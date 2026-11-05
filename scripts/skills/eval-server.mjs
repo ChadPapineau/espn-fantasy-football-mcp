@@ -55,6 +55,12 @@ export const USAGE_EXIT = 2;
 export const SERVER_ENV_RE = /^(?:ESPN|EFF)_/;
 /** One `--keep-env` key. */
 export const ENV_KEY_RE = /^[A-Z][A-Z0-9_]{0,63}$/;
+/**
+ * The eval seed's server flag (changelog §R10, R10-33): only `--seed` sets it, on the seed's own
+ * server. An eval run's server never carries it — `--keep-env` refuses it and the inherited env
+ * never passes it through — so a run's scripted 401 always stays armed.
+ */
+export const SEED_ONLY_KEY = "EFF_FIXTURE_SEED";
 
 /**
  * The first ancestor of `dir` (itself included) holding a `.git` entry, or null — the server refuses
@@ -75,7 +81,7 @@ export function gitTreeOf(dir) {
 /**
  * Parse `--state <dir> --root <repo> --keep-env <KEY,…>` (all three, each once, in any order); null
  * on anything else — a missing or malformed key list included, so a launcher never starts a server
- * with the inherited env unfiltered.
+ * with the inherited env unfiltered — and on a key list naming the seed-only flag (SEED_ONLY_KEY).
  * @param {readonly string[]} argv
  * @returns {{ state: string, root: string, keep: string[] } | null}
  */
@@ -93,7 +99,11 @@ export function parseArgs(argv) {
     else if (a === "--root" && v !== undefined && root === undefined) root = path.resolve(v);
     else if (a === "--keep-env" && v !== undefined && keep === undefined) {
       const keys = v.split(",");
-      if (!keys.every((k) => ENV_KEY_RE.test(k)) || new Set(keys).size !== keys.length) return null;
+      if (
+        !keys.every((k) => ENV_KEY_RE.test(k) && k !== SEED_ONLY_KEY) ||
+        new Set(keys).size !== keys.length
+      )
+        return null;
       keep = keys;
     } else return null;
     i++;
@@ -164,7 +174,8 @@ export function freshCopy(state, base = tmpdir()) {
 
 /**
  * The server's env for one start: the inherited env without the `ESPN_*` / `EFF_*` variables the
- * plugin does not declare (`keep`), its state directories pointed at the copy.
+ * plugin does not declare (`keep`) and without the seed-only flag whatever `keep` says (changelog
+ * §R10, R10-33), its state directories pointed at the copy.
  * @param {Readonly<Record<string, string | undefined>>} env
  * @param {string} copy
  * @param {readonly string[]} keep the plugin's declared env keys
@@ -174,7 +185,12 @@ export function serverEnvFor(env, copy, keep) {
   /** @type {Record<string, string>} */
   const out = {};
   for (const [k, v] of Object.entries(env))
-    if (typeof v === "string" && (!SERVER_ENV_RE.test(k) || keep.includes(k))) out[k] = v;
+    if (
+      typeof v === "string" &&
+      k !== SEED_ONLY_KEY &&
+      (!SERVER_ENV_RE.test(k) || keep.includes(k))
+    )
+      out[k] = v;
   for (const [d, key] of Object.entries(STATE_DIRS)) out[key] = path.join(copy, d);
   return out;
 }

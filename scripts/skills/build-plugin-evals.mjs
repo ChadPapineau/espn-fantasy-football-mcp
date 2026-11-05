@@ -91,6 +91,7 @@ import {
 import { tmpdir } from "node:os";
 import path from "node:path";
 import { buildSkills } from "./build-skills.mjs";
+import { SEED_ONLY_KEY } from "./eval-server.mjs";
 import {
   NO_TEMPLATE_SKILLS,
   SEED_NOTES,
@@ -131,6 +132,14 @@ export const NO_SOCKET = "tests/e2e/fixtures/no-socket.cjs";
 export const EVAL_SERVER = "scripts/skills/eval-server.mjs";
 /** The fixture season of fx-10h. */
 export const FIXTURE_SEASON = "2026";
+/**
+ * The env only a seed's server gets (changelog §R10, R10-33): the fixture-only seed path
+ * EFF_FIXTURE_SEED=1, which never arms a scripted mid-procedure 401, so the seed's reads are served
+ * and cached. writeSeeds adds it at the seed call site; no `.mcp.json` ever carries it (serverEnv
+ * refuses a variant manifest that sets it, planSuite reports one, and the launcher refuses the key
+ * in `--keep-env` and drops it from the inherited env), so an eval run's 401 always stays armed.
+ */
+export const SEED_ONLY_ENV = Object.freeze({ [SEED_ONLY_KEY]: "1" });
 /** The note the NC-INJ-2 seed logs in week 4 (an earlier, careless session copied a paste into it). */
 export const SEED_NOTE = SEED_NOTES.SEED_NOTE;
 /**
@@ -189,8 +198,9 @@ export function loggedNoteOf(seed) {
  *   other league read is refused — E11's session-refusal partial lines (changelog §R10, R10-11,
  *   R10-27). The seed reads nothing else: the feed, standings, rosters and pool stay unread;
  * - `private-expiring-weekly` — WK-10: on private-expiring (changelog §R10, R10-28), the datasets
- *   first (as `--seed-datasets` publishes them), then `espn_check_auth` (its scripted probe accepts:
- *   the label is `validated` in memory, and a validated session is never rejected) and
+ *   first (as `--seed-datasets` publishes them), then, on the seed's own path EFF_FIXTURE_SEED=1
+ *   (SEED_ONLY_ENV, which disarms the scripted 401 on the seed's server only; changelog §R10,
+ *   R10-33), `espn_check_auth` (its scripted probe accepts: the label is `validated` in memory) and
  *   `espn_get_league` only, as `private-settings-fresh` does, so the run's server — started again on
  *   the `stored` label — passes Step 0 from the fresh settings, and the first read it cannot serve
  *   is inside `espn_analyze_league_activity`: ESPN's 401 there turns the label `rejected`, and E11
@@ -1112,8 +1122,49 @@ export function yamlFrontmatter(fm) {
 }
 
 /**
+ * The error for a fixture variant whose manifest env sets the seed-only flag (changelog §R10,
+ * R10-33): an eval run's server must never carry it.
+ * @param {string | null} variant
+ * @returns {string}
+ */
+export function seedFlagProblem(variant) {
+  return `fixture variant ${variant ?? "base"}: its manifest env sets ${SEED_ONLY_KEY}, the seed's own path — no eval run's .mcp.json may carry it (changelog §R10, R10-33)`;
+}
+
+/**
+ * Whether a fixture variant's manifest env sets the seed-only flag; false when the manifest is
+ * absent or unreadable (the build reports that itself).
+ * @param {string} root
+ * @param {string | null} variant
+ * @returns {boolean}
+ */
+export function variantSetsSeedFlag(root, variant) {
+  try {
+    const m = /** @type {unknown} */ (
+      JSON.parse(
+        readFileSync(
+          path.join(
+            root,
+            "fixtures",
+            "espn",
+            "fx-10h",
+            ...(variant ? [variant] : []),
+            "manifest.json",
+          ),
+          "utf8",
+        ),
+      )
+    );
+    return isRecord(m) && isRecord(m["env"]) && Object.hasOwn(m["env"], SEED_ONLY_KEY);
+  } catch {
+    return false;
+  }
+}
+
+/**
  * The server environment of one eval plugin: fixture mode on the variant (the variant manifest's
- * own env block, ESPN_TEAM_ID null → unset), the toolset, the test stubs, private state dirs.
+ * own env block, ESPN_TEAM_ID null → unset), the toolset, the test stubs, private state dirs —
+ * never the seed-only flag (a manifest that sets it throws: changelog §R10, R10-33).
  * @param {{ root: string, variant: string | null, toolset: string, state: string }} o
  * @returns {Record<string, string>}
  */
@@ -1135,6 +1186,7 @@ export function serverEnv(o) {
   } catch (e) {
     throw new Error(`fixture variant ${o.variant ?? "base"}: no manifest.json (${errMsg(e)})`);
   }
+  if (Object.hasOwn(menv, SEED_ONLY_KEY)) throw new Error(seedFlagProblem(o.variant));
   /** @type {Record<string, string>} */
   const env = {};
   for (const [k, v] of Object.entries(menv)) if (typeof v === "string") env[k] = v;
@@ -1735,6 +1787,9 @@ export function planSuite(root, opts = {}) {
       errors.push(
         `PROMPT_MATCH_GRADERS: ${g.case}'s "${g.pattern}" no longer matches a grader that matches its prompt — remove or update the entry`,
       );
+  // no eval run's .mcp.json carries the seed-only flag (changelog §R10, R10-33)
+  for (const variant of new Set([...plugins.values()].map((p) => p.variant)))
+    if (variantSetsSeedFlag(root, variant)) errors.push(seedFlagProblem(variant));
   return { cases, plugins: [...plugins.values()], notTestable, errors };
 }
 
@@ -2513,9 +2568,11 @@ async function privateSettingsRead(t, seed) {
 }
 
 /**
- * WK-10's seed on private-expiring (changelog §R10, R10-28): `espn_check_auth` first — its scripted
- * probe accepts, so the label is `validated` in this server's memory and its read is not rejected —
- * then `espn_get_league` only, so the league settings are fresh in the state (`partial: false`, the
+ * WK-10's seed on private-expiring (changelog §R10, R10-28): its server runs on the seed path
+ * EFF_FIXTURE_SEED=1 (writeSeeds adds SEED_ONLY_ENV; changelog §R10, R10-33), the one path that
+ * never arms the scripted 401 — an accepting probe does not disarm it — so its reads are served and
+ * cached. `espn_check_auth` first — its scripted probe accepts, so the label is `validated` in this
+ * server's memory — then `espn_get_league` only, so the league settings are fresh in the state (`partial: false`, the
  * league private); the label must still be `validated` at the end. Nothing else is read. The run's
  * server starts again on the `stored` label: Step 0's settings are served from the cache (stamped in
  * the seed's first second, inside the server's 1-second tolerance for a copy stamped ahead of a
@@ -2820,7 +2877,9 @@ export async function writeSeeds(o) {
     const line = await seedState({
       root: o.root,
       node: o.node,
-      env: { PATH: process.env["PATH"] ?? "/usr/bin:/bin", ...env },
+      // the seed's own path, here only (changelog §R10, R10-33): never in seedServerOf's env or a
+      // .mcp.json, so an eval run's scripted 401 stays armed
+      env: { PATH: process.env["PATH"] ?? "/usr/bin:/bin", ...env, ...SEED_ONLY_ENV },
       seed,
       ...(o.spawnImpl ? { spawnImpl: o.spawnImpl } : {}),
     });

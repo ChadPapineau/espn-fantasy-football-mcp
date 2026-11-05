@@ -591,28 +591,40 @@ League activity: not read`;
     expect(c.expected_output).toContain("private-expiring-weekly");
   });
 
-  // the round-4d verifiers' R4DVF-7: an espn_check_auth before the 401 validates the session, which
-  // is then never rejected (changelog §R10, R10-31), so the case's 401 never lands on that run
-  it("WK-10 and WK-11 say a run that probes the session before the 401 is out of the case", async () => {
+  // changelog §R10, R10-33 (amends R10-31 and the round-4d verifiers' R4DVF-7): an accepting
+  // espn_check_auth before the 401 validates the session and leaves the 401 armed, so a probing run
+  // meets the 401 like any other and no run is voided for probing; only the seed path disarms it
+  it("WK-10 and WK-11 grade a run that probes first like any other: the probe leaves the 401 armed", async () => {
     const scripted = readScriptedCredential(
       path.join(ROOT, "fixtures/espn/fx-10h/private-expiring"),
     );
     expect(scripted).toMatchObject({ state: "stored", rejects: "first_uncached_read" });
     if (scripted === null) return;
-    const probed = scriptedAuth(scripted, fixedClock("2026-10-07T01:00:00.000Z"));
+    const clock = fixedClock("2026-10-07T01:00:00.000Z");
+    // a run's server: probed, the first uncached read is still the 401
+    const probed = scriptedAuth(scripted, clock);
     await probed.probe();
     expect(probed.state()).toBe("validated");
-    expect(probed.rejectsRead()).toBe(false);
-    // unprobed, the first uncached read is the 401
-    const unprobed = scriptedAuth(scripted, fixedClock("2026-10-07T01:00:00.000Z"));
+    expect(probed.rejectsRead()).toBe(true);
+    expect(probed.state()).toBe("rejected");
+    // unprobed, the same
+    const unprobed = scriptedAuth(scripted, clock);
     expect(unprobed.rejectsRead()).toBe(true);
     expect(unprobed.state()).toBe("rejected");
+    // the seed's server (EFF_FIXTURE_SEED=1): probed or not, never rejected
+    for (const probe of [true, false]) {
+      const seed = scriptedAuth(scripted, clock, { seed: true });
+      if (probe) await seed.probe();
+      expect(seed.rejectsRead(), `seed, probed ${String(probe)}`).toBe(false);
+      expect(seed.state()).toBe(probe ? "validated" : "stored");
+    }
     const cases = (JSON.parse(read("skills/weekly/evals/evals.json")) as { evals: Case[] }).evals;
     for (const name of ["WK-10", "WK-11"]) {
       const c = cases.find((x) => x.name === name);
       expect(c?.expected_output, name).toContain(
-        "A run that calls espn_check_auth before the first read the cache does not serve validates the session (an accepting probe validates before the 401, changelog §R10, R10-31), so the 401 never lands: that run is out of the case, never graded as a failure of the Skill.",
+        "A run that calls espn_check_auth before the first read the cache does not serve is graded like any other: the accepting probe moves the label to validated and leaves the 401 armed, so that read still takes ESPN's 401 and the label moves to rejected (changelog §R10, R10-33); no run is voided for probing.",
       );
+      expect(c?.expected_output, name).not.toMatch(/out of the case|never lands|is void\b/);
     }
   });
 

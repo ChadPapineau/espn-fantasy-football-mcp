@@ -28,6 +28,7 @@ import {
   COPY_PREFIX,
   ENV_KEY_RE,
   NO_SOCKET,
+  SEED_ONLY_KEY,
   SERVER_ENV_RE,
   STATE_DIRS,
   USAGE_EXIT,
@@ -241,6 +242,37 @@ describe("the fresh copy", () => {
         },
       ),
       { numRuns: 200 },
+    );
+  });
+
+  // changelog §R10, R10-33: the seed path disarms the scripted 401; no eval run's server may get it
+  it("never passes the seed-only flag: --keep-env refuses it, and the inherited env drops it", () => {
+    expect(SEED_ONLY_KEY).toBe("EFF_FIXTURE_SEED");
+    for (const keep of [
+      "EFF_FIXTURE_SEED",
+      "EFF_TOOLSET,EFF_FIXTURE_SEED",
+      "EFF_FIXTURE_SEED,ESPN_LEAGUE_ID",
+    ])
+      expect(parseArgs(["--state", "/s", "--root", "/r", "--keep-env", keep]), keep).toBeNull();
+    const inherited = { PATH: "/usr/bin", EFF_TOOLSET: "full", EFF_FIXTURE_SEED: "1" };
+    expect(serverEnvFor(inherited, "/c", ["EFF_TOOLSET"]).EFF_FIXTURE_SEED).toBeUndefined();
+    // even a key list that names it (no parsed one can) never lets it through
+    expect(
+      serverEnvFor(inherited, "/c", ["EFF_TOOLSET", "EFF_FIXTURE_SEED"]).EFF_FIXTURE_SEED,
+    ).toBeUndefined();
+    fc.assert(
+      fc.property(
+        fc.constantFrom("1", "true", "0", "false", "", "yes"),
+        fc.array(fc.stringMatching(/^[A-Z][A-Z0-9_]{0,12}$/), { maxLength: 6 }),
+        (v, keep) => {
+          const o = serverEnvFor({ ...inherited, EFF_FIXTURE_SEED: v }, "/c", [
+            ...keep,
+            SEED_ONLY_KEY,
+          ]);
+          expect(Object.hasOwn(o, SEED_ONLY_KEY)).toBe(false);
+        },
+      ),
+      { numRuns: 100 },
     );
   });
 

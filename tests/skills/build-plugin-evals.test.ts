@@ -62,6 +62,7 @@ import {
   DATASET_FIRST_SEEDS,
   SEED_NOTE,
   SEED_NOTE_PLAIN,
+  SEED_ONLY_ENV,
   STATE_ENV_KEYS,
   STATE_ROOT_FILE,
   SYNTHETIC_TOKEN,
@@ -90,6 +91,7 @@ import {
   rpcOver,
   seedLogWeek4,
   seedOfKey,
+  seedFlagProblem,
   seedServerOf,
   seedState,
   serverEnv,
@@ -1855,6 +1857,102 @@ describe("WK-10's private-expiring-weekly seed (changelog §R10, R10-28)", () =>
       },
     });
     expect(order).toEqual(["server"]);
+  });
+});
+
+describe("the seed path EFF_FIXTURE_SEED reaches the seeds' servers only (changelog §R10, R10-33)", () => {
+  const FLAG = "EFF_FIXTURE_SEED";
+  /** A fake server that answers every seed's calls (the WK-10 seed's included). */
+  const answerAll = (name: string, params: Json): unknown => {
+    if (name === "espn_check_auth")
+      return text({ data: { accepted: true, state: "validated", reason: null } });
+    if (name === "espn_get_league")
+      return text({
+        data: { league: { is_public: false }, scoring: { settings_hash: "a".repeat(64) } },
+        meta: { request_id: "r-000000000001" },
+        partial: false,
+      });
+    if (name === "espn_get_status") return text({ data: { credential: { state: "validated" } } });
+    return happy(name, params);
+  };
+
+  it("is the one fixture-only flag, on", () => {
+    expect(SEED_ONLY_ENV).toEqual({ [FLAG]: "1" });
+    expect(Object.isFrozen(SEED_ONLY_ENV)).toBe(true);
+  });
+
+  it("writeSeeds starts every seed's server with it; no .mcp.json and no seedServerOf env carries it", async () => {
+    const t = repoWithFixtures();
+    const out = temp("eff-seedflag-out-");
+    const r = buildPluginEvals({ root: t.root, out, node: "/n" });
+    cleanups.push(() => {
+      if (r.state) rmSync(r.state, { recursive: true, force: true });
+    });
+    expect(r.errors).toEqual([]);
+    for (const key of r.plugins) {
+      const raw = readFileSync(path.join(out, "plugins", key, ".mcp.json"), "utf8");
+      expect(raw, key).not.toContain(FLAG);
+      expect(seedServerOf(out, key).env[FLAG], key).toBeUndefined();
+    }
+    t.write("dist/cli.js", "// stand-in\n");
+    const keys = [
+      pluginKey("private-expiring", "full", "private-expiring-weekly"),
+      pluginKey(null, "full", SEEDS["NC-INJ-2"]),
+    ];
+    for (const key of keys) expect(r.seedNeeded).toContain(key);
+    const server = fakeServer(answerAll);
+    /** each spawn: whether it is the datasets pass, and its env's flag */
+    const spawned: [string, string | undefined][] = [];
+    await writeSeeds({
+      root: t.root,
+      out,
+      node: "/n",
+      seedNeeded: keys,
+      spawnImpl: (cmd, args, o) => {
+        const datasets = args.some((a) => a.endsWith("seed-fixture-datasets.ts"));
+        spawned.push([datasets ? "datasets" : "server", o.env[FLAG]]);
+        if (datasets) {
+          const ev = new EventEmitter();
+          setImmediate(() => ev.emit("exit", 0));
+          return {
+            stdin: new PassThrough(),
+            stdout: new PassThrough(),
+            stderr: null,
+            on: (e: "exit", fn: (c: number | null) => void) => ev.on(e, fn),
+            kill: () => undefined,
+          };
+        }
+        return server.spawnImpl(cmd, args, o);
+      },
+    });
+    // the seed servers carry it; the datasets pass makes no ESPN read and is left as it was
+    expect(spawned.filter(([k]) => k === "server")).toEqual([
+      ["server", "1"],
+      ["server", "1"],
+    ]);
+    for (const sp of server.spawned) expect(sp.env[FLAG]).toBe("1");
+    // the seed's own env, never the plugin's: the .mcp.json files are unchanged
+    for (const key of r.plugins)
+      expect(readFileSync(path.join(out, "plugins", key, ".mcp.json"), "utf8"), key).not.toContain(
+        FLAG,
+      );
+  });
+
+  it("a variant manifest that sets it is refused: serverEnv throws and planSuite reports it", () => {
+    const t = repoWithFixtures();
+    const at = "fixtures/espn/fx-10h/private-expiring/manifest.json";
+    const m = JSON.parse(readFileSync(path.join(t.root, at), "utf8")) as Json;
+    t.write(
+      at,
+      `${JSON.stringify({ ...m, env: { ...((m.env as Json | undefined) ?? {}), [FLAG]: "1" } }, null, 2)}\n`,
+    );
+    expect(() =>
+      serverEnv({ root: t.root, variant: "private-expiring", toolset: "full", state: "/s" }),
+    ).toThrow(seedFlagProblem("private-expiring"));
+    expect(seedFlagProblem("private-expiring")).toMatch(/EFF_FIXTURE_SEED[\s\S]*R10-33/);
+    expect(planSuite(t.root).errors).toContain(seedFlagProblem("private-expiring"));
+    // the committed variants set no such key
+    expect(planSuite(ROOT).errors.filter((e) => e.includes(FLAG))).toEqual([]);
   });
 });
 

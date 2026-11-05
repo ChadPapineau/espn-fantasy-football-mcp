@@ -85,8 +85,12 @@ datasets, runs the accepting `espn_check_auth` and then `espn_get_league` only, 
 again on `stored` passes Step 0 from the fresh settings (stamped in the seed's first second, inside
 the server's 1-second tolerance for a copy stamped ahead of a start's clock, and fresh for their
 1-day TTL), and its first read past them takes the 401. Its `espn_check_auth` accepts until that
-401 (a session it validates is never rejected after it: how the seed fills the cache) and reports
-the session rejected after it (`accepted: false`, `upstream_status: 401`; changelog §R10, R10-28,
+401 and leaves it armed: the label moves to `validated`, and the first read the cache does not
+serve after an accepting probe is still the 401 (changelog §R10, R10-33), so a run that probes
+first meets it like any other and no run is voided for probing. Only the seed's server disarms it,
+through the fixture-only seed path `EFF_FIXTURE_SEED=1` that the build adds at the seed call site
+and no eval run's `.mcp.json` carries; that is how the seed fills the cache. It reports
+the session rejected after the 401 (`accepted: false`, `upstream_status: 401`; changelog §R10, R10-28,
 R10-31); every later league read, and a read already under way when the 401 lands, is refused with
 the short-circuit and no request, while a fresh store entry is still served. WK-10 asks what happened in the league —
 weekly's League-activity-only scope — so that read is inside `espn_analyze_league_activity`, and E11
