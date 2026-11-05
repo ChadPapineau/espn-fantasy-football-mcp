@@ -819,20 +819,39 @@ const SAME_SUBJECT_GAP_RE = new RegExp(
   String.raw`^(?:\s+(?:his|a|an|the)\s+${BODY}(?:\s+${INJURY_NOUN})?)?(?:\s+(?:in|at|during)\s+(?:practice|the game|warmups|warm-ups|training camp))?[\s,-]*(?:(?:but|and|yet|though|although|however|still|so)\b[\s,]*)?(?:(?:the\s+)?(?:head\s+)?(?:coach|team)\s+)?(?:(?:says?|said|insists?|insisted|expects?|expected|confirms?|confirmed|reports?|reported)\s+)?(?:(?:he|he's|he'll)\s+)?(?:(?:still|also|fully|now|reportedly)\s+)?(?:(?:is|was|remains)\s+)?(?:(?:still|also)\s+)?$`,
 );
 /**
- * What, right after a plays phrase, puts its game past the coming one or reverses it: "will play no
- * more", "will not play anymore", "will play again" (a return, unless this game is named), "will play
- * next season".
+ * What may follow a plays phrase, up to the end of its clause, for its game to be the coming one —
+ * fail safe (the round-4c verifier's CR-1): nothing more, this game named (GAME_TIME, "against | vs
+ * | versus …"), a clause break (`,`, `:`, `)`, a spaced dash) or "and" — never another word first
+ * ("next week", "in two weeks", "after the bye", "if he practices", "when he returns", "later this
+ * month", "again", "through it"), and then no word anywhere in it that DEFERS_GAME_RE names.
  */
-const NOT_THIS_GAME_RE = new RegExp(
-  String.raw`^\s*(?:no more|no longer|anymore|any more|never|again\b(?!\s+(?:${GAME_TIME}|against|vs|versus)\b)|(?:next|this|the rest of the)\s+(?:season|year))`,
+const THIS_GAME_TAIL_RE = new RegExp(
+  String.raw`^(?:\s*$|\s+(?:${GAME_TIME}|against|vs|versus|and)\b|\s*[,:)]|\s+-)`,
 );
+/**
+ * A word, anywhere after a plays phrase in its clause, that puts the game past this one, makes it
+ * conditional or reverses it: "will play, though not this week", "will play Sunday if he practices
+ * Friday", "will play no more", "will play next season", "in 2027", "in two weeks".
+ */
+const DEFERS_GAME_RE = new RegExp(
+  String.raw`\b(?:if|unless|provided|providing|assuming|once|when|whenever|after|before|until|till|later|next|not|no|never|though|although|but|however|again|anymore|longer|rest|season|year|month|months|weeks|days|bye|return|returns|healthy|heal|heals|eventually|soon|maybe|might|could|hope|hopes|hoping|20\d\d)\b|n't\b|\b\d+\s+(?:days?|weeks?|months?)\b`,
+);
+
+/** Whether a plays phrase ending at `end`, in a clause ending at `clauseEnd`, is the coming game's. */
+function playsThisGame(folded: string, end: number, clauseEnd: number): boolean {
+  // a question is no statement that he plays ("will play? Unlikely.")
+  if (folded[clauseEnd] === "?") return false;
+  const tail = folded.slice(end, clauseEnd);
+  return THIS_GAME_TAIL_RE.test(tail) && !DEFERS_GAME_RE.test(tail);
+}
 
 /**
  * Whether the text, in the clause of its own down health claim, says that HE plays the coming game:
  * a rule that says he plays (an availability rule of the `plays` class — "will play", "cleared",
  * "practiced in full" — or a start of the coming game, which implies he plays) after the injury
  * report, in the same clause (no `.`, `;`, `!` or `?` between), with only SAME_SUBJECT_GAP_RE's words
- * between the two, and not reversed or put past this game (NOT_THIS_GAME_RE). "Has an ankle sprain but
+ * between the two, and nothing after it that is not this game (playsThisGame: fail safe — "will play
+ * next week", "… if he practices Friday", "… when he returns", "will play?" are not). "Has an ankle sprain but
  * will play Sunday" says he plays; "tore his ACL; the backup will start Sunday", "tore his ACL. Laube
  * will start Sunday" and "tore his ACL and will play no more this season" do not (the round-4b
  * review's CS-2: any plays hit anywhere in the text, about anyone, reversed or not, had read as his).
@@ -860,7 +879,7 @@ export function healthClaimSaysPlays(text: string | null | undefined): boolean {
       const end = index + m[0].length;
       if (!survives(r, folded, index, end, officials)) continue;
       if (!SAME_SUBJECT_GAP_RE.test(folded.slice(health.end, index))) continue;
-      if (NOT_THIS_GAME_RE.test(folded.slice(end, clauseEnd))) continue;
+      if (!playsThisGame(folded, end, clauseEnd)) continue;
       return true;
     }
   }

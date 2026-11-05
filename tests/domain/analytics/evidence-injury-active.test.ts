@@ -159,6 +159,10 @@ describe("R4VS-6: an injury reported with no designation word, against ESPN's AC
     "tore his ACL but will play Sunday",
     "has an ankle sprain, but the coach says he will play Sunday",
     "has a hamstring injury and is expected to play Sunday",
+    // CR-1's fail-safe tail keeps this game named, a clause break and "and"
+    "has an ankle sprain but will play Sunday against the Bears",
+    "has an ankle sprain but will play, the coach said",
+    "has an ankle sprain but will play.",
   ])("a report that also says he plays, %s, is consistent with ACTIVE", (text) => {
     expect(extractClaim(text)?.type).toBe("health");
     expect(healthClaimSaysPlays(text)).toBe(true);
@@ -180,6 +184,20 @@ describe("R4VS-6: an injury reported with no designation word, against ESPN's AC
     "tore his ACL and will play again next season",
     "has a knee injury and will not play anymore",
     "tore his ACL but will play next season",
+    // the round-4c verifier's CR-1: a plays phrase that puts the game after this one, makes it
+    // conditional or asks it does not say he plays the coming game (fail safe)
+    "Has an ankle sprain but will play next week.",
+    "Has an ankle sprain but will play in two weeks.",
+    "Has an ankle sprain but will play after the bye.",
+    "Has an ankle sprain but will play if he practices Friday.",
+    "Has an ankle sprain but he will play when he returns.",
+    "Has an ankle sprain and will play in 2027.",
+    "Has an ankle sprain but will play later this month.",
+    "Has an ankle sprain but will play, though not this week.",
+    "Has an ankle sprain but will play? Unlikely.",
+    "Has an ankle sprain but will play Sunday if he practices Friday.",
+    "Has an ankle sprain but will play against the Bears next week.",
+    "Has an ankle sprain but will play once he is healthy.",
   ])("%s → the plays phrase is not his: availability_conflict on injury_status", (text) => {
     expect(extractClaim(text)).toMatchObject({ type: "health", direction: "down" });
     expect(healthClaimSaysPlays(text)).toBe(false);
