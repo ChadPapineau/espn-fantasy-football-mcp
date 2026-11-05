@@ -288,4 +288,78 @@ describe("the mid-call shapes: an optional read of another week or season refuse
         expect(w, code).not.toMatch(/seeding evidence unavailable: last season could not be read/);
     }
   }, 120_000);
+
+  // the round-4d verifier's F5: last season's settings or schedule refused alone (its standings
+  // read) — the standings-only comparison is shown, and the refusal is said once, by the session
+  // line: never "could not be read" or "unavailable" beside it
+  it.each([
+    ["getLeagueRules", "league settings"],
+    ["getMatchups", "matchups"],
+  ] as const)(
+    "seeding evidence: last season's %s refused alone — the session line, no 'could not be read'",
+    async (read, label) => {
+      const season = (world.services.league as { season: number }).season;
+      const prev = (ref: unknown): boolean => (ref as { season?: number }).season === season - 1;
+      for (const [code, refusal] of [
+        ["ESPN_AUTH_REJECTED", "rejected"],
+        ["ESPN_REQUIRES_COOKIES", "no_session"],
+      ] as const) {
+        const refuse = (
+          real: (...a: unknown[]) => Promise<unknown>,
+          ...args: unknown[]
+        ): Promise<unknown> => (prev(args[0]) ? Promise.reject(coded(code)) : real(...args));
+        // fx-10h records no settings for last season: for the schedule's case they are this
+        // season's, so the schedule is the read that stops the reproduction
+        const thisSeasons = (
+          real: (...a: unknown[]) => Promise<unknown>,
+          ...args: unknown[]
+        ): Promise<unknown> =>
+          prev(args[0])
+            ? real({ ...(args[0] as object), season }, ...args.slice(1))
+            : real(...args);
+        const c = await connect(world, {
+          options: { toolset: "full" },
+          services: faulty(
+            world.services,
+            read === "getMatchups"
+              ? { getLeagueRules: thisSeasons, getMatchups: refuse }
+              : { getLeagueRules: refuse },
+          ),
+        });
+        const r = await call(c.client, "espn_get_league", { include: ["seeding_evidence"] });
+        await c.close();
+        expect(r.isError, JSON.stringify(r.body).slice(0, 300)).toBe(false);
+        const body = r.body as Body;
+        const w = body.warnings ?? [];
+        expect(body.partial, `${code} ${JSON.stringify(w)}`).toBe(true);
+        expect(w, JSON.stringify(w)).toContain(
+          sessionReadsWarning(refusal, [`${String(season - 1)} ${label}`]),
+        );
+        expect(w).toContain("seeding evidence: the standings-only comparison is shown");
+        for (const x of w)
+          if (x.startsWith("seeding evidence"))
+            expect(x).not.toMatch(/could not be read|unavailable/);
+      }
+    },
+    120_000,
+  );
+
+  it("seeding evidence: last season's settings out (an outage) keeps 'could not be read'", async () => {
+    const season = (world.services.league as { season: number }).season;
+    const prev = (ref: unknown): boolean => (ref as { season?: number }).season === season - 1;
+    const out = (
+      real: (...a: unknown[]) => Promise<unknown>,
+      ...args: unknown[]
+    ): Promise<unknown> =>
+      prev(args[0]) ? Promise.reject(coded("ESPN_UPSTREAM_UNAVAILABLE")) : real(...args);
+    const c = await connect(world, {
+      options: { toolset: "full" },
+      services: faulty(world.services, { getLeagueRules: out }),
+    });
+    const r = await call(c.client, "espn_get_league", { include: ["seeding_evidence"] });
+    await c.close();
+    expect((r.body as Body).warnings).toContain(
+      "seeding evidence: last season's schedule or settings could not be read: the standings-only comparison is shown",
+    );
+  }, 120_000);
 });

@@ -425,11 +425,16 @@ async function evidenceOf(
   }
   const ref = leagueRef(ctx, prev);
   const ABSENT = Symbol("absent");
+  // whether last season's settings or schedule read was one the session refused: the call's
+  // session line says it (what, why, `eff setup`), so the fallback line says only what is shown,
+  // never "could not be read" a second time (the round-4d verifier's F5; changelog §R10, R10-11)
+  let refused = false;
   const read = await withinBudget(
     () => ctx.services.platform.getLeagueRules(ref, readOpts(ctx)),
     warnings,
   ).catch((e: unknown) => {
     rememberAbsentSeason(ctx, prev, e);
+    if (sessionRefusalOf(e) !== null) refused = true;
     return isLeagueNotFound(e) ? ABSENT : null;
   });
   // no league that season: its standings would 404 too — no further request
@@ -489,12 +494,15 @@ async function evidenceOf(
           new Map(standings.teams.map((t) => [t.team_id, t.playoff_seed])),
         );
       }
-    } catch {
+    } catch (e) {
       // fall through to the standings-only comparison, said
+      if (sessionRefusalOf(e) !== null) refused = true;
     }
   }
   warnings.push(
-    "seeding evidence: last season's schedule or settings could not be read: the standings-only comparison is shown",
+    refused
+      ? "seeding evidence: the standings-only comparison is shown"
+      : "seeding evidence: last season's schedule or settings could not be read: the standings-only comparison is shown",
   );
   return seedingEvidence(
     prev,
