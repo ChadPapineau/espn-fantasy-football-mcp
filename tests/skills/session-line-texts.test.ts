@@ -21,6 +21,7 @@ import {
   ACTIVITY_NO_FEED_HISTORY_LINE,
   ACTIVITY_PARTIAL_FRAGMENTS,
   ORIENT_SENTENCES,
+  RETRO_SESSION_SENTENCE,
   SESSION_LINE_FRAGMENTS,
   SKILL_RULES,
   TOOL_OUTPUT_PHRASES,
@@ -152,6 +153,29 @@ describe("E13's session line in its row (retro; the round-4d product account)", 
     expect(row).toContain('"… and none is stored: … to add one"');
     expect(row).toContain("never counted as unavailable");
     expect(row).toContain("**A rejection mid-procedure**");
+  });
+});
+
+describe("retro on E13's session line (changelog §R10, R10-7, R10-12)", () => {
+  it("step 3 carries the rule, check-skills requires it, and a body without it fails the rule", () => {
+    const retro = read("skills/retro/SKILL.md");
+    expect(retro).toContain(RETRO_SESSION_SENTENCE);
+    const step3 =
+      retro.split("\n").find((l) => l.startsWith("`espn_analyze_retrospective` for that week.")) ??
+      "";
+    expect(step3).toContain(RETRO_SESSION_SENTENCE);
+    for (const part of [
+      "present what was scored",
+      "say which weeks were not read and why",
+      "`eff setup`",
+      "**A rejection mid-procedure**",
+      "`espn-fantasy-football:session-check`",
+    ])
+      expect(RETRO_SESSION_SENTENCE).toContain(part);
+    const rules = SKILL_RULES.retro?.body ?? [];
+    const rule = rules.find((r) => r.test(RETRO_SESSION_SENTENCE));
+    expect(rule).toBeDefined();
+    expect(rule?.test(retro.replace(RETRO_SESSION_SENTENCE, ""))).toBe(false);
   });
 });
 

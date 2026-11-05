@@ -412,6 +412,13 @@ export const ACTIVITY_PARTIAL_SENTENCE =
 export const ACTIVITY_REFUSAL_SENTENCE =
   "When it fails with `ESPN_AUTH_REJECTED` or `ESPN_REQUIRES_COOKIES` instead (the league settings it starts from could not be read — changelog §R10, R10-18), follow **A rejection mid-procedure** in [orient](references/orient.md), an `ESPN_REQUIRES_COOKIES` the same way: never a guessed activity section; on a public league fall back to the reads above, which answer keylessly there, and say so in Confidence & freshness; on a private or unknown league the briefing ends there with the hand-off to the `espn-fantasy-football:session-check` Skill.";
 /**
+ * retro's step 3 on E13's session line (the round-4d product account): a refused week's box score
+ * is never "unavailable"; what was scored is presented and the hand-off follows (changelog §R10,
+ * R10-7, R10-12).
+ */
+export const RETRO_SESSION_SENTENCE =
+  "When it answers `partial: true` with the session line naming ESPN's box scores (references/tool-outputs.md), the weeks that line names were not read: present what was scored, say which weeks were not read and why, give the one command — in a terminal, `eff setup` — once, never score those weeks from memory and never call it again for them, and follow **A rejection mid-procedure** in references/orient.md: on a private or unknown league end with the hand-off to the `espn-fantasy-football:session-check` Skill (changelog §R10, R10-7, R10-12).";
+/**
  * retro on E13's truncated result (changelog §R10, R10-20): it kept the most whole calls that fit;
  * say how many of the week's calls were scored and narrow by `kinds` (E13 does not page). Its
  * warning counts the calls kept and in the week per kind (R10-25), so retro narrows only to drop a
@@ -1209,6 +1216,8 @@ export const SKILL_RULES = /** @type {Readonly<Record<string, SkillRule>>} */ (
         /Read `calls\[\]` \(`followed`, `regret`, `decisive`, `note`\)/,
         // changelog §R10, R10-20: a truncated retrospective says how many calls it scored
         literal(RETRO_TRUNCATED_SENTENCE),
+        // E13's session line: what was scored, what was not read, the hand-off (round 4d)
+        literal(RETRO_SESSION_SENTENCE),
       ],
       sequences: (seqs) =>
         seqs.some((s) => stepsOf(s, "espn_analyze_retrospective").length)
