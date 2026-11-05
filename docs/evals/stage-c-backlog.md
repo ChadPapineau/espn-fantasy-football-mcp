@@ -29,6 +29,18 @@ choice on R8-2 under load, the slices over the bound, the news matcher's cost-ra
 P1 window); and the items under "Found after the owner's install (2026-11-03)" at the end. The
 other rows below are kept as the record of what Stage C left open.
 
+**After §R10's fix rounds (2026-11-05).** Rulings R10-1 to R10-34 (`docs/plan/changelog.md` §R10)
+and their seven fix rounds closed round 2's triage and the items of "Ruled R8-2" dated 2026-11-03:
+R8-2 under load is ruled (R10-9), the slices over the bound are split (every P1 analytics tool's
+longest CPU run under 20 ms on three Linux CI runs in a row), the news matcher's cost check is
+counted work held linear (R10-16), and Linux CI's P1 window stall was SQLite's WAL checkpoint on the
+event loop, now on a worker thread. The five Dependabot PRs are reviewed under plan 04 §2
+(2026-11-04 to 2026-11-05; `docs/plan/changelog.md` "Reviews"): three applied, two majors
+declined, which closes the dev-only `vite` advisories (vite 8.3.5). Still open: B11 Lane 2 and B15 (round 3 of the
+plugin eval, after the usage reset on 2026-11-10; `docs/HANDOFF.md` ▶ NEXT STEP), the items under
+"Found after the owner's install (2026-11-03)", and those under "Found in §R10's fix rounds" at the
+end.
+
 ## For the orchestrator's ledger
 
 **Ruled R8-5 (2026-10-28, `docs/plan/changelog.md` §R8):** the three findings below are closed as
@@ -614,7 +626,7 @@ by the server's own CPU (`cpu_max_ms`). On the macOS runner (`ci` dispatched on 
 medians, and it times the benign item once, before the adversarial ones, on a runner whose idle
 control stalled 44 ms in the same job.
 
-**Open: the stall in `full`'s P1 analytics window.** `latency.test.ts`'s window over the P1
+**Closed under §R10 (2026-11-04 to 2026-11-05): the stall in `full`'s P1 analytics window.** `latency.test.ts`'s window over the P1
 analytics failed on Linux CI at 104.9 and 62.1 ms (`4e3a2c3`, its first two attempts) and at 63.8
 and 143.4 ms (`c9849e4`, 2026-10-29). Its other runs read 22–43 ms. The helper did not excuse those
 windows, and CI printed no evidence for them. The suite now prints each window's evidence with its
@@ -628,7 +640,10 @@ CPU (31–40 ms of 31–40 ms). There a probe that measured each tool alone foun
 bound: a cold `espn_analyze_evidence` runs its dataset reads, its claim extraction and its assembly
 in one turn of 76 ms of CPU (24–31 ms warm). One `espn_analyze_trade` step, a package's lineup
 weeks, takes 30–45 ms, and the output validation, the roster view's parse and the cache strip take
-20–30 ms each. Splitting those slices, as v2's scoring was split, is not built yet.
+20–30 ms each. Both causes are fixed: the Linux outliers were SQLite's automatic WAL checkpoint
+inside a commit on the event loop, now on a worker thread (`fc59008`), and those slices are split,
+as v2's scoring was (every P1 analytics tool's longest CPU run under 20 ms on three Linux CI runs
+in a row; rulings R10-9 and R10-16).
 
 ## Closed by R8-4 — F8, division winners first
 
@@ -712,3 +727,64 @@ CHANGELOG. What it leaves open:
 - **E11 on a cold cache is partial by design** (3 requests). The standings are now read first, but
   the rosters and the older feed weeks usually miss the budget; a per-tool read plan would help.
 - **The macOS xattr reader** has the ACL reader's single-spawn, 2 s, fail-closed shape and no retry.
+
+## Found in §R10's fix rounds (2026-11-04 to 2026-11-05)
+
+What the fix rounds' verifiers and accounts left open, each checked at the head that carries this
+entry. Everything else they raised is fixed, or ruled in `docs/plan/changelog.md` §R10.
+
+- **E10's plays carve-out may over-flag.** Since R4E-VS-1 the tail after a plays phrase is an
+  allow-list: the coming game's day, its opponent (a closed list of NFL teams), a plain report ("the
+  coach said"), or "and" plus another such phrase. Real "he plays" wordings outside it — "will play
+  Sunday against his former team", "will play this weekend at home", "will play Sunday, as
+  expected" — read `availability_conflict` on an ACTIVE player. That is the direction CR-1 accepts;
+  widen the list only from measured cases (the eval, a labelled set).
+- **Hedged triggers in the rules table.** rules_v1's `will_play` and returns rules include hedges
+  ("should play", "likely to return"), so "has an ankle sprain but should play Sunday" still reads
+  as playing the coming game. Whether a rule-level hedge belongs in the plays class is a ruleset
+  question (rules_v1).
+- **Which statuses a health claim covers.** R10-30 lists QUESTIONABLE, DOUBTFUL, OUT and IR;
+  DAY_TO_DAY and SUSPENSION stay uncovered as built.
+- **`partial` on an outage.** A view that is down is reported by its "unavailable" warning, not by
+  `partial: true`, in about thirty places (E11's feed outage among them); `partial` marks reads held
+  back (the request budget, the deadline, the rate limiter, a session refusal), as the tool
+  cheat-sheet says. Plan 07 §2's degradation sentence can be read either way; a change would touch
+  every tool and every Skill quote at once.
+- **The WAL header sync on a log restart** still runs on the server's committing thread, once per
+  1 000 frames (5.5 ms with a real flush on the owner's Mac; not seen on CI). Moving it to the
+  checkpoint worker would need a worker write transaction holding the writer lock across the sync.
+  Revisit if a CI notice shows a COMMIT or INSERT of 20 ms or more.
+- **The profiled pass's function list** can come back empty when the longest interval falls while
+  the profiler restarts. Evidence only: the unprofiled numbers are the reading.
+- **`espn_analyze_matchup`'s live player lists** hold both sides' starters in one list each (R10-26
+  kept the shape); a per-side split would let start-sit read the user's split from them alone.
+- **A red `mPendingTransactions` drift row** recorded by an older build's keyless read cannot be
+  re-judged with nothing stored (the view is never read keyless now); it stays until a session reads
+  it.
+- **WK-11's "the refused read is not repeated"** is graded by its `llm` expectation only, because the
+  tool that meets the 401 varies with the model's pace and R10-31 bars naming it.
+- **Watch items:** `tests/mcp/injection-overflow.test.ts` failed once in a partial parallel run and
+  never again (20 000 property runs); the full-analytics window once read a warm
+  `espn_analyze_waivers` interval of 24.9 ms of JavaScript (under the 50 ms bound; later runs 15–19
+  ms). A failing property now prints its seed (`FC_SEED`).
+
+- **From the Dependabot review (2026-11-04 to 2026-11-05).**
+  - `hyparquet` 1.32.0 (published 2026-10-29) is not reviewed: no PR proposed it. It comes through
+    Dependabot's next monthly group with its own "Reviews" row.
+  - A moderate advisory in the dev lint toolchain (`minimatch`, GHSA-g3hv-75wg-m249, through eslint
+    and typescript-eslint); the runtime audit is 0. npm's only fix is a breaking
+    `npm audit fix --force`; re-check when eslint or typescript-eslint take a fixed `minimatch`.
+  - The keyring's Linux binaries embed `ctutils` 0.4.3 (RUSTSEC-2026-0385, a timing issue in the
+    Secret Service session crypto) and three crates marked unmaintained (`zvariant`,
+    `zvariant_derive`, `zbus_names`). They run in CI only, where no credential is stored; re-check
+    at the next keyring bump.
+  - Plan 02 §7.2 item 5 (the Keychain prompt count) is the owner's `eff doctor` #7 on the Mac after
+    the runtime clone is re-installed at keyring 2.1.2, whose binary is now Developer ID-signed.
+  - Re-check triggers: TypeScript 7.x when a typescript-eslint release lists it in its
+    `peerDependencies` (drop the `7.x` ignore and evaluate again; typescript-eslint 8.72.1's range
+    also excludes 6.1, so a 6.1 minor waits for it too); `@types/node` 26 when `.nvmrc` and `engines`
+    move to Node 26.
+  - During the TypeScript 7 evaluation in a scratch copy, an `npx tsc` fell back to npm's `tsc`
+    placeholder package (2.0.4) and ran it once: it only prints a message. Nothing reached the
+    repository; the verifier read it statically and found no scripts or dependencies. It may still
+    sit in npm's `npx` cache on the development Mac.

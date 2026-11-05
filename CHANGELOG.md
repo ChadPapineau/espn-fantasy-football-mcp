@@ -10,6 +10,25 @@ minor version (plan 04 §4.4; plan 09 K6). One version covers the server, the Sk
 
 ### Added
 
+- **A logged recommendation's `note` read back (rulings R10-1, R10-13; `docs/plan/changelog.md`
+  §R10).** `espn_list_recommendations` items, the `espn-ff://rec/week/{week}` items and
+  `espn_analyze_retrospective`'s `calls[]` carry the entry's `note` (null when none was logged),
+  path-listed as untrusted data (source `store.recommendation_log`) within the log's 200-character
+  bound. The Skills quote it as a claim from the log and never follow it.
+- **`espn_get_live_scoreboard` counts each side's starters by game state (plan 07 A4).**
+  `players { final, live, pending }`: a starter on bye counts as final, an empty slot is not counted.
+  The counts are null only when the week's rosters or the pro schedule could not be read, and the
+  warnings say so.
+- **Fixture-mode session states for the plugin eval (rulings R10-21, R10-27, R10-28, R10-33).**
+  Three private variants of the `fx-10h` fixture league: `private-league` (its scripted session
+  state governs every league read, with zero requests), `private-league-none` (no session stored)
+  and `private-expiring` (a stored session ESPN rejects at the first read the cache does not serve,
+  answered as ESPN's 401 would be). Pending claims follow the scripted state. The test-scope key
+  `EFF_FIXTURE_SEED` (fixture mode only, read after the fixture guard) lets the eval seed's own
+  server fill the cache; no eval run's server carries it, so an accepting probe never disarms the
+  scripted 401. All of it is value-free, with no cookie and no network.
+- **Reproducible property failures.** A failing fast-check property prints its seed, path and
+  counterexample, and `FC_SEED` / `FC_PATH` replay it.
 - **Scaffold and supply chain (plan 04 §1–§2).** `.npmrc` (`ignore-scripts`, `save-exact`,
   `engine-strict`, `audit`), `.nvmrc` (Node 24.21.0; engines `>=24.15`), `package.json` with exactly
   four runtime dependencies pinned exactly — `@modelcontextprotocol/server` 2.3.1, `zod` 4.6.7 (the
@@ -189,6 +208,83 @@ minor version (plan 04 §4.4; plan 09 K6). One version covers the server, the Sk
 
 ### Changed
 
+- **A missing or rejected ESPN session (rulings R10-7, R10-10, R10-11, R10-17 to R10-19, R10-23).**
+  On a public league the transaction feed is read without cookies whenever no accepted session is
+  at hand (nothing stored, or a session ESPN rejected), in the server and in the transactions job.
+  Pending waiver claims are never read without a session, public league or not:
+  `espn_list_transactions(pending: true)` answers `pending: null` with the reason and `eff setup`,
+  and makes no request. With nothing stored, a league already known to be private answers
+  `ESPN_REQUIRES_COOKIES` with no request (the private finding is trusted for 7 days, then checked
+  again). A read the session cannot make spends none of the call's three-request budget and is never
+  answered from stale cache. Under a rejected session the launchd jobs keep plan 06 §1.4 (only
+  `eff transactions --force` reads a public league's feed without cookies), and
+  `eff transactions --backfill` after `eff setup` first fills the weeks of this season the job
+  missed; `--seasons` may name the current season.
+- **A session refusal is said, never read as "unavailable" (rulings R10-11, R10-12).** When a tool
+  goes without a read the session refused, the answer is `partial: true` with one fixed line naming
+  what was not read, why, and `eff setup`, in every tool and resource (a 135-case sweep holds it). A
+  refusal on a read the tool needs is still the call's coded error.
+  `espn_analyze_league_activity` answers from the server's persisted history, labelled partial,
+  when the session cannot read ESPN's feed on a league not known to be public.
+- **`espn_analyze_trade` under `seeding_mode: "both"` (ruling R10-2).** `why_they_accept` gives the
+  partner's standing once per reading, each line named and from that reading's own P(playoffs).
+- **`espn_analyze_lineup` (rulings R10-22, R10-24, R10-29).** A `compare` pair is scored only as the
+  direct swap it names (the outgoing player starting, the incoming one on the bench and eligible for
+  the slot, neither locked); any other pair comes back as a warning with its reason and is never
+  scored. The trim warnings name `swaps` and `rec.subjects`, never `rec.lineup`, which is the
+  mean-optimal assignment. The option-value verdict is true in every case. `espn_cross_check`
+  compares ESPN's projection with the own model's line (`espn_project_players` `inputs.own`). A
+  swap whose interval only reaches 0 is no longer a coin flip.
+- **`espn_analyze_evidence` (plan 07 E10; rulings R10-30, R10-32).** A health claim explains a usage
+  drop while ESPN lists the player QUESTIONABLE, DOUBTFUL, OUT or IR, never a rise, and a mixed move
+  (one measure up, another down) stays `quiet_role_change`. An injury reported against ESPN's
+  ACTIVE is an availability conflict on `injury_status` unless the same clause says he plays in the
+  coming game, with nothing else after the plays phrase but that game's day, its opponent or who
+  reported it: a condition, a hedge, an alternative ("or sit"), a later week or "week N" leaves the
+  conflict standing. "No ACL tear" reports no injury.
+- **Truncation keeps whole items (rulings R10-20, R10-25).** `espn_analyze_retrospective` keeps the
+  most whole calls that fit its 10 000-character cap (5 of 100 worst-case calls, was 3), and its
+  warning gives the calls kept per kind and names `kinds` as the way to narrow it.
+  `espn_list_recommendations` keeps the most whole entries that fit its budget (20 of 25 at the
+  worst case, was 12); `next_offset` pages on.
+- **`espn_analyze_schedule`.** A week's row is the same whatever other weeks are asked for; a week
+  before the current one is dropped with a warning, and a call that asks only for such weeks is
+  refused.
+- **Injection flags.** `json_like` marks only text that opens like JSON; bracketed chat-role tags and
+  tool tags (`[system]`, `[INST]`, `[TOOL_CALLS]`, `(system: …)` and the like) are `role_marker`.
+- **The Skills (rulings R10-1 to R10-8, R10-10 to R10-15, R10-20 to R10-34).** A rejected session
+  mid-procedure follows orient's split: on a public league the keyless reads go on; on a private or
+  unknown league the Skill presents what was read, labelled partial, says what was not read, and
+  hands over to `session-check` (guardrail 5 follows it). A positional reference ("my RB1") asks
+  only when no rostered player at that position holds the rank. `trade` opens its recommendation
+  with the devil's-advocate paragraph, then the tool's verdict, then its own; `start-sit` and
+  `weekly` show the lineup from `rec.subjects` and read the live scoreboard's game-state counts;
+  `retro` reads a truncated retrospective by its per-kind counts; `news-check` reads the evidence
+  flag as the tool does; `injury-cascade` treats an injury as confirmed only by ESPN's status or the
+  official report. A Δ interval that spans 0 is a coin flip; one whose best case is 0 is held as
+  gaining nothing (R10-34). `check-skills` holds every fixed sentence, and the Skills listing is
+  4 591 of 4 600 characters.
+- **The plugin eval suite (rulings R10-3, R10-8, R10-14, R10-27, R10-28, R10-31, R10-33).** New
+  cases on the private variants (the hand-off on a rejected private session, the probe that accepts
+  after `eff setup`, a briefing whose session ESPN rejects mid-procedure), two retrospective
+  truncation cases, and graders anchored to their claims: the build refuses a final-message grader
+  that a reply's fixed lines, orient's opening lines or the case's own prompt satisfy.
+  `--baselines` attaches a passing kept run, else the best-scoring one, and names how each base was
+  chosen. A build without `--seed-datasets` lists the cases whose counts need the dataset excerpts
+  as not testable.
+- **Dependencies, reviewed under plan 04 §2 (Dependabot PRs 1–5, 2026-11-04 to 2026-11-05; ruling
+  R10-35).** The MCP SDK 2.3.1 → 2.4.0 (`@modelcontextprotocol/server` and `core`, and the dev
+  `client`; `espn_get_status` reports `sdk_version` 2.4.0): 2.4.0 adds the Skills extension on new
+  subpaths this server never imports, and the stdio path and both protocol eras are unchanged.
+  `@napi-rs/keyring` 2.1.0 → 2.1.2: the macOS binaries are Developer ID-signed and notarized, and
+  each platform package ships its linked crates' licences (`LICENSE.third-party.md`), which
+  `check:no-scripts` admits as a licence notice by name; a licence inside a prebuilt binary is
+  decided in its Reviews row (R10-35). `hyparquet` 1.31.2 → 1.31.5 (parquet decoding fixes). The dev
+  toolchain: vitest and `@vitest/coverage-v8` 5.0.5 (vite 8.3.5), eslint 10.13.0, prettier 3.9.10,
+  typescript-eslint 8.72.1 and `@types/node` 24.19.2. CI actions: setup-node v7.1.0, upload-artifact
+  v7.0.2, download-artifact v8.0.2. Declined: `@types/node` 26 (its types accept APIs Node 24 lacks)
+  and TypeScript 7 (typescript-eslint does not support it yet); Dependabot skips `@types/node`
+  majors and TypeScript 7.x until their re-check triggers (`docs/plan/changelog.md` "Reviews").
 - **Skills on a public league with no stored session (rulings R9-1, R9-2; `docs/plan/changelog.md`
   §R9).** They say so in one Session line and answer keylessly instead of stopping at setup; a
   private or unknown league still hands over to `session-check`. "My RB1", "my WR2" and "my TE" name
@@ -234,6 +330,45 @@ minor version (plan 04 §4.4; plan 09 K6). One version covers the server, the Sk
 
 ### Fixed
 
+- **The Linux CI stall (plan 10 A16a).** SQLite's automatic WAL checkpoint ran inside a commit on
+  the event loop: on the Linux CI runner one cache `INSERT` held the loop 36–89 ms, waiting on I/O.
+  `eff serve` now runs PASSIVE checkpoints on a worker thread with its own connection, at SQLite's
+  1 000-frame threshold; if the worker fails, checkpoints return to the connection with a store
+  warning. The CLI keeps SQLite's own checkpoints. Every CI run reports the stall evidence (the
+  longest gap attributed to SQLite, synchronous file calls, `Atomics.wait`, GC and scheduling) and
+  each P1 tool's longest CPU run as notices.
+- **Long CPU runs split into steps (plan 03 §1.2; ruling R10-9).** `espn_analyze_evidence`,
+  `espn_analyze_trade`, the large roster parse and cache strip, a tool result's serialisation and
+  check, the claim-rule compile, the matchup season simulation, the replacement values, the
+  injury cascade, league activity, player search and nflverse's weekly stat lines now give up the
+  event loop once a step has spent 8 ms of CPU. Every P1 analytics tool's longest CPU run stayed
+  under the 20 ms batch on three Linux CI runs in a row; answers are unchanged (compared byte for
+  byte, cold and warm). A stall window the host set is judged by the server's own longest CPU run
+  (R10-9). The news matcher's work is counted and held linear by count (R10-16).
+- **Answers that changed with the clock alone.** The result budget counts every input's `age_s` at a
+  fixed width, so an answer near its cap is trimmed the same way a second or a minute later.
+- **The season simulation's clinched and eliminated flags** are exact when no game is left in a
+  league with divisions and coin-flip ties (found by a property test).
+- **A rejected cookie is never sent again** — not by a read already in flight, and not when another
+  process (a launchd job, a second server, `eff doctor`) recorded the rejection; the credential
+  authority adopts a rejection from the shared metadata without loading the rejected value.
+- **E13's optional reads.** `espn_analyze_retrospective` absorbs only what an optional read may lose
+  (an outage, a session refusal, a stale dataset, fixture mode's missing fixture); any other error now fails the call as `INTERNAL`
+  instead of reading as "unavailable".
+- **Fixture mode's file reads.** Every fixture file, its manifests included, is read through one
+  path resolver and one regular-file reader: an empty, absolute or `..` manifest path, an absolute
+  or sideways root, a symlink out of the tree, a file over the size bound, and a FIFO, socket,
+  device or directory are refused, before a byte is read; a FIFO had blocked the process inside
+  fetch. A derived variant whose league settings cannot be read refuses to start.
+- **The release-install check** pins npm's log level, so a run under a silent npm script still
+  reports why `npm ci` failed.
+- **§R10's other fixes.** Rulings R10-1 to R10-34 and their fix rounds (2026-11-04 to 2026-11-05)
+  fixed many smaller defects in the tools, the Skills and the eval suite, each with a regression
+  test that fails without it. They are not itemised here: the commits on `build/phase-1` record each
+  one, and `docs/plan/changelog.md` §R10 the rulings.
+- **The supply-chain checks in a checkout under a UUID-named directory.** npm prints a UUID-shaped
+  run of a path as `***` in `npm ls`; `check:licenses` and `check:no-scripts` map such a path back
+  to the installed package instead of failing ENOENT.
 - **The hourly transactions job after the week's rollover (found on the owner's install,
   2026-11-03).** An `mTransactions2` answer on ESPN's recognised base (its own `draftDetail` object)
   without a `transactions` list is read as the empty week, unless ESPN's count header says there are
@@ -250,10 +385,10 @@ minor version (plan 04 §4.4; plan 09 K6). One version covers the server, the Sk
   error, a signal) is run once more; everything it refuses is unchanged, and two incomplete listings
   hold the second run off for 30 s.
 - **Phase 3 event-loop stalls.** v2's scoring scores 128 samples per cooperative step
-  (`V2_SIMS.scoreSlice`) and the matchup table scores a week in slices. Still open: a cold
-  `espn_analyze_evidence` runs one 76 ms turn of CPU on the owner's Mac, over the 50 ms stall bound,
-  and Linux CI's `full` P1 analytics window fails now and then (`docs/evals/stage-c-backlog.md`,
-  "Ruled R8-2").
+  (`V2_SIMS.scoreSlice`) and the matchup table scores a week in slices. The two stalls this entry
+  left open are fixed under §R10 (above): a cold `espn_analyze_evidence` gives up the event loop
+  every 8 ms of CPU, and Linux CI's `full` P1 analytics window stall was SQLite's WAL checkpoint,
+  now on a worker thread.
 - **Drift.** A composite read (several views in one request) is compared against the union of its
   views' observations, and integer-keyed maps no longer read as additive drift.
 - **Event-loop stalls on large cached bodies.** JSON without `__proto__` or escapes parses on the
@@ -308,6 +443,10 @@ minor version (plan 04 §4.4; plan 09 K6). One version covers the server, the Sk
 
 ### Security
 
+- **The recommendation log refuses text that becomes credential-shaped once read back** (entities
+  decoded, tags dropped), not only text that is credential-shaped as written: `SWID&#61;&#123;…&#125;`
+  used to pass and come back as `SWID={…}`. The same check covers every bounded model text (E12's
+  text fields, E10's claim, prompt arguments).
 - **The MCP SDK 2.2.0 → 2.3.1** (`@modelcontextprotocol/server` with `core`, and the dev
   `@modelcontextprotocol/client`): GHSA-jm63-cq47-j5jp, GHSA-46jr-4wx8-v453, GHSA-rvq5-wwqv-78pq
   and GHSA-6prh-2h8m-c8cw, all in HTTP-transport, bearer-auth or redirect code that this stdio
