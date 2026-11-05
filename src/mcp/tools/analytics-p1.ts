@@ -26,6 +26,7 @@ import {
   type ReplacementPlayer,
   type TeamWeekProjection,
 } from "../../domain/analytics/seasonRoster.js";
+import { turnIfSpent } from "../../domain/analytics/cooperative.js";
 import { CASCADE } from "../../domain/analytics/phase2.js";
 import { lineupPlayerOf, type LineupPlayer } from "../../domain/analytics/lineup.js";
 import type { ProjectedPlayer } from "../../domain/analytics/projection.js";
@@ -160,8 +161,24 @@ async function scheduleOrEmpty(
 }
 
 /** Subjects (platform player + crosswalk gsis id) of roster entries. */
-function subjectsOf(ctx: ToolContext, players: readonly PlatformPlayer[]): Subject[] {
-  return players.map((p) => ({ p, gsis: crosswalkOf(ctx, p.ref.id, p.position_id).gsis_id }));
+/**
+ * The E1 subjects of `players` (each one's crosswalk read), a player a step, the turn given up
+ * between two once the slice has spent its share (turnIfSpent): E3's season mode reads every
+ * rostered player (145 on fx-10h), and that map in one synchronous stretch, with the projection's
+ * first chunk after it, set matchup's 20.7–24.0 ms run on the CPU on the Linux CI runner (280 store
+ * statements in the gap), past plan 03 §1.2's 20 ms batch (the round-4b review's F1). Same subjects,
+ * same order.
+ */
+async function subjectsOf(
+  ctx: ToolContext,
+  players: readonly PlatformPlayer[],
+): Promise<Subject[]> {
+  const out: Subject[] = [];
+  for (const p of players) {
+    out.push({ p, gsis: crosswalkOf(ctx, p.ref.id, p.position_id).gsis_id });
+    await turnIfSpent();
+  }
+  return out;
 }
 
 /** LineupPlayers of one roster for week `w` from E1 and the lock plan at the call's instant. */
@@ -172,6 +189,8 @@ function lineupOf(
   schedule: ProSchedule,
   b: LeagueBasics,
   w: Week,
+  /** Each player's crosswalk gsis id when the caller already read it (E3 season: its subjects). */
+  gsisById?: ReadonlyMap<number, string | null>,
 ): { players: LineupPlayer[]; plan: ReturnType<typeof lockPlan> } {
   const plan = lockPlan(
     roster.entries.map((e) => ({
@@ -205,7 +224,9 @@ function lineupOf(
         role_games: projected.get(e.player.ref.id)?.projection.role_confidence_games ?? 0,
       },
       lock,
-      crosswalkOf(ctx, e.player.ref.id, e.player.position_id).gsis_id,
+      gsisById?.has(e.player.ref.id) === true
+        ? (gsisById.get(e.player.ref.id) ?? null)
+        : crosswalkOf(ctx, e.player.ref.id, e.player.position_id).gsis_id,
     );
   });
   return { players, plan };
@@ -438,12 +459,17 @@ export const analyzeMatchupTool = defineTool({
         // bye-heavy week set a team's strength for the whole season (Stage C finding
         // season-fit-prior-one-week)
         const fitWeeks = seasonFitWeeks(b.rules, b.w, args.horizon === "through_playoffs");
+        const subjects = await subjectsOf(
+          ctx,
+          rosters.flatMap((r) => r.entries.map((e) => e.player)),
+        );
+        // each player's crosswalk read once, for his subject: the team-week lineups below read it
+        // from here — read again per team-week, one team's ~10 weeks were ~150 store statements in
+        // one turn (the round-4b review's F1)
+        const gsisById = new Map(subjects.map((x) => [x.p.ref.id, x.gsis]));
         const proj = await projectMany(
           ctx,
-          subjectsOf(
-            ctx,
-            rosters.flatMap((r) => r.entries.map((e) => e.player)),
-          ),
+          subjects,
           {
             league: b.league,
             settings: b.settings,
@@ -463,8 +489,17 @@ export const analyzeMatchupTool = defineTool({
         for (const r of rosters) {
           const weeks: TeamWeekProjection[] = [];
           for (const fw of fitWeeks) {
-            const lp = lineupOf(ctx, rosterAt(r, fw, b.w), proj.byId, schedule, b, fw).players;
+            const lp = lineupOf(
+              ctx,
+              rosterAt(r, fw, b.w),
+              proj.byId,
+              schedule,
+              b,
+              fw,
+              gsisById,
+            ).players;
             weeks.push(teamWeekOf(b.slots, lp, fw));
+            await turnIfSpent();
           }
           projections.set(r.team.team_id, weeks);
           await turn();
@@ -582,7 +617,7 @@ export const analyzeMatchupTool = defineTool({
     await turn();
     const proj = await project(
       ctx,
-      subjectsOf(
+      await subjectsOf(
         ctx,
         [...mine.entries, ...opp.entries].map((e) => e.player),
       ),
@@ -1127,7 +1162,7 @@ export const analyzeScheduleTool = defineTool({
     const from = Math.min(...weeks);
     const proj = await projectMany(
       ctx,
-      subjectsOf(
+      await subjectsOf(
         ctx,
         mine.entries.map((e) => e.player),
       ),
@@ -1401,7 +1436,7 @@ export const analyzeRosterTool = defineTool({
     );
     const proj = await projectMany(
       ctx,
-      subjectsOf(
+      await subjectsOf(
         ctx,
         mine.entries.map((e) => e.player),
       ),
