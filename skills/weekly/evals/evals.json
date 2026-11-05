@@ -98,6 +98,38 @@
         "The reply names the player who must leave the IR slot and the deadline for the fix (llm)",
         "Every claim, free-agent add and stream is shown as blocked until the IR slot is fixed, never as a move to make now (llm)"
       ]
+    },
+    {
+      "id": 8,
+      "name": "WK-8",
+      "toolset": "core",
+      "prompt": "Prep me for week 5",
+      "expected_output": "On private-league ESPN rejected the stored session and the league's settings cannot be read: espn_get_status gives credential.state rejected and league.is_public null, and espn_get_league answers ESPN_AUTH_REJECTED (short_circuit, zero requests) with a hint naming eff setup. orient's rejected row on a private or unknown league applies (changelog §R10, R10-7): the briefing hands over to the session-check Skill and stops — no Session line about keyless reads (the league is not known to be public), no section of the briefing, no lineup, waiver or league-activity read.",
+      "files": ["evals/fixtures/fx-10h/private-league"],
+      "expectations": [
+        "The skill called espn_get_status (tool_used)",
+        "espn_analyze_lineup was not called (tool_used: min 0 max 0)",
+        "espn_analyze_waivers was not called (tool_used: min 0 max 0)",
+        "The reply hands over to the session-check Skill or gives its one command, and no section of the answer (regex: `session-check|eff setup`)",
+        "The reply never prints the public-league Session line (regex_absent: `this league is public`)",
+        "The reply says ESPN rejected the stored session on a league whose settings could not be read, hands over to session-check, and gives no section of the briefing (llm)"
+      ]
+    },
+    {
+      "id": 9,
+      "name": "WK-9",
+      "toolset": "full",
+      "prompt": "Prep me for week 5",
+      "expected_output": "On private-league with the league settings already read while the session was valid (the build's private-settings-fresh seed), ESPN now rejects the stored session: espn_get_status gives credential.state rejected and league.is_public false, and espn_get_league answers from the fresh settings (is_public false). orient's rejected row on a private league applies at Step 0 (changelog §R10, R10-7): the briefing hands over to the session-check Skill and stops, so no section is given and espn_analyze_league_activity is not called (on this state it would answer partial: true with E11's session-refusal lines for the feed and for the standings, rosters and free-agent pool, each ending in eff setup — weekly's P1 paragraph governs those lines only after Step 0). No Session line about keyless reads.",
+      "files": ["evals/fixtures/fx-10h/private-league"],
+      "expectations": [
+        "espn_get_league was called at most once (tool_used: min 0 max 1)",
+        "espn_analyze_league_activity was not called (tool_used: min 0 max 0)",
+        "espn_analyze_lineup was not called (tool_used: min 0 max 0)",
+        "The reply hands over to the session-check Skill or gives its one command, and no section of the answer (regex: `session-check|eff setup`)",
+        "The reply never prints the public-league Session line (regex_absent: `this league is public`)",
+        "The reply says ESPN rejected the stored session on this private league, hands over to session-check, and gives no section of the briefing (llm)"
+      ]
     }
   ]
 }

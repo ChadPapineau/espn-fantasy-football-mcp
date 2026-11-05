@@ -81,6 +81,7 @@
       "writes-on",
       "auth-rejected",
       "public-league",
+      "private-league",
       "drift-mRoster",
       "points-only-seeding",
       "seeding-unknown",

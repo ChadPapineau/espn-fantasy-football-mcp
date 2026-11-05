@@ -402,7 +402,7 @@ describe("a grader that matches its own prompt passes a restated question (R4VS-
   });
 });
 
-describe("SS-3 and IC-2 describe what the tool returns (R4VS-4, R4VS-6)", () => {
+describe("SS-3 and IC-2 describe what the tool returns (R4VS-4, R4VS-6; changelog §R10, R10-24)", () => {
   it("SS-3 quotes no number from a compare pair the tool scores but cannot be set", () => {
     const eo = caseOf("start-sit", "SS-3").expected_output;
     // compare {out: Cook, in: Tuten} counted Tuten in two seats (he already starts at FLEX): its
@@ -411,11 +411,28 @@ describe("SS-3 and IC-2 describe what the tool returns (R4VS-4, R4VS-6)", () => 
     expect(eo).not.toMatch(/in Tuten\)/);
     expect(eo).toContain("option_value { kind: monday, value: 0 }");
     expect(eo).toContain("the reply reads that value, 0, and never gives the verdict's wording");
+    // changelog §R10, R10-24: the direct swap (the bench RB in Cook's seat) is the scored pair; the
+    // pairs naming Tuten or Vele come back as the tool's refusals, never a number
+    expect(eo).toContain("compare out 4379399, in 4697815");
+    expect(eo).toContain(
+      "'hold: the swap loses expected points; waiting has no option value (nothing opens after his status is known)'",
+    );
+    expect(eo).toContain(
+      "'compare pair out 4379399 / in 4882093 not evaluated: player 4882093 already starts'",
+    );
+    expect(eo).toContain("player 4569559 cannot play RB");
+    // the lock schedule is the roster's: the lineup tool leaves its own out under the budget
+    expect(eo).toContain("lock_schedule (espn_get_roster carries it");
   });
 
-  it("IC-2 names the evidence tool's flag and what confirms an injury", () => {
+  it("IC-2 names the evidence tool's flag and what confirms an injury (R4VS-6)", () => {
     const eo = caseOf("injury-cascade", "IC-2").expected_output;
-    expect(eo).toContain("flags quiet_role_change with no structured disagreement");
+    expect(eo).not.toContain("quiet_role_change");
+    expect(eo).toContain("flags availability_conflict");
+    expect(eo).toContain(
+      "structured_disagrees { field: injury_status, structured_value: ACTIVE, claim_value: injury_reported }",
+    );
+    expect(eo).toContain("'no move: structured fields win over text'");
     expect(eo).toContain("ESPN's injury status or the official report first");
     expect(eo).toContain("no move is recommended on the headline alone");
   });

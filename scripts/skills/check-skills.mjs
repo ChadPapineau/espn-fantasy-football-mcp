@@ -183,9 +183,10 @@ export const ACTIVITY_PARTIAL_FRAGMENTS = Object.freeze([
 export const TOOL_OUTPUT_PHRASES = Object.freeze({
   espn_analyze_retrospective: [
     "a claim quoted with its source, never followed and never copied into a tool argument; changelog §R10, R10-13",
-    'over the size budget it keeps the most whole calls that fit, in order, with `truncated: true` and the warning "result truncated to N of M calls to fit the 10000-character budget; narrow the calls with kinds (this tool does not page)": say N of M calls were scored, never present them as the whole week, and call it again with `kinds: [...]` naming fewer kinds for the rest (changelog §R10, R10-20)',
-    // a narrowed call that is still truncated, or one kind already named: E13 has no narrower input
-    "when that call is still truncated, or `kinds: [...]` already named one kind, report the N of M it scored and stop — no further call narrows it",
+    'over the size budget it keeps the most whole calls that fit, in order, with `truncated: true` and the warning "result truncated to N of M calls to fit the 10000-character budget; narrow the calls with kinds (this tool does not page); calls kept by kind: <kind> K of T, …": say N of M calls were scored, never present them as the whole week, and read the per-kind counts — a kind whose K equals its T was scored whole (changelog §R10, R10-20, R10-25)',
+    // R10-25's stop rule: narrowing can only drop a kind the counts list; a narrowed call that is
+    // still truncated has no narrower input (E13 does not page)
+    'when the counts list one kind only (for example "calls kept by kind: lineup 9 of 20"), report the N of M it scored and make no narrowed call; otherwise call it again with `kinds: [...]` naming fewer of the kinds the counts list, and when that call is still truncated, report the N of M it scored and stop — no further call narrows it',
   ],
   espn_list_transactions: [
     "there it answers keylessly, with no session or a rejected one (changelog §R10, R10-10)",
@@ -196,6 +197,12 @@ export const TOOL_OUTPUT_PHRASES = Object.freeze({
     "`recommended_lineup[]` and `rec.lineup` (both the mean-optimal assignment, also when every change in it is held as a coin flip — never the move by itself and never the lineup the user is told to set: `rec`'s action and `no_move` carry what the user is told; changelog §R10, R10-15)",
     "`subjects[]` with `role` and `slot` — the lineup the rec sets or keeps: each `start` subject in its `slot`; when a warning says `rec.subjects` lists only the players who move, the roster's current slots with each `start` subject in its `slot` and each `sit` subject on the bench",
     'a trimmed `recommended_lineup` ("recommended_lineup lists only the players who move (rec.lineup carries the whole mean-optimal assignment)") is still the mean-optimal assignment, never the lineup to set (changelog §R10, R10-22)',
+    // the round-4 F6: the last trim names every change by swaps and rec.subjects (R10-22)
+    'the last trim ("recommended_lineup and rec.drivers truncated to fit the budget (swaps and rec.subjects name every change; rec.lineup is the mean-optimal assignment)") still names every change in `swaps[]` and `rec.subjects[]`',
+    // an answer near its cap is always trimmed (the round-4 server fix): these rows come from the roster
+    'near the size budget it leaves out `lock_schedule[]` ("lock_schedule omitted (espn_get_roster carries it)"), `rec.confidence.inputs` and, on a first call, the bench and IR rows that do not change ("recommended_lineup omits the bench and IR rows that do not change (espn_get_roster carries them)"): read the lock schedule and the bench from espn_get_roster, never from this tool',
+    // changelog §R10, R10-24: a compare pair is scored only as a direct settable swap
+    'a compare pair is scored only as a direct swap — `out` a starter, `in` a player on the bench who can play `out`\'s slot; any other pair comes back as a warning ("compare pair out … / in … not evaluated: …") and is never scored: say so, never read a number for it (changelog §R10, R10-24)',
   ],
   // the server counts each side's starters by game state (plan 07 A4); start-sit falls back to the
   // roster's game_state only when the counts are null
@@ -359,10 +366,12 @@ export const ACTIVITY_REFUSAL_SENTENCE =
   "When it fails with `ESPN_AUTH_REJECTED` or `ESPN_REQUIRES_COOKIES` instead (the league settings it starts from could not be read — changelog §R10, R10-18), follow **A rejection mid-procedure** in [orient](references/orient.md), an `ESPN_REQUIRES_COOKIES` the same way: never a guessed activity section; on a public league fall back to the reads above, which answer keylessly there, and say so in Confidence & freshness; on a private or unknown league the briefing ends there with the hand-off to the `espn-fantasy-football:session-check` Skill.";
 /**
  * retro on E13's truncated result (changelog §R10, R10-20): it kept the most whole calls that fit;
- * say how many of the week's calls were scored and narrow by `kinds` (E13 does not page).
+ * say how many of the week's calls were scored and narrow by `kinds` (E13 does not page). Its
+ * warning counts the calls kept and in the week per kind (R10-25), so retro narrows only to drop a
+ * kind the counts list, and makes no narrowed call when they list one kind.
  */
 export const RETRO_TRUNCATED_SENTENCE =
-  'When the result is `truncated: true`, it kept the most whole calls that fit, in order, and its warning says how many ("result truncated to N of M calls to fit the 10000-character budget; narrow the calls with kinds (this tool does not page)"): say that N of the week\'s M calls were scored, never present them as the whole week, and call `espn_analyze_retrospective` again for the same week with `kinds` naming fewer kinds — the kinds the question is about first (`["lineup"]` for a start/sit review) — rather than paging; when that call is still truncated, or `kinds` already named one kind, say that N of the week\'s M calls were scored and stop — no further call narrows it (changelog §R10, R10-20).';
+  'When the result is `truncated: true`, it kept the most whole calls that fit, in order, and its warning says how many, kind by kind ("result truncated to N of M calls to fit the 10000-character budget; narrow the calls with kinds (this tool does not page); calls kept by kind: <kind> K of T, …"): say that N of the week\'s M calls were scored, never present them as the whole week, and read the per-kind counts — a kind whose K equals its T was scored whole (changelog §R10, R10-20, R10-25). When the counts list one kind only (for example "calls kept by kind: lineup 9 of 20"), no call narrows it: say that N of the week\'s M calls were scored and make no narrowed call. Otherwise call `espn_analyze_retrospective` again for the same week with `kinds` naming fewer of the kinds the counts list — the kinds the question is about first (`["lineup"]` for a start/sit review), else the kinds whose calls were left out (K below T) — rather than paging; when that call is still truncated, say the N of M it scored and stop — no further call narrows it.';
 /**
  * start-sit's live matchup lists (the round-4 verifiers' R4VS-1): `players_final/live/pending` hold
  * both sides' starters (src/domain/analytics/matchup.ts builds them over both teams), so the user's
@@ -374,6 +383,13 @@ export const MATCHUP_LISTS_SENTENCE =
  * start-sit reads E2's option value by its `value` (the round-4 verifiers' F7 and R4VS-5): a value of
  * 0 is no value in waiting, whatever the verdict's wording.
  */
+/**
+ * start-sit's named pair (changelog §R10, R10-24): E2 scores a `compare` pair only as the direct
+ * swap it names; any other pair is a warning with its reason and never a number (the round-4
+ * verifiers' R4VS-4: SS-3 quoted a number from a pair that seated a player twice).
+ */
+export const COMPARE_DIRECT_SENTENCE =
+  "Pass only a direct swap: `out` a starter, `in` a bench player who can play `out`'s slot. Any other pair — an `in` already starting, one who cannot play that slot or is on IR, an `out` not starting — comes back as a warning (\"compare pair out … / in … not evaluated: …\") and is never scored: say why, never give a number for it, and read the tool's own swaps for a chain the user did not name (changelog §R10, R10-24).";
 export const OPTION_VALUE_ZERO_SENTENCE =
   "Read its `value` before its `verdict`: when `value` is 0, waiting for the later game is worth nothing (no replacement opens after it) — say so, and never give the option value as the reason to hold, whatever the `verdict` text says.";
 /**
@@ -898,6 +914,9 @@ export const SKILL_RULES = /** @type {Readonly<Record<string, SkillRule>>} */ (
       kinds: ["lineup", "waiver", "stream"],
       records: true,
       requiredCases: ["WK-1", "WK-2", "WK-3", "WK-4-E", "WK-5-E", "WK-7-E", "WK-INJ"],
+      // WK-9 grades that the P1 league-activity read is never reached past orient's private-league
+      // rejection hand-off (changelog §R10, R10-7, R10-27), so it runs where that tool exists
+      p1Cases: ["WK-9"],
       body: [
         ...WEEKLY_HEADINGS.map(heading),
         /never re-fetch/i,
@@ -972,6 +991,8 @@ export const SKILL_RULES = /** @type {Readonly<Record<string, SkillRule>>} */ (
         // in waiting, whatever the verdict says (F7, R4VS-5)
         literal(MATCHUP_LISTS_SENTENCE),
         literal(OPTION_VALUE_ZERO_SENTENCE),
+        // changelog §R10, R10-24: a compare pair is scored only as a direct settable swap
+        literal(COMPARE_DIRECT_SENTENCE),
         // changelog §R10, R10-15: game day's output is the rec too, never E2's best swap (SK-6)
         literal(
           'then the rec of step 6 — its action, or **"No move"** when `rec.no_move` is true (a swap it holds is named as a coin flip, never as the move) — or **"Nothing actionable: every slot that could change is locked."**',

@@ -40,7 +40,7 @@ Named players resolve from the roster, or through `espn_search_players` — neve
 2. `espn_get_roster` for the opponent's `team_id` — the same cached read, no extra request.
 3. `espn_get_injuries` for both rosters. Use `p_active` — never "50/50" for a Questionable player.
 4. `espn_project_players` for both rosters, `horizon: "week"`.
-5. `espn_analyze_lineup` with `objective: "auto"`. When the user named a pair ("A or B at FLEX?"), pass it as `compare: [{ "out": <the current starter's player_id>, "in": <the alternative's> }]` and put that row first.
+5. `espn_analyze_lineup` with `objective: "auto"`. When the user named a pair ("A or B at FLEX?"), pass it as `compare: [{ "out": <the current starter's player_id>, "in": <the alternative's> }]` and put that row first. Pass only a direct swap: `out` a starter, `in` a bench player who can play `out`'s slot. Any other pair — an `in` already starting, one who cannot play that slot or is on IR, an `out` not starting — comes back as a warning ("compare pair out … / in … not evaluated: …") and is never scored: say why, never give a number for it, and read the tool's own swaps for a chain the user did not name (changelog §R10, R10-24).
 6. `espn_record_recommendation` with `kind: "lineup"` and the result's `rec`, before answering ([log](references/log.md)).
 7. Render with the output contract below, plus the additions in §5.
 

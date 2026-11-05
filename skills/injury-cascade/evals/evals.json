@@ -23,7 +23,7 @@
       "name": "IC-2",
       "toolset": "full",
       "prompt": "A headline says my RB1 tore his ACL in practice. Who replaces him?",
-      "expected_output": "ESPN shows the RB1 (Ashton Jeanty) as ACTIVE and no official report agrees: the news gate runs first — espn_analyze_evidence weighs the headline as a health claim against his usage, and in this build flags quiet_role_change with no structured disagreement, its what_would_confirm items the depth chart's next update and the role holding a second game; the injury is labelled unconfirmed, what would confirm it is named — ESPN's injury status or the official report first, then the tool's items — and any beneficiary plan is conditional on it: no move is recommended on the headline alone.",
+      "expected_output": "ESPN shows the RB1 (Ashton Jeanty) as ACTIVE and no official report agrees: the news gate runs first — espn_analyze_evidence weighs the headline's injury against ESPN's status and flags availability_conflict, structured_disagrees { field: injury_status, structured_value: ACTIVE, claim_value: injury_reported }, its rec 'no move: structured fields win over text', and its what_would_confirm items ESPN's injuryStatus for him changing from ACTIVE, the next official injury report listing the injury, and the inactives list about 90 minutes before kickoff (a dataset-seeded eval server); the injury is labelled unconfirmed, ESPN shows him active, what would confirm it is named — ESPN's injury status or the official report first — and any beneficiary plan is conditional on it: no move is recommended on the headline alone.",
       "files": ["evals/fixtures/fx-10h"],
       "expectations": [
         "The skill called espn_analyze_evidence (tool_used)",

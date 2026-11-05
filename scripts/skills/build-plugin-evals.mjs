@@ -176,6 +176,18 @@ export function loggedNoteOf(seed) {
  * - `log-six-lineup` — RT-4-E: six lineup calls over weeks 1–4 ("six lineup calls logged"; none
  *   stores a pre-kickoff win probability, so p_win's Brier has n = 0), each with its scored
  *   alternative (R10-3);
+ * - `log-week4-mixed` — RT-5: three week-4 lineup calls, then week-4 evidence entries enough that
+ *   the week passes E13's 10 000-character cap even with the lineup calls left out (MANY_CALL_SEEDS),
+ *   so the retrospective truncates with R10-25's per-kind counts, and a call narrowed to the kind
+ *   that lost calls is still truncated (retro's stop rule; changelog §R10, R10-20, R10-25, R10-27);
+ * - `log-week4-many` — RT-6: week-4 lineup calls only, enough to pass the cap, so the counts list
+ *   one kind and no narrower call exists (retro makes no repeat call);
+ * - `private-settings-fresh` — WK-9: on private-league, `espn_check_auth` (its scripted probe
+ *   accepts: the label is `validated` in memory) then `espn_get_league` only, so the league settings
+ *   are fresh in the state; the run's server starts again on the `rejected` label and serves them,
+ *   so Step 0 reads `league.is_public: false` (orient's private-league rejection row), while every
+ *   other league read is refused — E11's session-refusal partial lines (changelog §R10, R10-11,
+ *   R10-27). The seed reads nothing else: the feed, standings, rosters and pool stay unread;
  * - `drift-red` — SC-4: the drifted roster view already read once, so Step 0's `espn_get_status`
  *   reports `drift.status: red` (a fresh drift-mRoster state is green until an mRoster read);
  * - `seeding-points-only` — SS-5-E, WK-5-E: the points-only reading recorded and confirmed, exactly
@@ -189,10 +201,13 @@ export const SEEDS = Object.freeze({
   "RT-1": "log-week4-lineup",
   "RT-3": "log-week4-lineup",
   "RT-4-E": "log-six-lineup",
+  "RT-5": "log-week4-mixed",
+  "RT-6": "log-week4-many",
   "RT-INJ": "log-week4-lineup-note",
   "SC-4": "drift-red",
   "SS-5-E": "seeding-points-only",
   "WK-5-E": "seeding-points-only",
+  "WK-9": "private-settings-fresh",
 });
 /** Every seed `--seed` knows how to write. */
 export const SEED_KINDS = Object.freeze([
@@ -201,8 +216,11 @@ export const SEED_KINDS = Object.freeze([
   "log-week4-lineup",
   "log-week4-lineup-note",
   "log-six-lineup",
+  "log-week4-mixed",
+  "log-week4-many",
   "drift-red",
   "seeding-points-only",
+  "private-settings-fresh",
 ]);
 /** The seeding reading each seeding seed records (`eff setup --seeding <mode>`). */
 export const SEEDING_SEEDS = Object.freeze({ "seeding-points-only": "points_only" });
@@ -268,18 +286,21 @@ export const MANDATED_LINE_GRADERS = Object.freeze([
   },
 ]);
 /**
- * The opening lines orient.md makes every answer print on a case's eval server — on a public league
- * (every fx-10h variant's league is public: scripts/fx10h/model.ts): the Session line of its
+ * The opening lines orient.md makes every answer print on a case's eval server. On a public league
+ * (every fx-10h variant's but private-league's — variantIsPublic): the Session line of its
  * credential state (R9-1's `not_configured` row, R10-7's `rejected` row; a `stored` session prints
  * none), then the seeding line while the reading is unconfirmed (every fixture server, unless the
- * case's seed records a reading — SEEDING_SEEDS). Read from orient.md itself, so a reworded line is
- * the line the graders are checked against.
+ * case's seed records a reading — SEEDING_SEEDS). On a private league (changelog §R10, R10-27) a
+ * `rejected` or `not_configured` session hands over to session-check at Step 0 and stops, so no
+ * line is mandated; a `stored` one prints the seeding line only. Read from orient.md itself, so a
+ * reworded line is the line the graders are checked against.
  * @param {string} orient the text of skills/_shared/references/orient.md
  * @param {unknown} credentialState the variant's `harness.credential_state` (absent: not_configured)
  * @param {string | null} seed the case's seed
+ * @param {boolean} [isPublic] whether the variant's recorded league is public (default true)
  * @returns {{ lines: string[], errors: string[] }}
  */
-export function mandatedLines(orient, credentialState, seed) {
+export function mandatedLines(orient, credentialState, seed, isPublic = true) {
   /** @param {RegExp} re @param {string} what */
   const quoted = (re, what) => {
     const m = re.exec(orient);
@@ -295,7 +316,10 @@ export function mandatedLines(orient, credentialState, seed) {
     else errors.push(x.error);
   };
   const state = credentialState ?? "not_configured";
-  if (state === "rejected" || state === "not_configured")
+  const handsOver = state === "rejected" || state === "not_configured";
+  // orient's private-league rows hand over before any opening line (changelog §R10, R10-7)
+  if (!isPublic && handsOver) return { lines, errors };
+  if (isPublic && handsOver)
     add(
       quoted(
         new RegExp(
@@ -1075,6 +1099,37 @@ export function variantHarness(root, variant) {
 }
 
 /**
+ * Whether a fx-10h variant's recorded league is public: the base's is (`isPublic: true`), and a
+ * variant is private only when its `league/mSettings.patch.json` replaces `settings.isPublic` with
+ * false (private-league, changelog §R10, R10-27 — scripts/fx10h/variants.ts writes that patch).
+ * @param {string} root
+ * @param {string | null} variant
+ * @returns {boolean}
+ */
+export function variantIsPublic(root, variant) {
+  if (!variant) return true;
+  const file = path.join(
+    root,
+    "fixtures",
+    "espn",
+    "fx-10h",
+    variant,
+    "league",
+    "mSettings.patch.json",
+  );
+  if (!existsSync(file)) return true;
+  /** @type {unknown} */
+  const ops = JSON.parse(readFileSync(file, "utf8"));
+  const op = Array.isArray(ops)
+    ? ops.find(
+        (x) =>
+          isRecord(x) && Array.isArray(x["path"]) && x["path"].join("/") === "settings/isPublic",
+      )
+    : undefined;
+  return !(isRecord(op) && op["value"] === false);
+}
+
+/**
  * Why a case on this variant cannot be graded by a fixture-mode server, or null when it can: its
  * harness credential state is one such a server never reports (FIXTURE_CREDENTIAL_STATES).
  * @param {Record<string, unknown>} harness
@@ -1395,7 +1450,12 @@ export function planSuite(root, opts = {}) {
       writtenCases.add(name);
       const exps0 = Array.isArray(c["expectations"]) ? c["expectations"] : [];
       // every final-message regex can fail a reply that only prints orient's opening lines (V-1)
-      const mandated = mandatedLines(orient, harnessOf(variant)["credential_state"], seed);
+      const mandated = mandatedLines(
+        orient,
+        harnessOf(variant)["credential_state"],
+        seed,
+        variantIsPublic(root, variant),
+      );
       errors.push(...mandated.errors.map((e) => `${where}/evals.json ${name}: ${e}`));
       for (const p of mandatedLineProblems(
         name,
@@ -2278,6 +2338,81 @@ export const LINEUP_SEEDS = Object.freeze({
 });
 
 /**
+ * The week-4 calls each truncation seed logs, in order (changelog §R10, R10-27: a retro seed whose
+ * week's calls pass E13's 10 000-character cap, so the warning R10-25 extends is graded): RT-5's
+ * `log-week4-mixed` logs three lineup calls, then evidence entries enough to pass the cap on their
+ * own, so the first call keeps every lineup call and cuts the evidence, and a call narrowed to
+ * `kinds: ["evidence"]` is still truncated; RT-6's `log-week4-many` logs lineup calls only, so the
+ * counts list one kind and no call narrows it. Every call is start-sit's week-4 call, logged once
+ * per entry with its own `client_ref` (the log is idempotent on it); a lineup entry carries its
+ * scored alternative (R10-3), an evidence entry none and no note.
+ */
+export const MANY_CALL_SEEDS = Object.freeze({
+  "log-week4-mixed": Object.freeze([
+    { kind: "lineup", n: 3 },
+    { kind: "evidence", n: 30 },
+  ]),
+  "log-week4-many": Object.freeze([{ kind: "lineup", n: 24 }]),
+});
+
+/**
+ * A truncation seed (MANY_CALL_SEEDS): each entry logged as logLineupCall logs start-sit's week-4
+ * call (`espn_analyze_lineup`, served from the cache after the first; for a lineup entry the roster
+ * and the two QBs' projections for its alternative), each with its own `client_ref`.
+ * @param {SeedOpts} o
+ * @param {readonly { kind: string, n: number }[]} groups
+ * @param {string} seed
+ * @returns {Promise<string>}
+ */
+export async function seedManyCalls(o, groups, seed) {
+  return withSeedServer(o, async (t) => {
+    const settingsHash = await settingsHashOf(t);
+    let logged = 0;
+    /** @type {string[]} */
+    const counts = [];
+    for (const g of groups) {
+      for (let i = 0; i < g.n; i++)
+        await logLineupCall(t, {
+          week: 4,
+          objective: "auto",
+          settingsHash,
+          ...(g.kind === "lineup" ? {} : { kind: g.kind }),
+          note: null,
+          clientRef: `plugin-evals-seed-${seed}-${g.kind}-${String(i + 1).padStart(2, "0")}`,
+        });
+      logged += g.n;
+      counts.push(`${g.kind} ${String(g.n)}`);
+    }
+    return `logged ${String(logged)} week-4 calls (${counts.join(", ")})`;
+  });
+}
+
+/**
+ * WK-9's seed on private-league (changelog §R10, R10-27): `espn_check_auth` first — its scripted
+ * probe accepts, so the label is `validated` in this server's memory — then `espn_get_league`
+ * only, so the league settings are fresh in the state, and the league must read private. Nothing
+ * else is read: a fresh feed, standings, roster or pool entry would be served to the run too,
+ * which then could not show E11's session-refusal partial lines.
+ * @param {SeedOpts} o
+ * @returns {Promise<string>}
+ */
+export async function seedPrivateSettingsFresh(o) {
+  return withSeedServer(o, async (t) => {
+    const auth = sub(await t.call("espn_check_auth", {}), "data");
+    if (auth["accepted"] !== true)
+      throw new Error(
+        `private-settings-fresh: espn_check_auth answered accepted ${String(auth["accepted"])} (reason ${String(auth["reason"])})`,
+      );
+    const league = sub(sub(await t.call("espn_get_league", {}), "data"), "league");
+    if (league["is_public"] !== false)
+      throw new Error(
+        `private-settings-fresh: espn_get_league reports is_public ${String(league["is_public"])}, not false`,
+      );
+    return "league settings fresh (private), nothing else read";
+  });
+}
+
+/**
  * Run the built CLI once on a PRISTINE state (`o.env` names its directories), under the no-socket
  * preload, and resolve its exit code — what the owner's terminal command does, here for a seed
  * (`eff setup --seeding <mode>`: no prompt, no network, no credential).
@@ -2343,6 +2478,11 @@ export async function seedState(o) {
   if (seeding !== undefined) return seedSeedingReading(o, seeding);
   if (seed === "log-week4") return `logged ${await seedLogWeek4(o)}`;
   if (seed === "log-week4-plain") return `logged ${await seedLogWeek4({ ...o, plain: true })}`;
+  if (seed === "private-settings-fresh") return seedPrivateSettingsFresh(o);
+  const many = /** @type {Readonly<Record<string, readonly { kind: string, n: number }[]>>} */ (
+    MANY_CALL_SEEDS
+  )[seed];
+  if (many !== undefined) return seedManyCalls(o, many, seed);
   if (seed === "drift-red")
     return withSeedServer(o, async (t) => {
       const raw = await t.callRaw("espn_get_roster", {});

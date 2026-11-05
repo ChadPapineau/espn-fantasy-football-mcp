@@ -948,11 +948,17 @@ describe("orient's rejected routing and round 3's fixed sentences (changelog §R
       "and end the briefing with the hand-off to the `espn-fantasy-football:session-check` Skill (changelog §R10, R10-7).",
       "and carry on.",
     ],
-    // F5 and R4VS-8: a narrowed retrospective that is still truncated, or one kind, stops there
+    // F5 and R4VS-8: a narrowed retrospective that is still truncated stops there; R10-25: the
+    // per-kind counts listing one kind mean no narrowed call
     [
       "retro",
-      "when that call is still truncated, or `kinds` already named one kind, say that N of the week's M calls were scored and stop — no further call narrows it",
+      "when that call is still truncated, say the N of M it scored and stop — no further call narrows it",
       "keep narrowing until it fits",
+    ],
+    [
+      "retro",
+      'When the counts list one kind only (for example "calls kept by kind: lineup 9 of 20"), no call narrows it: say that N of the week\'s M calls were scored and make no narrowed call.',
+      "When the result is truncated, narrow it.",
     ],
     // R4VS-1: the live matchup's lists hold both sides' starters; F7/R4VS-5: a 0 option value is no
     // value in waiting, whatever the verdict says

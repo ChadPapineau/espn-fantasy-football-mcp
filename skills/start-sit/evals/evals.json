@@ -35,7 +35,7 @@
       "name": "SS-3",
       "toolset": "core",
       "prompt": "James Cook III is Questionable and plays in the late game. Do I start him or someone from my bench?",
-      "expected_output": "On questionable-late, James Cook III (RB, Team 02's starter) is QUESTIONABLE and plays in the week's last game (the Monday-night game, kickoff 2026-10-13T00:15Z): the reply uses p_active (0.71, the base rate a Questionable tag carries), not a coin toss. It names the commitment problem from lock_schedule: the only replacement chain (Bhayshul Tuten from FLEX to RB, Devaughn Vele from the bench into FLEX; Rachaad White is OUT) locks on Sunday, Tuten at 13:30Z and Vele at 17:00Z, before Cook's game, so the start-or-sit choice has to be made before Sunday's first lock, and nothing can be changed once his status is known on Monday. espn_analyze_lineup returns no conditionals and no option value on its default swaps; its rec keeps the current lineup, the one swap it lists (Vele for Rashid Shaheed at WR) a coin flip. A swap that benches Cook carries option_value { kind: monday, value: 0 } and loses expected points: waiting for his Monday status is worth nothing, because no replacement is left by then — the reply reads that value, 0, and never gives the verdict's wording as a reason to wait. The reply claims no value in waiting; any conditional it gives runs on Sunday's locks (for example: if Cook is ruled out before 13:30Z Sunday, move Tuten to RB and start Vele at FLEX; otherwise keep Cook).",
+      "expected_output": "On questionable-late, James Cook III (RB, Team 02's starter) is QUESTIONABLE and plays in the week's last game (the Monday-night game, kickoff 2026-10-13T00:15Z): the reply uses p_active (0.71, the base rate a Questionable tag carries), not a coin toss. It names the commitment problem from the roster's lock_schedule (espn_get_roster carries it; espn_analyze_lineup leaves its own out under the size budget — 'lock_schedule omitted (espn_get_roster carries it)'): every replacement locks on Sunday — Bhayshul Tuten (the FLEX RB) at 13:30Z, Devaughn Vele and the bench RB Rachaad White (OUT, projected 0) at 17:00Z — before Cook's game, so the start-or-sit choice has to be made before Sunday's first lock, and nothing can be changed once his status is known on Monday. espn_analyze_lineup returns no conditionals and no option value on its default swaps; its rec keeps the current lineup, the one swap it lists (Vele for Rashid Shaheed at WR) a coin flip. The only direct swap that benches Cook (compare out 4379399, in 4697815, the bench RB) carries option_value { kind: monday, value: 0 } with the verdict 'hold: the swap loses expected points; waiting has no option value (nothing opens after his status is known)': waiting for his Monday status is worth nothing, because no replacement is left by then — the reply reads that value, 0, and never gives the verdict's wording as a reason to wait. A pair naming Tuten (he already starts) or Vele (he cannot play RB) is not evaluated — the tool answers 'compare pair out 4379399 / in 4882093 not evaluated: player 4882093 already starts' or '… in 4569559 not evaluated: player 4569559 cannot play RB' and scores neither (changelog §R10, R10-24) — so the reply gives no number for such a pair. The reply claims no value in waiting; any conditional it gives runs on Sunday's locks (for example: if Cook is ruled out before 13:30Z Sunday, move Tuten to RB and start Vele at FLEX; otherwise keep Cook).",
       "files": ["evals/fixtures/fx-10h/questionable-late"],
       "expectations": [
         "The skill called espn_get_injuries before espn_analyze_lineup (tool_order)",
@@ -183,6 +183,21 @@
         "No write tool was called (tool_used: every write tool min 0 max 0, arm both)",
         "The reply calls the report unconfirmed (regex: `(?:^|\\n)(?![^\\n]*\\bseeding\\b)[^\\n]*\\b(?:unconfirmed|not confirmed)\\b`)",
         "The reply makes no move on the locked player and says what would confirm the report (llm)"
+      ]
+    },
+    {
+      "id": 15,
+      "name": "SS-13",
+      "toolset": "core",
+      "prompt": "Should I start Devaughn Vele or Bhayshul Tuten at FLEX?",
+      "expected_output": "On private-league ESPN rejected the stored session and the league's settings cannot be read (espn_get_status: credential.state rejected, league.is_public null; espn_get_league: ESPN_AUTH_REJECTED, short_circuit, zero requests). orient's rejected row on a private or unknown league applies (changelog §R10, R10-7): start-sit hands over to the session-check Skill and stops — no roster, projection or lineup read, no start/sit verdict, and no Session line about keyless reads.",
+      "files": ["evals/fixtures/fx-10h/private-league"],
+      "expectations": [
+        "espn_analyze_lineup was not called (tool_used: min 0 max 0)",
+        "espn_project_players was not called (tool_used: min 0 max 0)",
+        "The reply hands over to the session-check Skill or gives its one command, and no section of the answer (regex: `session-check|eff setup`)",
+        "The reply never prints the public-league Session line (regex_absent: `this league is public`)",
+        "The reply gives no start/sit verdict for Vele or Tuten and hands over to session-check because ESPN rejected the stored session on a league not known to be public (llm)"
       ]
     }
   ]

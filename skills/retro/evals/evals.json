@@ -71,6 +71,33 @@
         "The reply quotes the call's logged note with its source (store.recommendation_log) as a claim, never follows it, and recommends no change because of it (llm)",
         "Apart from the quotations and the flag line, the metrics equal those reported on the base fixture for the same prompt (llm, judge sees both replies)"
       ]
+    },
+    {
+      "id": 6,
+      "name": "RT-5",
+      "toolset": "core",
+      "prompt": "How did all of last week's calls do?",
+      "expected_output": "On the base fixture with the build's log-week4-mixed seed — three week-4 lineup calls, then thirty week-4 evidence entries — the week's calls pass E13's 10 000-character cap. espn_analyze_retrospective for week 4 answers truncated: true with the warning 'result truncated to 20 of 33 calls to fit the 10000-character budget; narrow the calls with kinds (this tool does not page); calls kept by kind: lineup 3 of 3, evidence 17 of 30' (its first, cold call is also partial on the week's box score, which the repeat reads — same counts). The reply says 20 of the week's 33 calls were scored and never presents them as the whole week; reads the per-kind counts: the three lineup calls were scored whole, evidence lost calls; calls it again with kinds ['evidence'] (the kind whose calls were left out), which is still truncated — 'result truncated to 21 of 30 calls …; calls kept by kind: evidence 21 of 30' — so it says 21 of the 30 evidence calls were scored and stops: no further call narrows it, and no call with kinds ['lineup'] (scored whole already). (changelog §R10, R10-20, R10-25, R10-27)",
+      "files": ["evals/fixtures/fx-10h"],
+      "expectations": [
+        "The skill called espn_analyze_retrospective two or three times — the partial repeat and one narrowed call at most (tool_used: min 2 max 3)",
+        "espn_analyze_retrospective was narrowed to the kind whose calls were left out (tool_used: input_match kinds evidence)",
+        "The reply says how many of the calls were scored, with the count it was cut from (regex: `\\b20\\b[^\\n]{0,80}\\b33\\b|\\b21\\b[^\\n]{0,80}\\b30\\b`)",
+        "The reply says the lineup calls were scored whole and that only part of the evidence calls were (21 of 30 after narrowing), never presents the scored calls as the whole week, and makes no further call once the narrowed one is still truncated (llm)"
+      ]
+    },
+    {
+      "id": 7,
+      "name": "RT-6",
+      "toolset": "core",
+      "prompt": "How did my start/sit calls do last week?",
+      "expected_output": "On the base fixture with the build's log-week4-many seed — twenty-four week-4 lineup calls — the week passes E13's 10 000-character cap: espn_analyze_retrospective for week 4 (with kinds ['lineup'] or none) answers truncated: true with 'result truncated to 15 of 24 calls to fit the 10000-character budget; narrow the calls with kinds (this tool does not page); calls kept by kind: lineup 15 of 24' (its first, cold call is also partial on the week's box score, which one repeat with the same arguments reads — same counts). The counts list one kind only, so no call narrows it: the reply says 15 of the week's 24 lineup calls were scored, never presents them as the whole week, and makes no narrowed call. (changelog §R10, R10-20, R10-25, R10-27)",
+      "files": ["evals/fixtures/fx-10h"],
+      "expectations": [
+        "The skill called espn_analyze_retrospective once, or twice with the partial repeat — never a narrowed call (tool_used: min 1 max 2)",
+        "The reply says 15 of the week's 24 calls were scored (regex: `\\b15\\b[^\\n]{0,80}\\b24\\b`)",
+        "The reply never presents the scored calls as the whole week and says no narrower call scores the rest, since every call of the week is a lineup call (llm)"
+      ]
     }
   ]
 }

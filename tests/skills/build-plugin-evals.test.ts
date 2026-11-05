@@ -52,6 +52,7 @@ import {
   HISTORY_FORMAT_VERSION,
   INJECTION_NEEDLES,
   LINEUP_SEEDS,
+  MANY_CALL_SEEDS,
   NO_SOCKET,
   RT_INJ_NOTE,
   SEEDS,
@@ -99,6 +100,7 @@ import {
   discardSuite,
   STATE_OUTSIDE_TEMP,
   variantHarness,
+  variantIsPublic,
   withoutStateDirs,
   writeSeeds,
   yamlFrontmatter,
@@ -141,11 +143,19 @@ const repoWithFixtures = (): TempRepo => {
     "fixtures/espn/fx-10h/manifest.json",
     readFileSync(path.join(fx, "manifest.json"), "utf8"),
   );
-  for (const v of manifest.variants)
+  for (const v of manifest.variants) {
     t.write(
       `fixtures/espn/fx-10h/${v}/manifest.json`,
       readFileSync(path.join(fx, v, "manifest.json"), "utf8"),
     );
+    // the recorded publicity a variant changes (variantIsPublic; changelog §R10, R10-27)
+    const settings = path.join(fx, v, "league", "mSettings.patch.json");
+    if (existsSync(settings))
+      t.write(
+        `fixtures/espn/fx-10h/${v}/league/mSettings.patch.json`,
+        readFileSync(settings, "utf8"),
+      );
+  }
   return t;
 };
 const lane2 = (skill: string) =>
@@ -705,10 +715,13 @@ describe("recorded-state preconditions (Stage C finding eval-recorded-state-prec
       "RT-1": "log-week4-lineup",
       "RT-3": "log-week4-lineup",
       "RT-4-E": "log-six-lineup",
+      "RT-5": "log-week4-mixed",
+      "RT-6": "log-week4-many",
       "RT-INJ": "log-week4-lineup-note",
       "SC-4": "drift-red",
       "SS-5-E": "seeding-points-only",
       "WK-5-E": "seeding-points-only",
+      "WK-9": "private-settings-fresh",
     });
     // the configured points-only plugin (round 2's triage: SS-5-E and WK-5-E); ON-4-E and TR-5-E
     // keep the unconfigured one, whose unconfirmed reading they need
@@ -728,6 +741,10 @@ describe("recorded-state preconditions (Stage C finding eval-recorded-state-prec
       "inj-teamname-json--core--log-week4-lineup-note",
     );
     expect(byDir.get("session-check--sc-4")?.plugin).toBe("drift-mRoster--core--drift-red");
+    // changelog §R10, R10-27: the truncation seeds, and the private league's fresh settings
+    expect(byDir.get("retro--rt-5")?.plugin).toBe("base--core--log-week4-mixed");
+    expect(byDir.get("retro--rt-6")?.plugin).toBe("base--core--log-week4-many");
+    expect(byDir.get("weekly--wk-9")?.plugin).toBe("private-league--full--private-settings-fresh");
     // RT-INJ's metrics must equal RT-1's: the same calls, the note the only difference
     expect(LINEUP_SEEDS["log-week4-lineup-note"].map((c) => ({ ...c, note: null }))).toEqual(
       LINEUP_SEEDS["log-week4-lineup"],
@@ -1406,11 +1423,14 @@ describe("buildPluginEvals on a copy", () => {
       [
         "base--core--log-six-lineup",
         "base--core--log-week4-lineup",
+        "base--core--log-week4-many",
+        "base--core--log-week4-mixed",
         "base--full--log-week4",
         "base--full--log-week4-plain",
         "drift-mRoster--core--drift-red",
         "inj-teamname-json--core--log-week4-lineup-note",
         "points-only-seeding--core--seeding-points-only",
+        "private-league--full--private-settings-fresh",
       ].sort(),
     );
     expect(r.notTestable).toEqual([]);
@@ -1612,6 +1632,129 @@ const happy = (name: string, params: Json): unknown => {
   }
   return null;
 };
+
+/** The tools/call names a fake server saw, in order. */
+const toolNames = (s: FakeServer) =>
+  s.calls.filter((c) => c.method === "tools/call").map((c) => String(c.params.name));
+
+describe("WK-9's private-settings-fresh seed (changelog §R10, R10-27)", () => {
+  const answer =
+    (accepted: unknown, isPublic: unknown) =>
+    (name: string): unknown => {
+      if (name === "initialize") return { protocolVersion: "2025-06-18", capabilities: {} };
+      if (name === "espn_check_auth")
+        return text({ data: { accepted, reason: accepted === true ? null : "x" } });
+      if (name === "espn_get_league") return text({ data: { league: { is_public: isPublic } } });
+      return null;
+    };
+
+  it("probes once (the label turns validated), then reads the league settings and nothing else", async () => {
+    const s = fakeServer(answer(true, false));
+    const line = await seedState({
+      root: "/r",
+      node: "/n",
+      env: {},
+      seed: "private-settings-fresh",
+      spawnImpl: s.spawnImpl,
+    });
+    expect(line).toBe("league settings fresh (private), nothing else read");
+    // never the feed, the standings, a roster or the pool: a fresh copy would be served to the run
+    expect(toolNames(s)).toEqual(["espn_check_auth", "espn_get_league"]);
+    expect(SEED_KINDS).toContain("private-settings-fresh");
+  });
+
+  it.each([
+    ["the probe does not accept", answer(null, false), /espn_check_auth answered accepted null/],
+    ["the probe rejects", answer(false, false), /espn_check_auth answered accepted false/],
+    ["the league reads public", answer(true, true), /is_public true, not false/],
+    ["the league's publicity is unknown", answer(true, null), /is_public null, not false/],
+  ])("fails when %s", async (_, a, why) => {
+    const s = fakeServer(a);
+    await expect(
+      seedState({
+        root: "/r",
+        node: "/n",
+        env: {},
+        seed: "private-settings-fresh",
+        spawnImpl: s.spawnImpl,
+      }),
+    ).rejects.toThrow(why);
+  });
+});
+
+describe("the truncation seeds (MANY_CALL_SEEDS; changelog §R10, R10-20, R10-25, R10-27)", () => {
+  const roster = {
+    players: [
+      { player_id: 11, slot: "QB", position: "QB", projection_week_espn: 20 },
+      { player_id: 12, slot: "BE", position: "QB", projection_week_espn: 15 },
+    ],
+  };
+  const rec = {
+    action: "keep",
+    log_id: null,
+    point_estimate: 100,
+    distribution: { mean: 100, p10: 80, p90: 120 },
+    subjects: [{ player_id: 11, role: "start", slot: "QB" }],
+  };
+  let id = 0;
+  const answer = (name: string): unknown => {
+    if (name === "initialize") return { protocolVersion: "2025-06-18", capabilities: {} };
+    if (name === "espn_get_league")
+      return text({ data: { scoring: { settings_hash: "a".repeat(64) } }, meta: {} });
+    if (name === "espn_analyze_lineup") return text({ data: { rec }, meta: { request_id: "r-1" } });
+    if (name === "espn_get_roster") return text({ data: roster, meta: { request_id: "r-2" } });
+    if (name === "espn_project_players")
+      return text({
+        data: {
+          projections: [11, 12].map((p) => ({
+            player_id: p,
+            weeks: [{ points: { mean: p === 11 ? 20 : 15 } }],
+          })),
+        },
+        meta: { request_id: "r-3" },
+      });
+    if (name === "espn_record_recommendation") {
+      id += 1;
+      return text({ data: { log_id: `rec-${String(id)}` } });
+    }
+    return null;
+  };
+
+  it.each(Object.entries(MANY_CALL_SEEDS))(
+    "%s logs every entry once, each with its own client_ref, in its order and kind",
+    async (seed, groups) => {
+      const s = fakeServer(answer);
+      const line = await seedState({
+        root: "/r",
+        node: "/n",
+        env: {},
+        seed,
+        spawnImpl: s.spawnImpl,
+      });
+      const records = s.calls
+        .filter((c) => c.method === "tools/call" && c.params.name === "espn_record_recommendation")
+        .map((c) => c.params.arguments as Json);
+      const want = groups.flatMap((g) => Array.from({ length: g.n }, () => g.kind));
+      expect(records.map((r) => r.kind)).toEqual(want);
+      expect(new Set(records.map((r) => r.client_ref)).size).toBe(records.length);
+      for (const r of records) {
+        expect(r.week).toBe(4);
+        expect(r.note).toBeUndefined();
+        // a lineup entry carries its scored alternative (R10-3); an evidence entry none
+        expect((r.alternatives as unknown[]).length).toBe(r.kind === "lineup" ? 1 : 0);
+      }
+      expect(line).toBe(
+        `logged ${String(want.length)} week-4 calls (${groups.map((g) => `${g.kind} ${String(g.n)}`).join(", ")})`,
+      );
+      expect(SEED_KINDS).toContain(seed);
+    },
+  );
+
+  it("RT-5's week holds two kinds, lineup first; RT-6's one kind only", () => {
+    expect(MANY_CALL_SEEDS["log-week4-mixed"].map((g) => g.kind)).toEqual(["lineup", "evidence"]);
+    expect(MANY_CALL_SEEDS["log-week4-many"].map((g) => g.kind)).toEqual(["lineup"]);
+  });
+});
 
 describe("the NC-INJ-2 seed (seedLogWeek4, over the real tools' JSON-RPC)", () => {
   it("initializes, reads the league, takes a week-4 lineup rec and logs it as week-4 evidence with the order in its note", async () => {
@@ -2836,6 +2979,43 @@ describe("every final-message regex can fail a reply that only prints orient's o
     expect(mandatedLines("", "rejected", "seeding-points-only").errors).toEqual([
       "orient.md: no quoted rejected Session line to check the graders against",
     ]);
+  });
+
+  it("on a private league a rejected or missing session hands over at Step 0: no line is mandated (changelog §R10, R10-7, R10-27)", () => {
+    for (const state of [undefined, "not_configured", "rejected"])
+      for (const seed of [null, "private-settings-fresh", "seeding-points-only"])
+        expect(mandatedLines(orient, state, seed, false)).toEqual({ lines: [], errors: [] });
+    // a stored session on a private league prints no Session line, the seeding line still
+    expect(mandatedLines(orient, "stored", null, false)).toEqual({ lines: [seeding], errors: [] });
+    // the default stays the public league's
+    expect(mandatedLines(orient, "rejected", null, true)).toEqual(
+      mandatedLines(orient, "rejected", null),
+    );
+    // the publicity is read from the variant's recorded settings: private-league alone is private
+    expect(variantIsPublic(ROOT, "private-league")).toBe(false);
+    for (const v of [null, "auth-rejected", "public-league", "questionable-late"])
+      expect(variantIsPublic(ROOT, v)).toBe(true);
+    // and the private-league cases are written with no mandated line to dodge: their hand-off
+    // graders ("session-check|eff setup") are not exemptions
+    const plan = planSuite(ROOT);
+    expect(plan.errors).toEqual([]);
+    for (const dir of [
+      "weekly--wk-8",
+      "onboard--on-6",
+      "weekly--wk-9",
+      "start-sit--ss-13",
+      "session-check--sc-9",
+      "session-check--sc-10",
+    ])
+      expect(plan.cases.find((c) => c.dir === dir)?.plugin, dir).toMatch(/^private-league--/);
+  });
+
+  it("a private-league grader that matched the public Session line would still be refused", () => {
+    // the public league's rejected Session line carries "eff setup"; on a public league the
+    // hand-off grader would need an exemption, on the private one it needs none
+    const exps = ["The reply hands over (regex: `session-check|eff setup`)"];
+    expect(mandatedLineProblems("X-9", exps, [rejected]).length).toBeGreaterThan(0);
+    expect(mandatedLineProblems("X-9", exps, [])).toEqual([]);
   });
 
   it("refuses the graders round 3 shipped: they passed on the seeding or the Session line alone", () => {

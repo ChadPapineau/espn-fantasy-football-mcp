@@ -1,7 +1,8 @@
 // The server warnings the cheat-sheet (skills/_shared/references/tool-outputs.md) and the Skills
 // quote are the server's own: each quoted form matches a line the server writes, from the server's
 // own code, never a copy of its template (changelog §R10, R10-11 and the round-3b server refix's
-// second E11 line; R10-20's E13 warning; R10-22's lineup trim warnings).
+// second E11 line; R10-20's E13 warning with R10-25's per-kind counts; R10-22's lineup trim warnings
+// and the round-4 F6's last one; R10-24's compare refusals).
 import { readFileSync } from "node:fs";
 import path from "node:path";
 import fc from "fast-check";
@@ -15,6 +16,8 @@ import {
 } from "../../scripts/skills/check-skills.mjs";
 import { fitOptionsOf } from "../../src/mcp/define.js";
 import { ANALYTICS_BUDGET_CHARS, fitToBudget } from "../../src/mcp/envelope.js";
+import { compareWarnings } from "../../src/domain/analytics/lineup.js";
+import { RECOMMENDATION_KINDS } from "../../src/domain/reclog/types.js";
 import { lineupTrims } from "../../src/mcp/tools/analytics.js";
 import {
   SESSION_READ_WARNINGS,
@@ -97,21 +100,31 @@ describe("E11's partial lines in the cheat-sheet are the server's (changelog §R
   });
 });
 
-describe("E13's truncation warning, as the cheat-sheet and retro quote it (changelog §R10, R10-20)", () => {
-  /** The quoted warning of a text, with N and M as counts. */
+describe("E13's truncation warning, as the cheat-sheet and retro quote it (changelog §R10, R10-20, R10-25)", () => {
+  /** One "<kind> K of T" entry of the per-kind counts (R10-25). */
+  const KIND_COUNT = "[a-z]+ \\d+ of \\d+";
+  /**
+   * The quoted warning of a text, with N and M as counts and the per-kind list ("<kind> K of T, …")
+   * as one group of one or more "<kind> K of T" entries.
+   */
   const quotedIn = (text: string): RegExp => {
     const m = /"(result truncated to N of M calls[^"]*)"/.exec(text);
     expect(m, "the quoted warning").not.toBeNull();
-    const re = (m?.[1] ?? "")
+    const q = m?.[1] ?? "";
+    expect(q, "the quoted warning carries the per-kind counts").toMatch(
+      /; calls kept by kind: <kind> K of T, …$/,
+    );
+    const re = q
       .replace(/[.*+?^${}()|[\]\\]/g, "\\$&")
-      .replace("N of M", "(\\d+) of (\\d+)");
+      .replace("N of M", "(\\d+) of (\\d+)")
+      .replace("<kind> K of T, …", `(${KIND_COUNT}(?:, ${KIND_COUNT})*)`);
     return new RegExp(`^${re}$`);
   };
   /** E13's own fit, under its registered options, of `n` calls of about `size` characters each. */
-  const fitted = (n: number, size: number) => {
+  const fitted = (n: number, size: number, kinds: readonly string[] = ["lineup"]) => {
     const call = (i: number) => ({
       log_id: `r-${String(i).padStart(4, "0")}`,
-      kind: "lineup",
+      kind: kinds[i % kinds.length] ?? "lineup",
       followed: null,
       regret: null,
       decisive: null,
@@ -137,6 +150,12 @@ describe("E13's truncation warning, as the cheat-sheet and retro quote it (chang
     return r.envelope;
   };
 
+  /** A week's kinds: one to four of E13's kinds and an unknown one (counted as `other`). */
+  const kindLists = fc.uniqueArray(fc.constantFrom(...RECOMMENDATION_KINDS, "not-a-kind"), {
+    minLength: 1,
+    maxLength: 4,
+  });
+
   it.each([
     ["the cheat-sheet's E13 row", rowOf("espn_analyze_retrospective")],
     ["retro's sentence", RETRO_TRUNCATED_SENTENCE],
@@ -146,16 +165,29 @@ describe("E13's truncation warning, as the cheat-sheet and retro quote it (chang
       fc.property(
         fc.integer({ min: 60, max: 200 }),
         fc.integer({ min: 150, max: 400 }),
-        (n, size) => {
-          const env = fitted(n, size);
+        kindLists,
+        (n, size, kinds) => {
+          const env = fitted(n, size, kinds);
           expect(env.truncated).toBe(true);
           const w = env.warnings.find((x) => x.startsWith("result truncated to"));
           const m = re.exec(w ?? "");
           expect(m, w).not.toBeNull();
-          const kept = (env.data as { calls: unknown[] }).calls.length;
+          const calls = (env.data as { calls: { kind: string }[] }).calls;
+          const kept = calls.length;
           expect(Number(m?.[1])).toBe(kept);
           expect(Number(m?.[2])).toBe(n);
           expect(kept).toBeLessThan(n);
+          // the per-kind counts add up to N of M, and name each kind of the week once (R10-25)
+          const entries = (m?.[3] ?? "").split(", ").map((e) => {
+            const x = /^([a-z]+) (\d+) of (\d+)$/.exec(e);
+            return { kind: x?.[1] ?? "", k: Number(x?.[2]), t: Number(x?.[3]) };
+          });
+          expect(entries.reduce((a, e) => a + e.k, 0)).toBe(kept);
+          expect(entries.reduce((a, e) => a + e.t, 0)).toBe(n);
+          const named = kinds.map((k) =>
+            (RECOMMENDATION_KINDS as readonly string[]).includes(k) ? k : "other",
+          );
+          expect(entries.map((e) => e.kind).sort()).toEqual([...new Set(named)].sort());
         },
       ),
       { numRuns: 25 },
@@ -163,6 +195,22 @@ describe("E13's truncation warning, as the cheat-sheet and retro quote it (chang
     // the warning names E13's narrowing input, and the text tells the reader to use it
     expect(text).toContain("narrow the calls with kinds (this tool does not page)");
     expect(text).toMatch(/`kinds/);
+    // the stop rule reads the counts: one kind listed means no repeat call (R10-25)
+    expect(text).toMatch(/one kind only \(for example "calls kept by kind: lineup 9 of 20"\)/);
+    expect(text).toMatch(/make no narrowed call/);
+  });
+
+  it("the quoted form rejects the warning without its per-kind counts (round 4's text)", () => {
+    const re = quotedIn(RETRO_TRUNCATED_SENTENCE);
+    expect(
+      re.test(
+        "result truncated to 5 of 100 calls to fit the 10000-character budget; narrow the calls with kinds (this tool does not page)",
+      ),
+    ).toBe(false);
+    // and the example in the stop rule is a warning the fit writes for a week of one kind
+    const env = fitted(120, 300, ["lineup"]);
+    const w = env.warnings.find((x) => x.startsWith("result truncated to")) ?? "";
+    expect(w).toMatch(/; calls kept by kind: lineup \d+ of 120$/);
   });
 });
 
@@ -216,8 +264,73 @@ describe("the lineup trim warnings the cheat-sheet quotes are lineupTrims' own (
     for (const q of quoted) expect(sheet).toContain(q);
   });
 
+  it("the lineup row's other quoted trim warnings are warnings the trims write (the round-4 F6 and server fix)", () => {
+    const row = TOOL_OUTPUT_PHRASES.espn_analyze_lineup.join(" ");
+    const quoted = [
+      ...(row.match(
+        /"((?:lock_schedule omitted|recommended_lineup omits|recommended_lineup and rec\.drivers truncated)[^"]*)"/g,
+      ) ?? []),
+    ].map((q) => q.replace(/^"|"$/g, ""));
+    expect(quoted).toEqual([
+      "recommended_lineup and rec.drivers truncated to fit the budget (swaps and rec.subjects name every change; rec.lineup is the mean-optimal assignment)",
+      "lock_schedule omitted (espn_get_roster carries it)",
+      "recommended_lineup omits the bench and IR rows that do not change (espn_get_roster carries them)",
+    ]);
+    // the same lineup with a lock schedule and an unmoved bench player: their trims fire too
+    const withLocks = {
+      ...untrimmed,
+      current_lineup: [...untrimmed.current_lineup, { player_id: 4, slot: "BE" }],
+      recommended_lineup: [...untrimmed.recommended_lineup, { player_id: 4, slot: "BE" }],
+      lock_schedule: [{ player_id: 1, lock_at: "x" }],
+    };
+    const all = lineupTrims(withLocks)
+      .map((trim) => trim(withLocks))
+      .filter((r) => r !== null)
+      .map((r) => r.warning);
+    for (const q of quoted) expect(all).toContain(q);
+    for (const q of quoted) expect(rowOf("espn_analyze_lineup")).toContain(q);
+    // round 3b's last trim ("rec.lineup and swaps name every change") is no longer written
+    expect(warnings.join("\n")).not.toContain("(rec.lineup and swaps name every change)");
+  });
+
   it("no trim warning says rec.lineup carries the lineup to set", () => {
     expect(warnings.length).toBeGreaterThan(2);
     for (const w of warnings) expect(TRIM_WARNING_ABSENT.test(w), w).toBe(false);
+  });
+});
+
+describe("the compare refusal the lineup row quotes is compareWarnings' own (changelog §R10, R10-24)", () => {
+  const quoted = /"(compare pair out … \/ in … not evaluated: …)"/.exec(
+    TOOL_OUTPUT_PHRASES.espn_analyze_lineup.join(" "),
+  )?.[1];
+  const form = formRe(`"${quoted ?? ""}"`);
+
+  it("the row and the Skill quote the form, and it matches every refusal the server writes", () => {
+    expect(quoted).toBeDefined();
+    expect(rowOf("espn_analyze_lineup")).toContain(`"${quoted ?? ""}"`);
+    fc.assert(
+      fc.property(
+        fc.integer({ min: 1, max: 9_999_999 }),
+        fc.integer({ min: 1, max: 9_999_999 }),
+        (a, b) => {
+          // no roster: every id is "not on the roster"; one id twice: "the same player"
+          for (const w of [
+            ...compareWarnings([], [{ out: a, in: b }]),
+            ...compareWarnings([], [{ out: a, in: a }]),
+          ])
+            expect(form.test(w), w).toBe(true);
+        },
+      ),
+      { numRuns: 50 },
+    );
+  });
+
+  it("the form matches no lineup trim warning", () => {
+    for (const w of [
+      "rec.subjects lists only the players who move (the roster's current slots hold the rest)",
+      "lock_schedule omitted (espn_get_roster carries it)",
+      "recommended_lineup and rec.drivers truncated to fit the budget (swaps and rec.subjects name every change; rec.lineup is the mean-optimal assignment)",
+    ])
+      expect(form.test(w)).toBe(false);
   });
 });

@@ -72,7 +72,11 @@ fresh is served before the label is asked, as the real pipeline serves it: a see
 state, and a run started again on it reads them while the transaction feed, the standings, the
 rosters and the pool are refused — `espn_analyze_league_activity`'s session-refusal partial lines
 (changelog §R10, R10-11, R10-18). A seed must not read the feed (`mTransactions2` is cached: a fresh
-copy is served too). `owner-mismatch` unsets `ESPN_TEAM_ID` (its `env` block). The others: `drift-mRoster`
+copy is served too). The plugin eval grades R10-7's private-league hand-off on this variant as
+committed (`league.is_public` null: WK-8, SS-13, ON-6, SC-9; SC-10 the accepting probe after the
+user re-ran setup), and the `is_public: false` row after the build's `private-settings-fresh` seed
+(`espn_check_auth`, then `espn_get_league` only: WK-9). E11's partial lines are graded at tool level
+there, since orient hands over at Step 0 on that state. `owner-mismatch` unsets `ESPN_TEAM_ID` (its `env` block). The others: `drift-mRoster`
 (Team 01's `roster.entries` gone), `points-only-seeding` (last season's seeds follow points for; Team 03 keeps its 3–1 record on weaker week 1–4 lineups, seventh in points for, 2.34 behind the last playoff place — a contender under the record-first reading, on the bubble under the points-only one: changelog §R10, R10-14), `seeding-unknown`, `faab`, `k10`,
 `post-run` (Wednesday 06:00 ET, pool `FREEAGENT`), `ir-open`, `ir-invalid`, `hidden-bench`,
 `sunday-live` (Sunday 14:05 ET: the 09:30 ET London game final — a game is final four hours after

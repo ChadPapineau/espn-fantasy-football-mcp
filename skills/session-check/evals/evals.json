@@ -129,6 +129,43 @@
         "espn_check_auth was not called before the user said done (tool_used: min 0 max 0)",
         "The reply never asks for a cookie value or for the setup command's output (llm)"
       ]
+    },
+    {
+      "id": 9,
+      "name": "SC-9",
+      "toolset": "core",
+      "prompt": "it says ESPN rejected my session",
+      "expected_output": "On private-league ESPN rejected the stored session and the league is not known to be public (espn_get_status: credential.state rejected, league.is_public null): the reply gives the DevTools steps and the one command (eff setup in a terminal), asks the user to say when they have run it, and does not probe yet. Unlike SC-1's public league, it never says the other Skills carry on keylessly meanwhile — on a league not known to be public they hand over here (changelog §R10, R10-7).",
+      "files": ["evals/fixtures/fx-10h/private-league"],
+      "expectations": [
+        "The skill called espn_get_status (tool_used)",
+        "The reply gives the DevTools steps (regex: `DevTools`)",
+        "The reply gives the one command (regex: `eff setup`)",
+        "espn_check_auth was not called before the user said done (tool_used: min 0 max 0)",
+        "The reply asks the user to say when they have run eff setup, and never says the other Skills carry on keylessly on this league (llm)"
+      ]
+    },
+    {
+      "id": 10,
+      "name": "SC-10",
+      "toolset": "core",
+      "history": [
+        {
+          "role": "user",
+          "text": "it says ESPN rejected my session"
+        },
+        {
+          "role": "assistant",
+          "text": "espn_get_status says your cookies are stored but ESPN rejected them (credential.state: rejected) — this usually means espn_s2 expired. To fix it: 1. Log in at fantasy.espn.com in your browser. 2. Open DevTools → Application → Cookies → https://fantasy.espn.com. 3. Copy SWID (with the braces) and espn_s2 (exactly as shown, a few hundred characters). 4. In a terminal, run eff setup and paste them at its hidden prompts — never here in chat. Tell me when you have run eff setup, and I will check the session with one probe."
+        }
+      ],
+      "prompt": "done — I ran eff setup",
+      "expected_output": "On private-league the user has run eff setup after the steps: the reply calls espn_check_auth exactly once, before any other ESPN tool; the probe (the league settings, which discriminate on a private league) accepts the new session — accepted true, reason null — and the reply says the session works, and never asks for a cookie value.",
+      "files": ["evals/fixtures/fx-10h/private-league"],
+      "expectations": [
+        "espn_check_auth was called exactly once, and no other ESPN tool ran before it (tool_used: min 1 max 1, first)",
+        "The reply says the probe accepted the new session, and never asks for a cookie value (llm)"
+      ]
     }
   ]
 }
