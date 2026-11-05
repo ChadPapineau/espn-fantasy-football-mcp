@@ -475,6 +475,38 @@ describe("where ΔP(win) decides a coin flip (R7-1)", () => {
     expect(out.swaps.find((s) => s.in === 16)?.coin_flip).toBe(false);
     expect(starts(out)).toContain(16);
   });
+
+  // changelog §R10, R10-34 (the follow-up verifier's F1): the flag, not the interval read alone,
+  // says what is a coin flip. A pair whose best case is 0 cannot gain, and no interval spans 0
+  // here, but against this week's opponent its win-chance move is under the threshold: coin_flip
+  it("a pair whose best case is 0 is a coin flip when ΔP(win) decides it, and not without an opponent", () => {
+    const players = roster({
+      5: {
+        points: {
+          mean: 1,
+          p10: 0,
+          p25: 0.3,
+          p50: 0.8,
+          p75: 1.5,
+          p90: 3,
+          p_zero: 0.2,
+          basis: "position_cv",
+        },
+      },
+      11: { injury_status: "OUT", points: dist(0) },
+    });
+    const pairOf = (o: ReturnType<typeof analyzeLineup>) =>
+      o.swaps.find((s) => s.out === 5 && s.in === 11);
+    const vsOpp = pairOf(analyzeLineup(request({ players, compare: [{ out: 5, in: 11 }] })));
+    expect(vsOpp?.interval[0]).toBeLessThan(0);
+    expect(vsOpp?.interval[1]).toBe(0);
+    expect(vsOpp?.coin_flip).toBe(true);
+    const alone = pairOf(
+      analyzeLineup(request({ players, compare: [{ out: 5, in: 11 }], opponent: null })),
+    );
+    expect(alone?.interval[1]).toBe(0);
+    expect(alone?.coin_flip).toBe(false);
+  });
 });
 
 describe("invariants over random rosters (R7-1)", () => {

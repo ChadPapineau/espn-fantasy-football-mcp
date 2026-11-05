@@ -118,13 +118,15 @@ export const GUARDRAIL_REJECTED =
 export const GUARDRAIL_REJECTED_ABSENT = "— and stop. If a cookie";
 /**
  * Guardrail 9's no-move rule, as every body carries it (changelog §R10, R10-34, which states the
- * reading of plan 09 §2's "a Δ interval including 0"): an interval that spans 0 is a coin flip; one
- * whose best case is 0 gains nothing and is held, never called a coin flip — as E2 reads it
- * (spansZero) and start-sit names it. The old "includes 0 … a coin flip" called SS-3's held swap
- * (`[−35.2, 0]`, `coin_flip: false`) a coin flip, against the tool.
+ * reading of plan 09 §2's "a Δ interval including 0"): an interval that spans 0 is a coin flip
+ * (spansZero), and otherwise the tool's flag decides — E2's `coin_flip`, which its ΔP(win) branch
+ * also sets whatever the interval, or trade's `fair` (`p10 ≤ 0 ≤ p90`). The old "includes 0 … a coin
+ * flip" called SS-3's swap (`[−35.2, 0]`, `coin_flip: false`) a coin flip, against the tool; the
+ * first R10-34 wording ("a best case of 0 is never a coin flip") then contradicted the ΔP(win)
+ * branch (`[−3, 0]`, `coin_flip: true`; the follow-up verifier's F1).
  */
 export const GUARDRAIL_NO_MOVE =
-  'A Δ whose interval spans 0 — below 0 at one end, above it at the other — is **"no move"**: a coin flip, said plainly; one whose best case is 0 gains nothing and is held too, never called a coin flip — say `coin_flip` as the tool gives it';
+  'A Δ whose interval spans 0 — below 0 at one end, above it at the other — is **"no move"**: a coin flip, said plainly. The tool\'s flag decides what is a coin flip, never the interval read alone: a change with `coin_flip: true` (E2 also sets it when the win-chance move is under its threshold, whatever the interval) or a trade verdict `fair` is one; a change with `coin_flip: false` is never called one, and one whose best case is 0 cannot gain';
 /** The superseded guardrail 9 (every interval that includes 0 read as a coin flip). */
 export const GUARDRAIL_NO_MOVE_ABSENT = "whose interval includes 0 is";
 /**

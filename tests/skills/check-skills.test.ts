@@ -1149,7 +1149,7 @@ describe("the body (plan 09 §2, §5.1 item 2)", () => {
       "utf8",
     );
     expect(template).toContain(
-      '- A Δ interval that spans 0 is "no move" — a coin flip — never a dramatised edge; one whose best case is 0 is "no move" too, as a change that gains nothing, never as a coin flip.',
+      '- A Δ interval that spans 0 is "no move" — a coin flip — never a dramatised edge. What is a coin flip is the tool\'s `coin_flip` (or trade\'s `fair`); a held change with `coin_flip: false` is "no move" as gaining nothing, never as a coin flip.',
     );
     expect(template).not.toMatch(/interval that includes 0/);
     for (const s of SKILLS) {
@@ -1157,6 +1157,14 @@ describe("the body (plan 09 §2, §5.1 item 2)", () => {
       expect(body, s).toContain(GUARDRAIL_NO_MOVE);
       expect(body, s).not.toMatch(/includes 0/);
     }
+    // the flag decides (the follow-up verifier's F1): weekly's one-line rule and trade's `fair`
+    expect(readFileSync(path.join(ROOT, "skills/weekly/SKILL.md"), "utf8")).toContain(
+      'a sub-decision with `coin_flip: true` is one line ("coin flip — no move"), and one held with `coin_flip: false` one line ("no move — it gains nothing").',
+    );
+    expect(readFileSync(path.join(ROOT, "skills/trade/SKILL.md"), "utf8")).toContain(
+      "`fair` when the `delta_me` interval spans 0 or reaches it at either end (`p10 ≤ 0 ≤ p90`;",
+    );
+    expect(GUARDRAIL_NO_MOVE).toContain("The tool's flag decides what is a coin flip");
     const t = fresh();
     t.edit(
       "skills/_shared/references/guardrails.md",
