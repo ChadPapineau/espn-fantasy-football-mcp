@@ -631,13 +631,28 @@ export const analyzeTradeTool = defineTool({
       return out;
     };
     const partnerId = args.offer?.partner_team_id ?? null;
+    // every rostered player's record (a crosswalk read, his value weeks) a player a step, the turn
+    // given up between two once the slice has spent its share (turnIfSpent): all teams' players
+    // mapped in one synchronous stretch (145 on fx-10h, ~3 store statements each) set trade's
+    // 22–24 ms run on the CPU on the Linux CI runner, past plan 03 §1.2's 20 ms batch (the round-4b
+    // review's F1; the latency suite's per-tool notice). The records are the same, in the same order
+    const playersOf = async (
+      entries: readonly { readonly player: PlatformPlayer; readonly slot_id: number }[],
+    ): Promise<TradePlayer[]> => {
+      const out: TradePlayer[] = [];
+      for (const e of entries) {
+        out.push(tradePlayerOf(ctx, e.player, e.slot_id, weeks, ros, b.w));
+        await turnIfSpent();
+      }
+      return out;
+    };
     const teamOfRoster = async (r: Roster, withReadings: boolean): Promise<TradeTeam> => {
       const sim = withReadings ? await readingsFor(r.team.team_id) : null;
       const readings = sim?.readings ?? null;
       return {
         team_id: r.team.team_id,
         name: r.team_name,
-        players: r.entries.map((e) => tradePlayerOf(ctx, e.player, e.slot_id, weeks, ros, b.w)),
+        players: await playersOf(r.entries),
         readings,
         alive_by_week: aliveOf(readings),
         ...(sim === null ? {} : { marginal_weeks: sim.weeks }),
@@ -659,7 +674,8 @@ export const analyzeTradeTool = defineTool({
     // not reach this week) — counted as a free add before, he made "give both my QBs for an RB" look
     // fair when the pool held no free-agent QB at all (Stage C finding trade-wire-fill-free-waivers)
     const wire = pool.filter((p) => p.status === "FREEAGENT").slice(0, TRADE_WIRE_MAX);
-    // the teams' players were mapped synchronously above: the loop runs before the engine
+    const freeAgents = await playersOf(wire.map((p) => ({ player: p, slot_id: 20 })));
+    // the loop runs before the engine
     await turn();
     const out = await analyzeTrade({
       roster: b.slots,
@@ -677,7 +693,7 @@ export const analyzeTradeTool = defineTool({
         mode: ctx.services.seedingMode,
         confirmed_at: ctx.services.seedingConfirmedAt,
       },
-      free_agents: wire.map((p) => tradePlayerOf(ctx, p, 20, weeks, ros, b.w)),
+      free_agents: freeAgents,
       clock: ctx.services.clock,
       pacer: ctx.pacer,
       rng: seededRng(seed),
