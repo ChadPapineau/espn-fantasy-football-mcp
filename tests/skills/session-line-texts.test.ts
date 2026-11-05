@@ -23,6 +23,7 @@ import {
   GUARDRAIL_REJECTED,
   ORIENT_SENTENCES,
   orientRoutingProblems,
+  TEMPLATE_PARTIAL_SESSION_LINE,
   RETRO_SESSION_SENTENCE,
   SESSION_LINE_FRAGMENTS,
   SKILL_RULES,
@@ -188,6 +189,45 @@ describe("an ESPN_AUTH_REJECTED that ends the procedure (changelog §R10, R10-7,
         )
         .includes(GUARDRAIL_REJECTED),
     ).toBe(false);
+  });
+});
+
+// the round-4d verifiers' R4DVF-3: the output contract still gave every tool's session line the
+// persisted history as its provenance, which is E11's alone
+describe("the output contract's session-refusal line agrees with the cheat-sheet (changelog §R10, R10-11, R10-12)", () => {
+  const did = "(for `espn_analyze_league_activity`, the server's persisted history)";
+  it("both say the result stands as what the tool did read, the persisted history E11's only", () => {
+    // the contract is in P0 bodies, so it names E11 by its section, never by the P1 tool's name
+    expect(TEMPLATE_PARTIAL_SESSION_LINE).toContain(
+      "the result stands as what the tool did read (for the League activity analysis, the server's persisted history)",
+    );
+    expect(TEMPLATE_PARTIAL_SESSION_LINE).not.toMatch(/\bespn_/);
+    expect(template).toContain(TEMPLATE_PARTIAL_SESSION_LINE);
+    const rule =
+      TOOL_OUTPUT_SHEET_PHRASES.find((p) =>
+        p.startsWith("A `partial:` line that names a session refusal"),
+      ) ?? "";
+    expect(rule).toContain(`give the result as what it did read ${did}`);
+    expect(sheet).toContain(rule);
+  });
+  it("no Skill text says a session line's result is what the persisted history shows", () => {
+    const files = [
+      "skills/_shared/references/output-template.md",
+      "skills/_shared/references/tool-outputs.md",
+      "skills/_shared/references/orient.md",
+      ...Object.keys(SKILL_RULES).map((k) => `skills/${k}/SKILL.md`),
+    ];
+    for (const f of files) {
+      const text = read(f);
+      expect(text, f).not.toContain("persisted history shows");
+      // the persisted history is named only for E11: its row, weekly's E11 paragraph, or the
+      // parenthesis that scopes it
+      for (const line of text.split("\n").filter((l) => l.includes("persisted history")))
+        expect(
+          line.includes("espn_analyze_league_activity") || line.includes("League activity"),
+          `${f}: ${line.slice(0, 80)}`,
+        ).toBe(true);
+    }
   });
 });
 

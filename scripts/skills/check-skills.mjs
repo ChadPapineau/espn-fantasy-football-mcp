@@ -573,11 +573,13 @@ export const VOCABULARY_SEEDING_RULE =
 
 /**
  * The output contract's partial rule names its one exception (changelog §R10, R10-11; the round-4
- * verifiers' F1): a session-refusal line, which no repeat call reads, stands as the persisted
- * history's answer — never "only after the one repeat call".
+ * verifiers' F1): a session-refusal line, which no repeat call reads, stands as what the tool did
+ * read — never "only after the one repeat call". The persisted history is E11's alone (the round-4d
+ * verifiers' R4DVF-3: the contract gave every tool's session line that provenance, against the
+ * cheat-sheet's partial rule and orient's sessionLinePartial).
  */
 export const TEMPLATE_PARTIAL_SESSION_LINE =
-  "A `partial:` line that names a session refusal and ends in `eff setup` is the exception: no repeat call reads it, so the result stands as what the server's persisted history shows, said with that line (changelog §R10, R10-11).";
+  "A `partial:` line that names a session refusal and ends in `eff setup` is the exception: no repeat call reads it, so the result stands as what the tool did read (for the League activity analysis, the server's persisted history), said with that line (changelog §R10, R10-11, R10-12).";
 /**
  * The output contract's injection-flag line (round 2's triage, IC-INJ): every body carrying the
  * template repeats every flag of the session's reads, Step 0's included.
