@@ -37,22 +37,24 @@ updates:
       timezone: "Etc/UTC"
     versioning-strategy: "increase"
     open-pull-requests-limit: 5
-    # Majors declined on review (2026-11-04, Dependabot PRs 4 and 5; docs/plan/changelog.md "Reviews"
-    # rows of that date). Minor and patch updates of both still come in the group below.
+    # Majors declined on review (2026-11-04, Dependabot PRs 4 and 5; docs/plan/changelog.md
+    # "Reviews", the two "Declined" rows of that date). Minor and patch updates of both still come
+    # in the group below.
     ignore:
-      # @types/node follows the RUNTIME's major (engines ">=24.15", .nvmrc on Node 24), not the newest
-      # Node: the 26.x types let tsc accept calls Node 24 lacks (v8.startHeapProfile(),
+      # @types/node follows the RUNTIME's major (engines ">=24.15", .nvmrc on Node 24), not the
+      # newest Node: the 26.x types let tsc accept calls Node 24 lacks (v8.startHeapProfile(),
       # diagnostics_channel.boundedChannel(), process.addUncaughtExceptionCaptureCallback() are
-      # undefined on 24.21.0). Re-check when .nvmrc and engines move to the next even line: raise the
-      # types major with them (tests/lint/dependency-review.test.ts holds the two majors equal).
+      # undefined on 24.21.0). Re-check when .nvmrc and engines move to the next even line: raise
+      # the types major with them (tests/lint/dependency-review.test.ts holds the two majors equal).
       - dependency-name: "@types/node"
         update-types: ["version-update:semver-major"]
       # typescript 7 (the native compiler) is outside typescript-eslint's supported range (8.72.1
-      # peers typescript ">=4.8.4 <6.1.0"), so lint would run on an unsupported major. Re-check when a
-      # typescript-eslint release lists 7.x in its peerDependencies: then evaluate 7.x again (tsc,
-      # lint, build, the suites, tsx and vitest).
+      # peers typescript ">=4.8.4 <6.1.0" and refuses 7.0 when it loads), so the lint gate cannot
+      # run on it. Only the declined major is ignored: a later one is proposed and evaluated again.
+      # Re-check when a typescript-eslint release lists 7.x in its peerDependencies: then drop this
+      # rule and evaluate 7.x again (tsc, lint, build, the suites, tsx and vitest).
       - dependency-name: "typescript"
-        update-types: ["version-update:semver-major"]
+        versions: ["7.x"]
     groups:
       npm-minor-and-patch:
         patterns: ["*"]

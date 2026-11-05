@@ -11,9 +11,15 @@
 // 2. The installed zod has the fix GHSA-mrhx-c7xc-m3w5 names, on this server's own input schemas:
 //    an over-long id list is refused on its size alone (zod ≤ 4.6.5 parsed every element first and
 //    kept an issue per failing one — 100,001 issues for the list below).
-// 3. The changelog's "Reviews" table reviews every dependency it names at the version the lockfile
-//    pins, with a passing verdict — so a bump without its review row fails — and it names the SDK
-//    (server, core and the dev client, one version) and zod as well as the keyring.
+// 3. The changelog's "Reviews" table — one GitHub table, its rows contiguous after its header (a blank
+//    line ends a table, and rows after it render as a paragraph) — reviews every dependency it names
+//    at the version the lockfile pins, with a passing verdict — so a bump without its review row
+//    fails — and it names the SDK (server, core and the dev client, one version) and zod as well as
+//    the keyring. A "Declined" row records a version evaluated and not taken: the lockfile may pin
+//    it only once a passing row reviews it.
+// 4. The majors declined on 2026-11-04 (Dependabot PRs 4 and 5) stay declined until their re-check
+//    trigger: .github/dependabot.yml ignores @types/node's semver-major updates (its major is held to
+//    the runtime's) and typescript's declined major only (a later major is proposed again).
 import { readFileSync } from "node:fs";
 import path from "node:path";
 import { describe, expect, it } from "vitest";
@@ -221,19 +227,39 @@ interface ReviewRow {
   deps: { name: string; version: string }[];
   verdict: string;
   evidence: string;
+  /** The open-item cell (for a Declined row, its re-check trigger). */
+  open: string;
+  /** A version evaluated and not taken (verdict `**Declined…`). */
+  declined: boolean;
 }
 
 const DEP_TOKEN = /`((?:@[a-z0-9][\w.-]*\/)?[a-z0-9][\w.-]*)@(\d+\.\d+\.\d+(?:-[\w.]+)?)`/gi;
 
-/** The rows of the `## Reviews` table (header and separator dropped); throws when it is missing. */
+const REVIEWS_HEADER = ["date", "dependency", "verdict", "evidence", "open item"];
+
+/**
+ * The rows of the `## Reviews` table (header and separator dropped). Throws when the section or its
+ * header is missing, when a row comes before the header or its separator, and when a `|` line
+ * follows the table's end: a GitHub table ends at its first non-table line, so a row after a blank
+ * line renders as a paragraph, not as a row (2026-11-04 dependency-review finding RG-1).
+ */
 function reviewRows(changelog: string): ReviewRow[] {
   const lines = changelog.split(/\r?\n/);
   const start = lines.findIndex((l) => /^## Reviews\b/.test(l));
   if (start === -1) throw new Error("docs/plan/changelog.md has no `## Reviews` section");
   const rows: ReviewRow[] = [];
+  let seen = 0; // table lines read: the header, the separator, then the rows
+  let ended = false;
   for (const line of lines.slice(start + 1)) {
     if (/^#{1,2} /.test(line)) break;
-    if (!line.startsWith("|")) continue;
+    if (!line.startsWith("|")) {
+      if (seen > 0) ended = true;
+      continue;
+    }
+    if (ended)
+      throw new Error(
+        `a Reviews row after the table ended (a blank or text line splits it): ${line.slice(0, 80)}`,
+      );
     // cells split on unescaped pipes (a cell may quote a regex with `\|`)
     const cells = line
       .split(/(?<!\\)\|/)
@@ -241,19 +267,78 @@ function reviewRows(changelog: string): ReviewRow[] {
       .map((c) => c.trim());
     if (cells.length !== 5)
       throw new Error(`a Reviews row without five cells: ${line.slice(0, 80)}`);
-    const [date = "", dependency = "", verdict = "", evidence = ""] = cells;
-    if (date === "date" || /^-+$/.test(date)) continue;
+    seen++;
+    if (seen === 1) {
+      if (cells.join("|") !== REVIEWS_HEADER.join("|"))
+        throw new Error(`the Reviews table does not start with its header: ${line.slice(0, 80)}`);
+      continue;
+    }
+    if (seen === 2) {
+      if (!cells.every((c) => /^:?-+:?$/.test(c)))
+        throw new Error(
+          `the Reviews header is not followed by its separator: ${line.slice(0, 80)}`,
+        );
+      continue;
+    }
+    const [date = "", dependency = "", verdict = "", evidence = "", open = ""] = cells;
     const deps = [...dependency.matchAll(DEP_TOKEN)].map((m) => ({
       name: m[1] ?? "",
       version: m[2] ?? "",
     }));
-    rows.push({ date, dependency, deps, verdict, evidence });
+    rows.push({
+      date,
+      dependency,
+      deps,
+      verdict,
+      evidence,
+      open,
+      declined: /^\*\*Declined\b/.test(verdict),
+    });
   }
+  if (seen < 2) throw new Error("the Reviews section has no table (header and separator)");
   return rows;
 }
 
+describe("reviewRows reads the Reviews table as GitHub renders it", () => {
+  const HEAD =
+    "## Reviews\n\n| date | dependency | verdict | evidence | open item |\n|---|---|---|---|---|";
+  const row = (d: string, v = "**Safe — pin exact**") => `| ${d} | \`x@1.0.0\` | ${v} | e | — |`;
+
+  it("reads contiguous rows, up to the next section", () => {
+    const rows = reviewRows(
+      `${HEAD}\n${row("2026-01-01")}\n${row("2026-01-02", "**Declined — no**")}\n\n## Next\n| a | b | c | d | e |`,
+    );
+    expect(rows.map((r) => [r.date, r.declined])).toEqual([
+      ["2026-01-01", false],
+      ["2026-01-02", true],
+    ]);
+  });
+
+  it("throws on a row after a blank line (it would render as a paragraph)", () => {
+    expect(() => reviewRows(`${HEAD}\n${row("2026-01-01")}\n\n${row("2026-01-02")}`)).toThrow(
+      /after the table ended/,
+    );
+    expect(() => reviewRows(`${HEAD}\n${row("2026-01-01")}\nprose\n${row("2026-01-02")}`)).toThrow(
+      /after the table ended/,
+    );
+  });
+
+  it("throws on a table without its header or separator, and on a section without a table", () => {
+    expect(() => reviewRows(`## Reviews\n\n${row("2026-01-01")}`)).toThrow(/header/);
+    expect(() =>
+      reviewRows(
+        `## Reviews\n\n| date | dependency | verdict | evidence | open item |\n${row("2026-01-01")}`,
+      ),
+    ).toThrow(/separator/);
+    expect(() => reviewRows("## Reviews\n\nnone yet\n")).toThrow(/no table/);
+    expect(() => reviewRows("## Other\n")).toThrow(/no `## Reviews` section/);
+  });
+});
+
 describe("the changelog's Reviews table (plan 02 §7.2: re-run on every version bump)", () => {
-  const rows = reviewRows(read("docs/plan/changelog.md"));
+  const all = reviewRows(read("docs/plan/changelog.md"));
+  const rows = all.filter((r) => !r.declined);
+  const declined = all.filter((r) => r.declined);
   const named = [...new Set(rows.flatMap((r) => r.deps.map((d) => d.name)))].sort();
   const SDK = [
     "@modelcontextprotocol/server",
@@ -263,7 +348,7 @@ describe("the changelog's Reviews table (plan 02 §7.2: re-run on every version 
 
   it("every row names at least one exact `name@version` and is dated", () => {
     expect(rows.length).toBeGreaterThan(0);
-    for (const r of rows) {
+    for (const r of all) {
       expect(r.deps.length, r.date).toBeGreaterThan(0);
       expect(r.date).toMatch(/^\d{4}-\d{2}-\d{2}$/);
       expect(r.evidence.length, r.date).toBeGreaterThan(0);
@@ -302,6 +387,24 @@ describe("the changelog's Reviews table (plan 02 §7.2: re-run on every version 
     }
   });
 
+  it("a Declined row names its re-check trigger, and its version is pinned only once a passing row reviews it", () => {
+    for (const r of declined) {
+      expect(r.open, r.date).not.toMatch(/^(—|-|)$/);
+      for (const d of r.deps) {
+        if (lock.packages[`node_modules/${d.name}`]?.version !== d.version) continue;
+        const reviewed = rows.some((x) =>
+          x.deps.some((y) => y.name === d.name && y.version === d.version),
+        );
+        expect(reviewed, `${d.name}@${d.version} is pinned but was declined`).toBe(true);
+      }
+    }
+  });
+
+  it("records the two majors declined on 2026-11-04 (Dependabot PRs 4 and 5)", () => {
+    const ids = declined.flatMap((r) => r.deps.map((d) => `${d.name}@${d.version}`));
+    expect(ids).toEqual(expect.arrayContaining(["@types/node@26.6.5", "typescript@7.0.2"]));
+  });
+
   it("reviews the SDK's three packages together, at the server's pin", () => {
     const pin = pkg.dependencies?.["@modelcontextprotocol/server"];
     const row = rows.find((r) =>
@@ -317,16 +420,41 @@ describe("the declined majors stay declined until their re-check trigger (.githu
   const dependabot = read(".github/dependabot.yml");
   const major = (v: string | undefined): number => Number(/^v?(\d+)\./.exec(v ?? "")?.[1]);
 
-  it("ignores the semver-major updates of @types/node and typescript in the npm ecosystem", () => {
-    const npm = dependabot.slice(dependabot.indexOf('package-ecosystem: "npm"'));
+  const npm = dependabot.slice(dependabot.indexOf('package-ecosystem: "npm"'));
+  /** The ignore rule for `name` in the npm ecosystem: its dependency-name line and the lines under it. */
+  const rule = (name: string): string => {
+    const at = npm.indexOf(`- dependency-name: "${name}"\n`);
+    if (at === -1) return "";
+    const lines = npm.slice(at).split("\n");
+    const body = lines
+      .slice(1)
+      .filter((_, i, a) => a.slice(0, i + 1).every((l) => /^ {8}\S/.test(l)));
+    return [lines[0], ...body].join("\n");
+  };
+  const declinedMajor = (name: string): number => {
+    const rows = reviewRows(read("docs/plan/changelog.md")).filter((r) => r.declined);
+    const v = rows.flatMap((r) => r.deps).find((d) => d.name === name)?.version;
+    return major(v);
+  };
+
+  it("ignores every semver-major update of @types/node (its major is held to the runtime's below)", () => {
     expect(npm.length).toBeLessThan(dependabot.length);
-    for (const name of ["@types/node", "typescript"]) {
-      expect(npm, name).toMatch(
-        new RegExp(
-          `- dependency-name: "${name.replace("/", "\\/")}"\\n {8}update-types: \\["version-update:semver-major"\\]`,
-        ),
-      );
-    }
+    expect(rule("@types/node")).toBe(
+      '- dependency-name: "@types/node"\n        update-types: ["version-update:semver-major"]',
+    );
+  });
+
+  it("ignores only typescript's declined major, so a later major is proposed and evaluated again", () => {
+    const m = declinedMajor("typescript");
+    expect(m).toBe(7);
+    expect(rule("typescript")).toBe(
+      `- dependency-name: "typescript"\n        versions: ["${String(m)}.x"]`,
+    );
+    expect(major(pkg.devDependencies?.typescript)).toBeLessThan(m);
+  });
+
+  it("@types/node's declined major is above the runtime's", () => {
+    expect(declinedMajor("@types/node")).toBeGreaterThan(major(read(".nvmrc").trim()));
   });
 
   it("@types/node's major is the runtime's (.nvmrc), so tsc never accepts an API Node lacks", () => {
