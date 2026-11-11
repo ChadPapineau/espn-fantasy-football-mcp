@@ -63,14 +63,18 @@ import { redactString, SecretRegistry, type Logger } from "./log.js";
 import { privatizeNewFile, resolveBackupDestination } from "./maintenance.js";
 import {
   cookieFindings,
+  escapeControls,
+  filedWhere,
   gitWorkTreeAt,
-  removeCommand,
+  realPathOnceMade,
+  removalOf,
   shellWord,
   samePath,
   scanClientConfig,
   scanPlugin,
   whereOf,
   type ClientConfigScan,
+  type ClientEntry,
   type PluginInstall,
 } from "./client-config.js";
 import {
@@ -342,19 +346,40 @@ function pluginWhere(plugin: PluginInstall): string {
  * How to remove a local-scope entry recorded for a path that is not a directory a session can run
  * in (gone, or no directory): `mkdir -p` and `claude mcp remove` there only when no git work tree is
  * at or above it (`gitWorkTreeAt`: Claude Code 2.1.308 files a session under the work tree, so the
- * command would act on that record — V3-3), else `claude purge` while nothing is at the path (with
- * something there, purge also acts on the work tree's record).
+ * command would act on that record — V3-3) and the path, once made, is its own real path (that
+ * client keys a session by the real path of its working directory: D-7), else `claude purge` while
+ * nothing is at the path (with something there, purge also acts on the other record). A key or
+ * directory holding a terminal control gets the hand edit, never a command (D-8).
  */
-function goneRemoval(who: string, dir: string, notDirectory: boolean, remove: string): string {
+function goneRemoval(who: string, e: ClientEntry, dir: string, notDirectory: boolean): string {
+  const what = notDirectory ? "is not a directory" : "does not exist";
+  const r = removalOf(e);
+  if ("byHand" in r)
+    return `${who}: recorded for ${dir}, which ${what}, so never started — to remove it: ${r.byHand}`;
   const d = shellWord(dir);
   const tree = gitWorkTreeAt(dir);
-  if (!notDirectory)
-    return tree === null
-      ? `${who}: recorded for ${dir}, which does not exist, so never started — to remove it: mkdir -p ${d} && ${remove} (or claude purge ${d}, which deletes all of Claude Code's state for that directory)`
-      : `${who}: recorded for ${dir}, which does not exist, so never started — to remove it: claude purge ${d} while ${dir} does not exist (it deletes all of Claude Code's state for that directory); never make ${dir} first: Claude Code files a session there under the git work tree at ${tree}, so \`claude mcp remove\` there, or \`claude purge\` once it exists, acts on ${tree}'s record`;
-  return tree === null
-    ? `${who}: recorded for ${dir}, which is not a directory, so never started — to remove it: claude purge ${d} (it deletes all of Claude Code's state for that path; \`claude mcp remove\` cannot run there)`
-    : `${who}: recorded for ${dir}, which is not a directory, so never started — to remove it: move ${dir} aside, then claude purge ${d} while nothing is there, then move it back; with ${dir} there, claude purge also acts on the record of the git work tree at ${tree}`;
+  const real = tree === null ? realPathOnceMade(dir) : null;
+  /** The other record a command there would act on, as said, or null: the path's own. */
+  const other =
+    tree !== null
+      ? { at: tree, said: `the git work tree at ${tree}` }
+      : real === dir
+        ? null
+        : real === null
+          ? { at: null, said: null }
+          : { at: real, said: `its real path ${real}` };
+  if (!notDirectory) {
+    if (other === null)
+      return `${who}: recorded for ${dir}, which does not exist, so never started — to remove it: mkdir -p ${d} && ${r.command} (or claude purge ${d}, which deletes all of Claude Code's state for that directory)`;
+    const why =
+      other.at === null
+        ? "uninstall cannot tell which record Claude Code would file a session there under, so `claude mcp remove` there, or `claude purge` once it exists, may act on another record"
+        : `Claude Code files a session there under ${other.said}, so \`claude mcp remove\` there, or \`claude purge\` once it exists, acts on ${other.at}'s record`;
+    return `${who}: recorded for ${dir}, which does not exist, so never started — to remove it: claude purge ${d} while ${dir} does not exist (it deletes all of Claude Code's state for that directory); never make ${dir} first: ${why}`;
+  }
+  if (other === null)
+    return `${who}: recorded for ${dir}, which is not a directory, so never started — to remove it: claude purge ${d} (it deletes all of Claude Code's state for that path; \`claude mcp remove\` cannot run there)`;
+  return `${who}: recorded for ${dir}, which is not a directory, so never started — to remove it: move ${dir} aside, then claude purge ${d} while nothing is there, then move it back; with ${dir} there, claude purge ${other.said === null ? "may also act on another record" : `also acts on the record of ${other.said}`}`;
 }
 
 const COOKIE_NOTE =
@@ -386,9 +411,12 @@ export function manualSteps(
   copiedSkills: readonly string[] = [],
   found: FoundRegistrations = { scans: [], plugin: null },
 ): string[] {
-  // every line passes the log redaction patterns (verifier R-P1: defence in depth — no word holding
-  // more than a path is printed in the first place)
-  return stepLines(home, copiedSkills, found).map((l) => redactString(l, new SecretRegistry()));
+  // every line shows its terminal controls escaped (D-8: what a client config, settings file or
+  // registry holds is shown, never acted on) and passes the log redaction patterns (verifier R-P1:
+  // defence in depth — no word holding more than a path is printed in the first place)
+  return stepLines(home, copiedSkills, found).map((l) =>
+    redactString(escapeControls(l), new SecretRegistry()),
+  );
 }
 
 function stepLines(
@@ -454,14 +482,21 @@ function stepLines(
     // session there, so the directory is made first (F2) — unless Claude Code 2.1.308 would file
     // that session under a git work tree above it, whose record the command would then change
     // (V3-3); `claude purge` touches only the path's own record while nothing is there, and also
-    // the work tree's once it exists. A path that is no directory gets no `mkdir -p` (V3-5).
+    // the work tree's once it exists. A path that is no directory gets no `mkdir -p` (V3-5). One of
+    // a directory that exists but is filed under another key never starts, and its removal is the
+    // hand edit of its own record — `claude mcp remove` there, or `claude purge` of it, would act
+    // on the other (D-7); so is one whose key doctor cannot tell, or holding a control (D-8).
+    const r = removalOf(e);
+    const removal = "command" in r ? r.command : r.byHand;
     const gone = e.absent && e.scope === "local" ? e.dir : null;
     out.push(
-      gone !== null
-        ? goneRemoval(who, gone, e.notDirectory === true, removeCommand(e))
-        : e.declined
-          ? `${who}, declined in Claude Code's settings (${e.declinedBy.join(" or ")}), so never started — removing it is optional: ${removeCommand(e)}`
-          : `${who}: ${removeCommand(e)}`,
+      e.filedUnder !== undefined
+        ? `${who}: recorded for ${e.dir ?? "?"}, which Claude Code 2.1.308 files under ${filedWhere(e.filedUnder)}, so never started — removing it is optional: ${removal}`
+        : gone !== null
+          ? goneRemoval(who, e, gone, e.notDirectory === true)
+          : e.declined
+            ? `${who}, declined in Claude Code's settings (${e.declinedBy.join(" or ")}), so never started — removing it is optional: ${removal}`
+            : `${who}: ${removal}`,
     );
     if (cookieIn(e)) out.push(`  ${COOKIE_NOTE}`);
   }

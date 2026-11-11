@@ -10,7 +10,7 @@ import { existsSync } from "node:fs";
 import path from "node:path";
 import { assertNotSynced, fileProviderMarks, PathSecurityError } from "../config/paths.js";
 import type { ConfigKey, LenientConfig } from "../config/schema.js";
-import { pluginLoads, scanPlugin } from "./client-config.js";
+import { escapeControls, pluginLoads, scanPlugin } from "./client-config.js";
 import { EXIT, UsageError } from "./exit.js";
 import { distEntry, write, writeLine, type CliIo } from "./io.js";
 
@@ -218,7 +218,10 @@ export function runtimeLocationWarning(problems: readonly string[]): string[] {
   ];
 }
 
-/** `eff print-config`: the snippet on stdout; where to paste it and any warning on stderr. */
+/**
+ * `eff print-config`: the snippet on stdout; where to paste it and any warning on stderr — each
+ * warning with its terminal controls escaped (ruling D-8: a path is shown, never acted on).
+ */
 export async function printConfig(
   io: CliIo,
   config: LenientConfig,
@@ -226,12 +229,13 @@ export async function printConfig(
 ): Promise<number> {
   if (client === undefined || !(CLIENTS as readonly string[]).includes(client))
     throw new UsageError("print-config needs --client desktop or --client code");
+  const warn = (line: string): Promise<void> => writeLine(io.stderr, escapeControls(line));
   let spec: LaunchSpec;
   try {
     spec = launchSpec(io, config);
   } catch (e) {
     if (e instanceof MissingBuildError) {
-      await writeLine(io.stderr, `eff print-config: ${e.message} (expected ${e.entry})`);
+      await warn(`eff print-config: ${e.message} (expected ${e.entry})`);
       return EXIT.error;
     }
     throw e;
@@ -239,14 +243,12 @@ export async function printConfig(
   const text = client === "desktop" ? desktopSnippet(spec) : codeCommand(spec);
   await write(io.stdout, `${text}\n`);
   for (const l of runtimeLocationWarning(runtimeLocationProblems(io, spec.args[0] ?? "")))
-    await writeLine(io.stderr, l);
+    await warn(l);
   if (config.leagueId === null)
-    await writeLine(
-      io.stderr,
+    await warn(
       "eff print-config: ESPN_LEAGUE_ID is not set: add it to the env block above or to config.json before starting the server.",
     );
-  await writeLine(
-    io.stderr,
+  await warn(
     client === "desktop"
       ? `eff print-config: merge the mcpServers entry into ${desktopConfigPath(io.home)}, then restart Claude Desktop.`
       : "eff print-config: run the command above in a terminal (user scope, so nothing lands in a repository's .mcp.json).",
@@ -258,8 +260,7 @@ export async function printConfig(
   const plugin = client === "code" ? scanPlugin(io.home) : null;
   if (plugin?.enabled === true) {
     const loads = pluginLoads(plugin.origin);
-    await writeLine(
-      io.stderr,
+    await warn(
       loads === "yes"
         ? `eff print-config: warning: the ${PLUGIN_ID} plugin is installed and enabled — it registers this server in Claude Code already. Adding the entry above beside it starts two servers and lists every tool twice: use it only instead of the plugin (\`claude plugin uninstall ${PLUGIN_ID}\` first).`
         : loads === "unknown"

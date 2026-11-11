@@ -833,9 +833,9 @@ the owner's delegation:
   working directory). A session opened in a subdirectory of a recorded project also reads that
   subdirectory's `.mcp.json`; one opened in a linked worktree outside its main repository is filed
   under the main repository but reads the worktree's own `.mcp.json` chain (round-3 verifier F5,
-  filed here as the same limit; the orchestrator's confirmation is pending). Doctor reads each
-  recorded project directory and its ancestors only: it never scans subdirectories (a recorded
-  project may be the home directory) or worktrees.
+  confirmed as covered by this limit). Doctor reads each recorded project directory and its
+  ancestors only: it never scans subdirectories (a recorded project may be the home directory) or
+  worktrees.
 - **D-3 — the keep rule is greedy** (accepted). It never strips a session's only server, and where
   it cannot settle a view it names the choice as the user's; no global search.
 - **D-4 — optional source fields are not checked.** The optional fields of each marketplace source
@@ -846,3 +846,34 @@ the owner's delegation:
 - **D-6 — credential-shaped keys are pseudonymized** (accepted trade-off). A key or path holding a
   GUID or other credential-shaped text is pseudonymized by the output redaction, so a printed
   `claude mcp remove` for such a key may need the real key typed; classification is unchanged.
+- **D-7 — Claude Code's own key for a recorded project.** Claude Code 2.1.308 files a session, and
+  runs `claude mcp add|remove --scope local`, under the key its `t6e` gives the working directory:
+  the canonical git root of its real path (the nearest of it and its ancestors holding a `.git`
+  directory or file; a linked worktree's `.git` file leads through `gitdir` and `commondir` to its
+  main repository, or to the bare repository it belongs to; a submodule, or a `.git` file it cannot
+  follow, is its own root), or the real path itself outside git. A recorded `projects` key that is
+  not its own key (below a git work tree, in a linked worktree, or not its own real path) is
+  reached by no 2.1.308 session: it is no session view (a session opened there is D-2's limit), and
+  its local entries never start — said once in row 2, their env still scanned, never counted,
+  judged, called a duplicate or a FAIL. Neither doctor nor uninstall prints a command that would act
+  on another record for them (never `cd <dir> && claude mcp remove --scope local …`, never `claude
+  purge <dir>` while it exists): their optional removal is a hand edit of
+  `projects["<dir>"].mcpServers["<key>"]` in `~/.claude.json`, with every Claude Code session closed
+  and the file backed up first. Where doctor cannot tell the key (a `.git` that is a symbolic link or
+  that it cannot lstat, a pointer file it cannot read or past its bound, a pointer naming an odd
+  path or passing a symbolic link, a directory it cannot stat), the directory stays a session — a
+  broken entry there still fails — but its local entries are removed by hand, the detail saying why.
+  Project-scope removal (`cd <dir> && claude mcp remove --scope project …`) writes the working
+  directory's `.mcp.json` and stays. The gone-directory route keeps its V3-3 behaviour, and offers
+  `mkdir -p` only where the path, once made, would be its own real path. Known limit: where 2.1.308
+  keeps a linked worktree as its own root after a path-safety check of its own on a plain path,
+  doctor files it under the main repository (its entries are said as never started).
+- **D-8 — display safety.** Every path, key or name read from a client config, settings file or
+  registry and printed by doctor (text and `--json`), uninstall or print-config shows no terminal
+  control: the C0 controls, DEL, the C1 controls (U+0080–U+009F), the Unicode bidi controls (U+061C,
+  U+200E, U+200F, U+202A–U+202E, U+2066–U+2069) and U+2028/U+2029 are printed escaped (ESC as
+  `\u{1b}`) at each output's choke point (row 2's `redactedLine`, every doctor row, uninstall's
+  step lines, print-config's warnings). A command whose words hold one is never printed; the line
+  says that the entry's key or directory holds a control character and gives the hand edit of its
+  record instead. print-config's stdout snippet is built from this install's own paths and is
+  printed as it runs.

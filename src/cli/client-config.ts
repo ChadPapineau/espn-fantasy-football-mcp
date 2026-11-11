@@ -59,6 +59,15 @@
 // (V3-1: `uninstallStrips`) and where an entry is turned off (`offIn`); a project directory doctor
 // cannot stat stays a session, and one that is no directory is said as such (V3-5: `dirState`); a
 // gone directory's removal is never run under a git work tree's record (V3-3: `gitWorkTreeAt`).
+//
+// Refix round 5 (rulings D-7, D-8; verifier VR4): a recorded directory Claude Code 2.1.308 files
+// under another key — below a git work tree, in a linked worktree, or not its own real path — is no
+// session, and its local entries never start (`codeProjectKey`, the one key-mapping helper the
+// gone-directory route shares); where doctor cannot tell the key, the directory stays a session but
+// its entries are removed by hand (`removalOf`); every word read from a client config, settings
+// file or registry is printed with its terminal controls escaped, and a command whose words hold one
+// is never printed (`escapeControls`, `holdsControl`); and uninstalling the plugin's first steps are
+// planned with what they add (VR4-2, VR4-3).
 import { lstatSync, realpathSync, statSync } from "node:fs";
 import path from "node:path";
 import { PathSecurityError, readSecureFile } from "../config/paths.js";
@@ -119,6 +128,23 @@ export interface ClientEntry {
   readonly absent: boolean;
   /** An `absent` local entry whose recorded path is there but is no directory (V3-5). */
   readonly notDirectory?: true;
+  /**
+   * An `absent` local entry of a recorded directory that Claude Code 2.1.308 files under another key
+   * (`codeProjectKey`: below a git work tree, in a linked worktree, or not its own real path — D-7):
+   * no session of that client reads this record, so it never starts; and `claude mcp remove --scope
+   * local` there, or `claude purge` of it while it exists, acts on `at`'s record instead.
+   */
+  readonly filedUnder?: { readonly at: string; readonly how: FiledHow };
+  /**
+   * An `absent` project-scope entry: a recorded directory at or below it exists, but each is filed
+   * under another key (D-7) — a session opened there is doctor's known limit D-2.
+   */
+  readonly filedBelow?: true;
+  /**
+   * Why a local entry is removed by hand, never with `claude mcp remove`: doctor cannot tell which
+   * record Claude Code 2.1.308 files its directory under (D-7 (d)).
+   */
+  readonly byHand?: string;
 }
 
 /** A setting that declines a server in a project (`ClientEntry.declinedBy`). */
@@ -147,6 +173,12 @@ export interface SessionView {
    * gives `EPERM`): it is kept as a session, since Claude Code may still open it (V3-5).
    */
   readonly unchecked?: string;
+  /**
+   * Doctor cannot tell which key Claude Code 2.1.308 files a session here under (`codeProjectKey`
+   * `unknown`, or `unchecked`): it is kept as a session, so a broken entry here still fails, but its
+   * local entries are removed by hand, never with `claude mcp remove` (D-7 (d)).
+   */
+  readonly keyUnknown?: string;
 }
 
 /** One entry's env block, where it lives (secrecy is checked over ALL entries — plan 03 §5 #3). */
@@ -295,6 +327,29 @@ export type Launch =
        */
       readonly elsewhere: boolean;
     };
+
+/**
+ * The characters a terminal acts on rather than shows (ruling D-8): the C0 controls (ESC, CR, LF,
+ * TAB …), DEL, the C1 controls (U+0080–U+009F, CSI among them), the Unicode bidi controls (U+061C,
+ * U+200E, U+200F, U+202A–U+202E, U+2066–U+2069) and the line and paragraph separators.
+ */
+const TERMINAL_CONTROL_RE =
+  /[\u0000-\u001f\u007f-\u009f\u061c\u200e\u200f\u202a-\u202e\u2066-\u2069\u2028\u2029]/gu;
+
+/** Whether a word read from a file holds a terminal control (`escapeControls`). */
+export function holdsControl(s: string): boolean {
+  return s.search(TERMINAL_CONTROL_RE) >= 0;
+}
+
+/**
+ * A line as doctor, uninstall and print-config print it (D-8): every terminal control escaped as
+ * `\u{…}` (ESC is `\u{1b}`), so what a path, key or name read from a client config, settings file
+ * or registry holds is shown, never acted on — in text and in `--json` (JSON.stringify escapes the
+ * C0 controls but leaves the C1 and bidi ones raw). Idempotent.
+ */
+export function escapeControls(s: string): string {
+  return s.replace(TERMINAL_CONTROL_RE, (c) => `\\u{${(c.codePointAt(0) ?? 0).toString(16)}}`);
+}
 
 /** A path or word read from a file, for a detail line: control characters dropped, bounded. */
 function shown(s: string, max = 300): string {
@@ -617,28 +672,247 @@ function dirState(dir: string): "dir" | "missing" | "file" | { readonly code: st
 }
 
 /**
- * The git work tree Claude Code 2.1.308 files a session in `dir` under (its `t6e`: the nearest of
- * `dir` and its ancestors, the filesystem root included, holding a `.git` directory or file — read
- * with lstat, never followed), or null when none does: then Claude Code files the session under
- * `dir` itself. A `.git` doctor cannot lstat (a symbolic link Claude Code does not follow, a
- * permission error) is taken as one: what `claude mcp remove --scope local` acts on is then not
- * certainly `dir`'s record (V3-3).
+ * The nearest of `start` and its ancestors, the filesystem root included, holding a `.git` (Claude
+ * Code 2.1.308's `Zn`, lstat): `root` — a `.git` directory or regular file (`file`: a linked
+ * worktree, a submodule…); null — none up to the root (a `.git` of another kind, a socket or a FIFO,
+ * is no repository to that client either); `why` — doctor cannot tell at `at`: a `.git` that is a
+ * symbolic link (Claude Code follows one it judges safe; doctor does not), a `.git` it cannot lstat
+ * (EACCES; Claude Code takes any error as no repository and walks on), or a path deeper than doctor
+ * walks (`deep`).
  */
-export function gitWorkTreeAt(dir: string): string | null {
-  let at = path.resolve(dir);
+function gitRootWalk(
+  start: string,
+):
+  | { readonly root: string; readonly file: boolean }
+  | { readonly why: string; readonly at: string; readonly deep?: true }
+  | null {
+  let at = path.resolve(start);
   for (let hop = 0; hop <= MAX_ANCESTORS; hop++) {
+    const dotgit = path.join(at, ".git");
     try {
-      lstatSync(path.join(at, ".git"));
-      return at;
+      const st = lstatSync(dotgit);
+      if (st.isSymbolicLink())
+        return { why: `${dotgit} is a symbolic link, which doctor does not follow`, at };
+      if (st.isDirectory() || st.isFile()) return { root: at, file: st.isFile() };
     } catch (e) {
       const code = errorCode(e);
-      if (code !== "ENOENT" && code !== "ENOTDIR") return at;
+      if (code !== "ENOENT" && code !== "ENOTDIR")
+        return { why: `doctor cannot check ${dotgit} (${code ?? "not a path"})`, at };
     }
     const up = path.dirname(at);
     if (up === at) return null;
     at = up;
   }
+  return { why: "it lies deeper than doctor walks", at, deep: true };
+}
+
+/**
+ * The git work tree Claude Code 2.1.308 files a session in `dir` under (its `t6e`: the nearest of
+ * `dir` and its ancestors, the filesystem root included, holding a `.git` directory or file — read
+ * with lstat, never followed), or null when none does: then Claude Code files the session under
+ * `dir` itself. A `.git` doctor cannot lstat (a symbolic link Claude Code does not follow, a
+ * permission error) is taken as one: what `claude mcp remove --scope local` acts on is then not
+ * certainly `dir`'s record (V3-3). The lexical walk the gone-directory route keeps (V3-3);
+ * `codeProjectKey` is the full mapping of a directory that exists (D-7).
+ */
+export function gitWorkTreeAt(dir: string): string | null {
+  const w = gitRootWalk(dir);
+  if (w === null || "deep" in w) return null;
+  return "root" in w ? w.root : w.at;
+}
+
+/**
+ * What `realpath` gives for `dir` once `mkdir -p` makes it: the real path of its deepest existing
+ * ancestor with the rest appended, NFC (Claude Code 2.1.308 keys a session by the real path of its
+ * working directory) — or null when doctor cannot tell (an ancestor it cannot resolve).
+ */
+export function realPathOnceMade(dir: string): string | null {
+  let at = path.resolve(dir);
+  const rest: string[] = [];
+  for (let hop = 0; hop <= MAX_ANCESTORS; hop++) {
+    try {
+      return path.join(realpathSync.native(at), ...rest).normalize("NFC");
+    } catch (e) {
+      const code = errorCode(e);
+      if (code !== "ENOENT" && code !== "ENOTDIR") return null;
+    }
+    const up = path.dirname(at);
+    if (up === at) return null;
+    rest.unshift(path.basename(at));
+    at = up;
+  }
   return null;
+}
+
+/** Largest `.git`, `commondir` or `gitdir` file read when mapping a project key (a few hundred bytes). */
+export const MAX_GIT_POINTER_BYTES = 4096;
+
+/** How a recorded project directory is filed under another key (`CodeProjectKey`). */
+export type FiledHow = "work tree" | "main repository" | "bare repository" | "real path";
+
+/**
+ * The key Claude Code 2.1.308 files a session opened in a directory under, and so the
+ * `projects["<key>"]` record its local scope and `claude mcp add|remove --scope local` read and
+ * write (its `t6e`, observed in that client's binary, 2026-11-11 — ruling D-7): the working directory
+ * is first its real path (`realpathSync(cwd)`, NFC — the system's realpath, which on macOS also
+ * gives each name's case as stored: `realpathSync.native` here); its git root is the nearest of it
+ * and its ancestors holding a `.git` directory or file (`Zn`); the key is that root's canonical root (`St`/
+ * `Qn`: a `.git` file whose `gitdir:` leads to `<common>/worktrees/<name>`, whose `commondir` names
+ * the common directory and whose `gitdir` points back at this `.git`, is a linked worktree — filed
+ * under its main repository, or under the bare repository it belongs to; anything else, a submodule
+ * included, is its own root), or the real path itself outside git. `self`: the key is the recorded
+ * string itself, so the record is the directory's own; `other`: another key (`at`, and `how`) —
+ * no 2.1.308 session reaches the record; `unknown` (`why`): doctor cannot tell — a `.git` that is a
+ * symbolic link or that it cannot lstat, a pointer file it cannot read or past
+ * `MAX_GIT_POINTER_BYTES`, a pointer naming a path that holds a control character, a backslash or a
+ * `//` start, a pointer path through a symbolic link, or a path it cannot resolve. Where Claude Code
+ * keeps the worktree as its own root after a safety check of its own on a plain path, doctor files it
+ * under the main repository (known limit: such a directory's entries are said as never started).
+ */
+export type CodeProjectKey =
+  | { readonly kind: "self" }
+  | { readonly kind: "other"; readonly at: string; readonly how: FiledHow }
+  | { readonly kind: "unknown"; readonly why: string };
+
+/** A path a git pointer file names that doctor follows (Claude Code's `Ki`/`SS` refuse odder ones). */
+function plainPointer(p: string): boolean {
+  return (
+    p.length > 0 &&
+    p.length <= MAX_GIT_POINTER_BYTES &&
+    !holdsControl(p) &&
+    !p.includes("\\") &&
+    !p.startsWith("//")
+  );
+}
+
+/** A git pointer file's text (bounded, never through a symbolic link), or why it was not read. */
+function pointerText(file: string): { text: string } | { why: string } | null {
+  try {
+    const text = readSecureFile(file, {
+      requirePrivate: false,
+      maxBytes: MAX_GIT_POINTER_BYTES,
+      what: "git pointer",
+    });
+    return text === null ? null : { text };
+  } catch (e) {
+    if (e instanceof PathSecurityError)
+      switch (e.reason) {
+        case "symlink":
+          return { why: `${file} is a symbolic link` };
+        case "too_large":
+          return { why: `${file} is larger than ${String(MAX_GIT_POINTER_BYTES)} bytes` };
+        default:
+          return { why: `doctor cannot read ${file}` };
+      }
+    return { why: `doctor cannot read ${file}` };
+  }
+}
+
+/** What is at a path, by lstat: its kind, or the code of an error other than ENOENT/ENOTDIR. */
+function lkind(p: string): "absent" | "file" | "dir" | "symlink" | "other" | { code: string } {
+  try {
+    const st = lstatSync(p);
+    if (st.isSymbolicLink()) return "symlink";
+    return st.isFile() ? "file" : st.isDirectory() ? "dir" : "other";
+  } catch (e) {
+    const code = errorCode(e);
+    return code === "ENOENT" || code === "ENOTDIR" ? "absent" : { code: code ?? "not a path" };
+  }
+}
+
+/** A path's real path, or null when it does not resolve (ENOENT/ENOTDIR), or the error code. */
+function realOrNull(p: string): string | null | { code: string } {
+  try {
+    return realpathSync.native(p);
+  } catch (e) {
+    const code = errorCode(e);
+    return code === "ENOENT" || code === "ENOTDIR" ? null : { code: code ?? "not a path" };
+  }
+}
+
+/**
+ * The canonical root of git root `root` (Claude Code 2.1.308's `St`/`Qn`), as `CodeProjectKey`'s
+ * `at` and `how`, or why doctor cannot tell. Every refusal of that client's own returns the root.
+ */
+function canonicalRoot(
+  root: string,
+  dotGitIsFile: boolean,
+): { readonly at: string; readonly how: FiledHow } | { readonly why: string } {
+  const self = { at: root, how: "work tree" } as const;
+  // a `.git` directory: the root itself (St's read fails, EISDIR); a root holding a backslash is
+  // always its own (Qn's last refusal, which every other outcome but its own passes through)
+  if (!dotGitIsFile || root.includes("\\")) return self;
+  const dotgit = path.join(root, ".git");
+  const read = pointerText(dotgit);
+  if (read === null) return self;
+  if ("why" in read) return read;
+  const line = read.text.trim();
+  if (!line.startsWith("gitdir:")) return self;
+  const gitdir = line.slice(7).trim();
+  if (!plainPointer(gitdir)) return { why: `${dotgit} names a path doctor does not follow` };
+  const o = path.resolve(root, gitdir);
+  const commondir = path.join(o, "commondir");
+  const ck = lkind(commondir);
+  if (typeof ck === "object") return { why: `doctor cannot check ${commondir} (${ck.code})` };
+  // none (a submodule, a separate git directory), a link or anything but a file: the root itself
+  if (ck !== "file") return self;
+  const oReal = realOrNull(o);
+  if (typeof oReal === "object" && oReal !== null)
+    return { why: `doctor cannot resolve ${o} (${oReal.code})` };
+  if (oReal !== o)
+    return { why: `${o} passes through a symbolic link, which doctor does not follow` };
+  const cread = pointerText(commondir);
+  if (cread === null) return self;
+  if ("why" in cread) return cread;
+  const common = cread.text.trim();
+  if (!plainPointer(common)) return { why: `${commondir} names a path doctor does not follow` };
+  const c = path.resolve(o, common);
+  if (path.resolve(path.dirname(o)) !== path.join(c, "worktrees")) return self;
+  const back = path.join(o, "gitdir");
+  const bk = lkind(back);
+  if (typeof bk === "object") return { why: `doctor cannot check ${back} (${bk.code})` };
+  if (bk !== "file") return self;
+  const bread = pointerText(back);
+  if (bread === null) return self;
+  if ("why" in bread) return bread;
+  const pointer = bread.text.trim();
+  if (!plainPointer(pointer)) return { why: `${back} names a path doctor does not follow` };
+  const target = path.resolve(o, pointer);
+  const there = realOrNull(target);
+  if (typeof there === "object" && there !== null)
+    return { why: `doctor cannot resolve ${target} (${there.code})` };
+  const mine = realOrNull(root);
+  if (typeof mine === "object" && mine !== null)
+    return { why: `doctor cannot resolve ${root} (${mine.code})` };
+  if (there === null || mine === null || there !== path.join(mine, ".git")) return self;
+  if (path.basename(c) !== ".git") {
+    // a bare repository's worktree: the bare repository — unless it holds a `.git` of its own
+    const inner = lkind(path.join(c, ".git"));
+    if (typeof inner === "object")
+      return { why: `doctor cannot check ${path.join(c, ".git")} (${inner.code})` };
+    if (inner === "symlink")
+      return { why: `${path.join(c, ".git")} is a symbolic link, which doctor does not follow` };
+    if (inner === "file" || inner === "dir") return self;
+    return { at: c.normalize("NFC"), how: "bare repository" };
+  }
+  return { at: path.dirname(c).normalize("NFC"), how: "main repository" };
+}
+
+/** See `CodeProjectKey`: the key Claude Code 2.1.308 files a session opened in `dir` under. */
+export function codeProjectKey(dir: string): CodeProjectKey {
+  const unknown = (why: string): CodeProjectKey => ({ kind: "unknown", why });
+  const real = realOrNull(dir);
+  if (real === null) return unknown("doctor cannot resolve its real path (it does not exist)");
+  if (typeof real === "object")
+    return unknown(`doctor cannot resolve its real path (${real.code})`);
+  const cwd = real.normalize("NFC");
+  const walk = gitRootWalk(cwd);
+  if (walk !== null && "why" in walk) return unknown(walk.why);
+  const key =
+    walk === null ? { at: cwd, how: "real path" as const } : canonicalRoot(walk.root, walk.file);
+  if ("why" in key) return unknown(key.why);
+  const at = path.normalize(key.at.normalize("NFC"));
+  return at === dir ? { kind: "self" } : { kind: "other", at, how: key.how };
 }
 
 /**
@@ -759,8 +1033,10 @@ export function scanClientConfig(client: "desktop" | "code", file: string): Clie
     }
   // the session directories: the known projects only — Claude Code records every session's project
   // under `projects`, so a parent directory read only for the projects below it has had none (V-B);
-  // and only those that still exist — Claude Code never prunes a key, and no session starts in a
-  // missing directory (F2)
+  // only those that still exist — Claude Code never prunes a key, and no session starts in a
+  // missing directory (F2); and only those Claude Code 2.1.308 files a session under (D-7: a
+  // directory below a git work tree, in a linked worktree, or not its own real path is filed under
+  // another key, so no session reads its record)
   const userDeclined = declinedIn(path.join(path.dirname(file), ".claude", "settings.json"));
   const records = isObj(read.value) && isObj(read.value.projects) ? read.value.projects : {};
   const turnedOff = new Map<string, string[]>();
@@ -768,6 +1044,10 @@ export function scanClientConfig(client: "desktop" | "code", file: string): Clie
   const files = new Set<string>();
   /** A directory doctor cannot stat: a session all the same, said (V3-5). */
   const unchecked = new Map<string, string>();
+  /** A recorded key Claude Code 2.1.308 files under another key: no session (D-7). */
+  const filed = new Map<string, { readonly at: string; readonly how: FiledHow }>();
+  /** A session whose key doctor cannot tell: its local entries are removed by hand (D-7 (d)). */
+  const keyUnknown = new Map<string, string>();
   for (const key of known) {
     const state = dirState(key);
     const dir = path.resolve(key);
@@ -776,7 +1056,17 @@ export function scanClientConfig(client: "desktop" | "code", file: string): Clie
       files.add(dir);
       continue;
     }
-    if (state !== "dir") unchecked.set(dir, state.code);
+    if (state === "dir") {
+      const k = codeProjectKey(key);
+      if (k.kind === "other") {
+        filed.set(key, { at: k.at, how: k.how });
+        continue;
+      }
+      if (k.kind === "unknown") keyUnknown.set(dir, k.why);
+    } else {
+      unchecked.set(dir, state.code);
+      keyUnknown.set(dir, `doctor cannot check ${dir} (${state.code})`);
+    }
     const rec = records[key];
     turnedOff.set(dir, [
       ...(turnedOff.get(dir) ?? []),
@@ -785,6 +1075,7 @@ export function scanClientConfig(client: "desktop" | "code", file: string): Clie
   }
   const sessions: SessionView[] = [...turnedOff].map(([dir, off]) => {
     const code = unchecked.get(dir);
+    const unknownKey = keyUnknown.get(dir);
     return {
       dir,
       declined: [
@@ -796,31 +1087,42 @@ export function scanClientConfig(client: "desktop" | "code", file: string): Clie
       ],
       disabled: [...new Set(off)],
       ...(code === undefined ? {} : { unchecked: code }),
+      ...(unknownKey === undefined ? {} : { keyUnknown: unknownKey }),
     };
   });
   // an entry is declined when every session that would see it declines it or turns it off (a
   // local-scope one: its own project's session; a project-scope one: every session at or below
-  // its directory), and absent when no such session exists (F1, F2)
+  // its directory), and absent when no such session exists (F1, F2) — a local one of a directory
+  // filed under another key included (D-7)
   const marked = entries.map((e): ClientEntry => {
     if (e.dir === null || (e.scope !== "project" && e.scope !== "local")) return e;
     const top = path.resolve(e.dir);
+    const filedAs = e.scope === "local" ? filed.get(e.dir) : undefined;
+    if (filedAs !== undefined) return { ...e, absent: true, filedUnder: filedAs };
     const seeing = sessions.filter((v) =>
       e.scope === "local" ? v.dir === top : within(top, v.dir),
     );
     if (seeing.length === 0)
-      return e.scope === "local" && files.has(top)
-        ? { ...e, absent: true, notDirectory: true }
-        : { ...e, absent: true };
+      return e.scope === "local"
+        ? files.has(top)
+          ? { ...e, absent: true, notDirectory: true }
+          : { ...e, absent: true }
+        : [...filed.keys()].some((k) => within(top, path.resolve(k)))
+          ? { ...e, absent: true, filedBelow: true }
+          : { ...e, absent: true };
+    // its directory's key doctor cannot tell: still a session's, removed by hand (D-7 (d))
+    const byHand = e.scope === "local" ? keyUnknown.get(top) : undefined;
+    const kept = byHand === undefined ? e : { ...e, byHand };
     const by = new Set<DeclineSetting>();
     for (const v of seeing) {
       if (e.scope === "project" && v.declined.includes(e.name)) by.add("disabledMcpjsonServers");
       else if (v.disabled.includes(e.name)) by.add("disabledMcpServers");
-      else return e;
+      else return kept;
     }
     const declinedBy = (["disabledMcpjsonServers", "disabledMcpServers"] as const).filter((k) =>
       by.has(k),
     );
-    return { ...e, declined: true, declinedBy };
+    return { ...kept, declined: true, declinedBy };
   });
   return {
     client,
@@ -881,6 +1183,67 @@ export function removeCommand(e: Pick<ClientEntry, "scope" | "dir" | "name">): s
   return `cd ${q(e.dir ?? ".")} && claude mcp remove --scope ${scope} ${q(e.name)}`;
 }
 
+/** Where a recorded directory is filed instead (`ClientEntry.filedUnder`), as a line says it. */
+export function filedWhere(f: { readonly at: string; readonly how: FiledHow }): string {
+  switch (f.how) {
+    case "work tree":
+      return `the git work tree at ${f.at}`;
+    case "main repository":
+      return `the main repository at ${f.at} of the linked worktree it is in`;
+    case "bare repository":
+      return `the bare repository at ${f.at} of the linked worktree it is in`;
+    case "real path":
+      return `its real path ${f.at}`;
+  }
+}
+
+/** Why a registration's `claude mcp remove` is not printed (`removalOf`), or null when it is. */
+function byHandWhy(
+  e: Pick<ClientEntry, "scope" | "dir" | "name" | "filedUnder" | "byHand">,
+): string | null {
+  const key = holdsControl(e.name);
+  const dir = e.dir !== null && e.scope !== "user" && holdsControl(e.dir);
+  if (key || dir)
+    return `its ${key && dir ? "key and directory hold" : key ? "key holds" : "directory holds"} a control character, which no command shows as it runs`;
+  if (e.scope !== "local") return null;
+  if (e.filedUnder !== undefined)
+    return `\`claude mcp remove\` there, or \`claude purge\` of it while it exists, acts on the record of ${e.filedUnder.at}`;
+  if (e.byHand !== undefined)
+    return `doctor cannot tell which record \`claude mcp remove\` there acts on: ${e.byHand}`;
+  return null;
+}
+
+/**
+ * How one registration is removed, as a fix line or uninstall step says it: its exact `claude mcp
+ * remove` (`removeCommand`) — or, where that command would act on another record or show otherwise
+ * than it runs, the hand edit of its own record, with every Claude Code session closed and the file
+ * backed up first (D-7: a directory Claude Code 2.1.308 files under another key, or whose key doctor
+ * cannot tell; D-8: a key or directory holding a terminal control). The hand edit names exactly the
+ * record it changes (`projects["<dir>"].mcpServers["<key>"]`, or the key in `.mcp.json`).
+ */
+export function removalOf(
+  e: Pick<ClientEntry, "scope" | "dir" | "name" | "file" | "filedUnder" | "byHand">,
+): { readonly command: string } | { readonly byHand: string } {
+  const why = byHandWhy(e);
+  if (why === null) return { command: removeCommand(e) };
+  const q = (s: string): string => JSON.stringify(s);
+  const closed = "with every Claude Code session closed and the file backed up first";
+  switch (e.scope) {
+    case "user":
+      return {
+        byHand: `delete mcpServers[${q(e.name)}] from ${e.file} by hand, ${closed} (${why})`,
+      };
+    case "project":
+      return {
+        byHand: `delete mcpServers[${q(e.name)}] from ${path.join(e.dir ?? ".", ".mcp.json")} by hand, the file backed up first (${why})`,
+      };
+    default:
+      return {
+        byHand: `delete projects[${q(e.dir ?? "?")}].mcpServers[${q(e.name)}] from ${e.file} by hand, ${closed} (${why})`,
+      };
+  }
+}
+
 /** A view the keep rule cannot settle: which entry to keep there is the user's. */
 export interface UnresolvedView {
   /** The session directory, or null: a session outside every project Claude Code records. */
@@ -929,9 +1292,15 @@ export interface PluginBeside {
  * removal strips a view that turned the plugin off (F1), the plugin's views settled first; a removed
  * entry running its command line gives the plugin back; and `uninstallStrips`: the views where the
  * plugin is started and the plan without it leaves no entry — uninstalling the plugin would leave
- * them with no server (V3-1), each with the keys turned off there that `/mcp enable` brings back.
- * `offIn`: each entry that reaches a session where `/mcp disable` turned it off, and those sessions
- * (V3-1: said, the way the plugin's off state is). The greedy rule is accepted as such (D-3).
+ * them with no server (V3-1), each with the keys turned off there that `/mcp enable` brings back
+ * (where the sessions outside the projects are stripped, the fix adds this server at user scope, so
+ * a stripped project that turned `espn-fantasy-football` off turns it back on too: VR4-2); and
+ * `uninstallExtra`/`uninstallUnresolved`: the keep rule over the views as those first steps leave
+ * them, the plan that follows the uninstall then (VR4-3: the user-scope entry the step adds never
+ * starts beside another entry of this server). `offIn`: each entry that reaches a session where
+ * `/mcp disable` turned it off, and those sessions (V3-1: said, the way the plugin's off state is).
+ * The ranking's reach is counted over the views each plan settles. The greedy rule is accepted as
+ * such (D-3).
  */
 export function duplicateRegistrations(
   entries: readonly ClientEntry[],
@@ -949,6 +1318,8 @@ export function duplicateRegistrations(
     readonly extra: readonly ClientEntry[];
     readonly unresolved: readonly UnresolvedView[];
     readonly uninstallStrips: readonly StrippedView[];
+    readonly uninstallExtra: readonly ClientEntry[];
+    readonly uninstallUnresolved: readonly UnresolvedView[];
   } | null;
 } {
   const regs = entries.filter((e) => !e.pluginSource);
@@ -979,8 +1350,6 @@ export function duplicateRegistrations(
     entries: regs.filter((e) => sees(dir, e)),
     plugin: plugin !== null && !off(dir, plugin.key),
   }));
-  const reach = new Map<ClientEntry, number>();
-  for (const v of views) for (const e of v.entries) reach.set(e, (reach.get(e) ?? 0) + 1);
   /** How far up an entry reaches: the user scope above all, then the shallower directory. */
   const depth = (e: ClientEntry): number =>
     narrow(e)
@@ -995,6 +1364,9 @@ export function duplicateRegistrations(
     vs: readonly { dir: string | null; entries: readonly ClientEntry[] }[],
     pinned: ClientEntry | null,
   ): { extra: ClientEntry[]; unresolved: UnresolvedView[] } => {
+    // how many of these views each entry reaches (the ranking's first key)
+    const reach = new Map<ClientEntry, number>();
+    for (const v of vs) for (const e of v.entries) reach.set(e, (reach.get(e) ?? 0) + 1);
     const extra: ClientEntry[] = [];
     const left = (es: readonly ClientEntry[]): ClientEntry[] =>
       es.filter((e) => !extra.includes(e));
@@ -1070,17 +1442,61 @@ export function duplicateRegistrations(
     );
     // its removals in the order the views list them (one command line per entry)
     const listed = [...new Set(views.flatMap((v) => v.entries))];
+    // uninstalling the plugin: the views it strips, and what gives them a server first (V3-1) — a
+    // user-scope entry under this server's key where the sessions outside the projects are
+    // stripped (turned back on in each stripped project that turned that key off: VR4-2), and the
+    // entries `/mcp disable` turned off there; then the keep rule over the views as those steps
+    // leave them, so the step never makes a duplicate of its own (VR4-3)
+    const stripped = views.filter(
+      (v) => v.plugin && v.entries.every((e) => without.extra.includes(e)),
+    );
+    const addUser = stripped.some((v) => v.dir === null);
+    // the one key a stripped project turns back on: this server's, where the step adds it at user
+    // scope and the project turned that key off; else the best ranked of the entries turned off
+    // there (more would only be removed again)
+    const seen = new Map<ClientEntry, number>();
+    for (const v of views) for (const e of v.entries) seen.set(e, (seen.get(e) ?? 0) + 1);
+    const best = (es: readonly ClientEntry[]): string[] => {
+      const ranked = [...es].sort(
+        (x, y) =>
+          (seen.get(y) ?? 0) - (seen.get(x) ?? 0) ||
+          depth(x) - depth(y) ||
+          Number(y.name === SERVER_NAME) - Number(x.name === SERVER_NAME),
+      );
+      return ranked.length === 0 ? [] : [ranked[0]?.name ?? SERVER_NAME];
+    };
+    const uninstallStrips = stripped.map((v) => ({
+      dir: v.dir,
+      off: addUser
+        ? off(v.dir, SERVER_NAME)
+          ? [SERVER_NAME]
+          : []
+        : best(regs.filter((e) => reaches(v.dir, e) && off(v.dir, e.name))),
+    }));
+    const turnedOn = new Map(
+      uninstallStrips.flatMap((v) => (v.dir === null ? [] : [[v.dir, new Set(v.off)] as const])),
+    );
+    const user: ClientEntry = { ...pseudo, name: SERVER_NAME };
+    const after = [...regs, ...(addUser ? [user] : [])];
+    const afterSteps = plan(
+      [null, ...byDir.keys()].map((dir) => ({
+        dir,
+        entries: after.filter(
+          (e) =>
+            reaches(dir, e) &&
+            (!off(dir, e.name) || (dir !== null && turnedOn.get(dir)?.has(e.name) === true)),
+        ),
+      })),
+      null,
+    );
     withPlugin = {
       worst,
       beside,
       extra: listed.filter((e) => settled.extra.includes(e)),
       unresolved: settled.unresolved,
-      uninstallStrips: views
-        .filter((v) => v.plugin && v.entries.every((e) => without.extra.includes(e)))
-        .map((v) => ({
-          dir: v.dir,
-          off: keysOf(regs.filter((e) => reaches(v.dir, e) && off(v.dir, e.name))),
-        })),
+      uninstallStrips,
+      uninstallExtra: regs.filter((e) => afterSteps.extra.includes(e)),
+      uninstallUnresolved: afterSteps.unresolved,
     };
   }
   return {
