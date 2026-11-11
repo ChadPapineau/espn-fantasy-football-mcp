@@ -158,11 +158,21 @@ function installPlugin(home: string, marketplace: unknown, folderBuilt?: string 
         ? marketplace
         : {
             [MARKETPLACE]: marketplace,
-            "other-market": { source: { source: "github", repo: "x/y" } },
+            "other-market": recorded({ source: "github", repo: "x/y" }),
           },
     );
   return { folder, cache };
 }
+
+/**
+ * A known_marketplaces.json record as Claude Code writes it: its source, its cache path and when it
+ * was refreshed (Claude Code 2.1.308's schema requires all three of every record — verifier V-A).
+ */
+const recorded = (source: unknown): Record<string, unknown> => ({
+  source,
+  installLocation: path.join(path.sep, "placeholder", "marketplaces", "x"),
+  lastUpdated: INSTALLED_AT,
+});
 
 /** known_marketplaces.json's record of a folder marketplace (`claude plugin marketplace add <dir>`). */
 const folderMarketplace = (home: string): Record<string, unknown> => {
@@ -994,44 +1004,44 @@ describe("Defect B: the plugin is judged where Claude Code reads it", () => {
     mkdirSync(path.join(linkDir, ".claude-plugin"), { recursive: true });
     symlinkSync(linked, path.join(linkDir, ".claude-plugin", "marketplace.json"));
     const cases: [unknown, unknown, "refused" | "unresolved", string][] = [
-      [{ source: { source: "directory", path: "src/x" } }, null, "refused", "no absolute path"],
+      [recorded({ source: "directory", path: "src/x" }), null, "refused", "no absolute path"],
       [
-        { source: { source: "file", path: path.join(folder, "m.json") } },
+        recorded({ source: "file", path: path.join(folder, "m.json") }),
         null,
         "refused",
         "not in a .claude-plugin folder",
       ],
       [
-        { source: { source: "directory", path: linkDir } },
+        recorded({ source: "directory", path: linkDir }),
         null,
         "refused",
         "is a symbolic link (never followed)",
       ],
       [
-        { source: { source: "directory", path: folder } },
+        recorded({ source: "directory", path: folder }),
         { name: MARKETPLACE, plugins: [] },
         "unresolved",
         "does not list",
       ],
       [
-        { source: { source: "directory", path: folder } },
+        recorded({ source: "directory", path: folder }),
         { plugins: [{ name: "espn-fantasy-football" }] },
         "unresolved",
         "gives the espn-fantasy-football plugin no source",
       ],
       [
-        { source: { source: "directory", path: folder } },
+        recorded({ source: "directory", path: folder }),
         { plugins: [{ name: "espn-fantasy-football", source: "~/elsewhere" }] },
         "refused",
         "is an absolute path",
       ],
       [
-        { source: { source: "directory", path: folder } },
+        recorded({ source: "directory", path: folder }),
         { plugins: [{ name: "espn-fantasy-football", source: "./a\u0007b" }] },
         "refused",
         "is not a path doctor reads",
       ],
-      [{ source: { source: "directory", path: folder } }, "{", "unresolved", "is not JSON"],
+      [recorded({ source: "directory", path: folder }), "{", "unresolved", "is not JSON"],
     ];
     for (const [record, doc, kind, why] of cases) {
       write(known, { [MARKETPLACE]: record });
@@ -1042,9 +1052,13 @@ describe("Defect B: the plugin is judged where Claude Code reads it", () => {
       expect(o !== undefined && "why" in o ? o.why : "", why).toContain(why);
       expect(plugin?.copies[0]?.root, why).toBeNull();
     }
-    // a source type outside this list is copied, named value-free
-    write(known, { [MARKETPLACE]: { source: { source: "Some Thing!" } } });
-    expect(scanPlugin(sb.home)?.origin).toEqual({ kind: "copied", source: "another" });
+    // a source Claude Code fetches is copied; a source type it does not have is refused (V-A)
+    write(known, {
+      [MARKETPLACE]: recorded({ source: "git", url: "https://example.invalid/m.git" }),
+    });
+    expect(scanPlugin(sb.home)?.origin).toEqual({ kind: "copied", source: "git" });
+    write(known, { [MARKETPLACE]: recorded({ source: "Some Thing!" }) });
+    expect(scanPlugin(sb.home)?.origin.kind).toBe("refused");
   });
 
   it("a `file` source, a relative plugin directory and metadata.pluginRoot resolve inside the folder", () => {
@@ -1052,7 +1066,7 @@ describe("Defect B: the plugin is judged where Claude Code reads it", () => {
     const { folder } = installPlugin(sb.home, folderMarketplace(sb.home));
     const listing = path.join(folder, ".claude-plugin", "marketplace.json");
     write(path.join(sb.home, ".claude", "plugins", "known_marketplaces.json"), {
-      [MARKETPLACE]: { source: { source: "file", path: listing } },
+      [MARKETPLACE]: recorded({ source: "file", path: listing }),
     });
     expect(scanPlugin(sb.home)?.origin).toEqual({
       kind: "folder",
@@ -1424,7 +1438,7 @@ describe("Refix round 1: the plugin as Claude Code 2.1.308 loads it (F1, F2, F3)
     for (const record of [
       null,
       "{ not json",
-      { "other-market": { source: { source: "github" } } },
+      { "other-market": recorded({ source: "github", repo: "x/y" }) },
       { [MARKETPLACE]: { source: 7 } },
     ]) {
       sb = sandbox();
@@ -1472,7 +1486,7 @@ describe("Refix round 1: the plugin as Claude Code 2.1.308 loads it (F1, F2, F3)
   });
 
   it("no record, but the user settings declare the folder (extraKnownMarketplaces, as on the owner's Mac): read in place, the cache copy a leftover; a symlinked file is doctor's own refusal (F1b)", async () => {
-    for (const record of [null, { "other-market": { source: { source: "github" } } }]) {
+    for (const record of [null, { "other-market": recorded({ source: "github", repo: "x/y" }) }]) {
       sb = sandbox();
       const label = JSON.stringify(record);
       const { folder, cache } = installPlugin(sb.home, null);
@@ -1520,7 +1534,12 @@ describe("Refix round 1: the plugin as Claude Code 2.1.308 loads it (F1, F2, F3)
     const r24 = checkStaleBuild(folder, plugin);
     expect(r24.status).toBe("ok");
     expect(r24.details.join("\n")).not.toContain(`plugin copy ${cache}`);
-    expect((await checkLaunchConfig(makeIo(sb, { exec: shimOk }), [], plugin)).status).toBe("warn");
+    const linked = await checkLaunchConfig(makeIo(sb, { exec: shimOk }), [], plugin);
+    expect(linked.status).toBe("warn");
+    // V-A: what doctor cannot judge is the registry, not a folder marketplace's listing
+    expect(linked.message).toBe(
+      "doctor cannot tell what Claude Code runs for the plugin: it cannot judge known_marketplaces.json",
+    );
   });
 
   it("an enabled plugin a folder marketplace lists, with no install record: Claude Code loads it — doctor counts it, catches the duplicate, and print-config warns (F2)", async () => {
@@ -1571,5 +1590,488 @@ describe("Refix round 1: the plugin as Claude Code 2.1.308 loads it (F1, F2, F3)
     expect(pc.err.text).toContain(
       `eff print-config: warning: the ${PLUGIN_ID} plugin is enabled, but Claude Code cannot load it (\`eff doctor\` row 2 says why): re-add its marketplace, or \`claude plugin uninstall ${PLUGIN_ID}\` before using the entry above — never both.`,
     );
+  });
+});
+
+// Refix round 2 (verifiers V-A, V-B, V-T, 2026-11-11): known_marketplaces.json read with Claude Code
+// 2.1.308's own per-record schema, sessions only where Claude Code records them, a fix that never
+// strips a session's only server, and the refix's untested rules pinned — each V-A and V-B case
+// failed before its fix.
+describe("Refix round 2: Claude Code 2.1.308's marketplace schema, its sessions and the keep rule (V-A, V-B, V-T)", () => {
+  const knownOf = (home: string): string =>
+    path.join(home, ".claude", "plugins", "known_marketplaces.json");
+  const withOther =
+    (other: unknown) =>
+    (home: string): Record<string, unknown> => ({
+      [MARKETPLACE]: folderMarketplace(home),
+      "other-market": other,
+    });
+  const oursWithout =
+    (field: string) =>
+    (home: string): Record<string, unknown> => {
+      const ours = Object.fromEntries(
+        Object.entries(folderMarketplace(home)).filter(([k]) => k !== field),
+      );
+      return { [MARKETPLACE]: ours, "other-market": recorded({ source: "github", repo: "x/y" }) };
+    };
+
+  it("one record Claude Code 2.1.308's schema refuses makes all of known_marketplaces.json unreadable: nothing loads — row 2 fails, no copy is judged, uninstall says why (V-A)", async () => {
+    const cases: [string, (home: string) => Record<string, unknown>, string][] = [
+      [
+        "our record without installLocation",
+        oursWithout("installLocation"),
+        `records the ${MARKETPLACE} marketplace with no installLocation`,
+      ],
+      [
+        "our record without lastUpdated",
+        oursWithout("lastUpdated"),
+        `records the ${MARKETPLACE} marketplace with no lastUpdated`,
+      ],
+      [
+        "another record without installLocation or lastUpdated",
+        withOther({ source: { source: "github", repo: "x/y" } }),
+        "records a marketplace with no installLocation",
+      ],
+      [
+        "a github source with no repo",
+        withOther(recorded({ source: "github" })),
+        "records a marketplace whose github source has no repo",
+      ],
+      [
+        "a directory source with no path",
+        withOther(recorded({ source: "directory" })),
+        "records a marketplace whose directory source has no path",
+      ],
+      [
+        "a file source with no path",
+        withOther(recorded({ source: "file", path: 7 })),
+        "records a marketplace whose file source has no path",
+      ],
+      [
+        "a git source with no url",
+        withOther(recorded({ source: "git" })),
+        "records a marketplace whose git source has no url",
+      ],
+      [
+        "a url source whose url is no URL",
+        withOther(recorded({ source: "url", url: "not a url" })),
+        "records a marketplace whose url source's url is not a URL",
+      ],
+      [
+        "an npm source with no package",
+        withOther(recorded({ source: "npm" })),
+        "records a marketplace whose npm source has no package",
+      ],
+      [
+        "an autoUpdate that is not true or false",
+        withOther({ ...recorded({ source: "github", repo: "x/y" }), autoUpdate: "yes" }),
+        "records a marketplace whose autoUpdate is not true or false",
+      ],
+      [
+        "a settings source with no plugins",
+        withOther(recorded({ source: "settings", name: "other-market" })),
+        "records a marketplace whose settings source lists no plugins",
+      ],
+      [
+        "a record that is not an object",
+        withOther(7),
+        "records a marketplace that is not an object",
+      ],
+    ];
+    for (const [label, known, why] of cases) {
+      sb = sandbox();
+      const { folder, cache } = installPlugin(sb.home, null);
+      write(knownOf(sb.home), known(sb.home));
+      const plugin = scanPlugin(sb.home);
+      // it was: "folder" — row 2 ok "1 client registration…", row 24 ok — while Claude Code 2.1.308
+      // ("Marketplace configuration file is corrupted") loads no marketplace plugin at all
+      expect(plugin?.origin.kind, label).toBe("unloaded");
+      const o = plugin?.origin;
+      const said = o !== undefined && "why" in o ? o.why : "";
+      expect(said, label).toBe(
+        `${knownOf(sb.home)} ${why}, which fails its schema: Claude Code loads no marketplace plugin while it cannot read it`,
+      );
+      expect(plugin?.copies[0]?.root, label).toBeNull();
+      const r2 = await checkLaunchConfig(makeIo(sb, { exec: shimOk }), [], plugin);
+      expect(r2.status, label).toBe("fail");
+      expect(r2.message, label).toBe(
+        "Claude Code cannot load the plugin: it cannot read known_marketplaces.json",
+      );
+      expect(r2.fix, label).toContain(
+        "repair or move aside ~/.claude/plugins/known_marketplaces.json",
+      );
+      expect(r2.details.join("\n"), label).not.toContain("the plugin registers the server");
+      const r24 = checkStaleBuild(folder, plugin);
+      expect(r24.status, label).toBe("ok");
+      expect(r24.details, label).toContain(
+        `the cache copy ${cache} is not judged: Claude Code cannot load the plugin (row 2)`,
+      );
+      expect(manualSteps(sb.home, [], findRegistrations(sb.home)).join("\n"), label).toContain(
+        `Claude Code cannot load it — ${said}`,
+      );
+      sb.cleanup();
+    }
+    sb = sandbox();
+  });
+
+  it("a source type Claude Code 2.1.308 does not have: doctor cannot tell whether this client reads the file — refused, row 2 warns, no copy judged, the type named only as a plain word (V-A)", async () => {
+    for (const [type, named, ours] of [
+      ["carrier-pigeon", true, false],
+      ["Some Thing!", false, false],
+      ["carrier-pigeon", true, true],
+    ] as const) {
+      sb = sandbox();
+      const label = `${type} ${ours ? "(ours)" : "(another)"}`;
+      const { folder, cache } = installPlugin(sb.home, null);
+      write(
+        knownOf(sb.home),
+        ours
+          ? { [MARKETPLACE]: recorded({ source: type }) }
+          : withOther(recorded({ source: type }))(sb.home),
+      );
+      const plugin = scanPlugin(sb.home);
+      expect(plugin?.origin.kind, label).toBe("refused");
+      expect(plugin?.copies[0]?.root, label).toBeNull();
+      const r2 = await checkLaunchConfig(makeIo(sb, { exec: shimOk }), [], plugin);
+      expect(r2.status, label).toBe("warn");
+      expect(r2.message, label).toBe(
+        "doctor cannot tell what Claude Code runs for the plugin: it cannot judge known_marketplaces.json",
+      );
+      const text = r2.details.join("\n");
+      expect(text, label).toContain(
+        `code: doctor cannot tell what Claude Code runs for the plugin — ${knownOf(sb.home)} records ${ours ? `the ${MARKETPLACE} marketplace` : "a marketplace"} with a source type doctor does not know${named ? ` (${type})` : ""}: Claude Code 2.1.308 refuses such a file, and a newer client may read it`,
+      );
+      expect(text, label).not.toContain("Some Thing");
+      expect(text, label).not.toContain("the plugin registers the server");
+      const r24 = checkStaleBuild(folder, plugin);
+      expect(r24.status, label).toBe("ok");
+      expect(r24.details, label).toContain(
+        `the cache copy ${cache} is not judged: doctor cannot tell what Claude Code runs for the plugin (row 2)`,
+      );
+      expect(manualSteps(sb.home, [], findRegistrations(sb.home)).join("\n"), label).toContain(
+        "doctor cannot tell what Claude Code runs for it — ",
+      );
+      sb.cleanup();
+    }
+    sb = sandbox();
+  });
+
+  it("every source type of Claude Code 2.1.308, each with the field it requires, reads: the folder is read in place (V-A)", () => {
+    sb = sandbox();
+    const { folder } = installPlugin(sb.home, null);
+    write(knownOf(sb.home), {
+      [MARKETPLACE]: folderMarketplace(sb.home),
+      a: recorded({ source: "github", repo: "x/y", ref: "main" }),
+      b: recorded({ source: "git", url: "https://example.invalid/m.git" }),
+      c: recorded({ source: "url", url: "\u00a0https://example.invalid/marketplace.json\n" }),
+      d: recorded({ source: "npm", package: "@example/marketplace" }),
+      e: recorded({ source: "file", path: "/placeholder/.claude-plugin/marketplace.json" }),
+      f: recorded({ source: "directory", path: "/placeholder" }),
+      g: recorded({ source: "skills-dir" }),
+      h: recorded({ source: "hostPattern", hostPattern: "^example\\.invalid$" }),
+      i: recorded({ source: "pathPattern", pathPattern: ".*" }),
+      j: recorded({ source: "settings", name: "j", plugins: [] }),
+      k: { ...recorded({ source: "github", repo: "x/z" }), autoUpdate: false },
+    });
+    expect(scanPlugin(sb.home)?.origin).toEqual({
+      kind: "folder",
+      root: folder,
+      marketplaceDir: folder,
+    });
+  });
+
+  it("known_marketplaces.json that is an array, null or a number is unreadable, never an empty registry (V-T)", () => {
+    for (const body of ["[]", "null", "7"]) {
+      sb = sandbox();
+      installPlugin(sb.home, body);
+      expect(scanPlugin(sb.home)?.origin, body).toEqual({
+        kind: "unloaded",
+        registry: "unreadable",
+        why: `${knownOf(sb.home)} is not a JSON object: Claude Code loads no marketplace plugin while it cannot read it`,
+      });
+      sb.cleanup();
+    }
+    sb = sandbox();
+  });
+
+  it("a declared `file` source outside a .claude-plugin folder is not loaded before it is recorded (V-T)", () => {
+    sb = sandbox();
+    const { folder } = installPlugin(sb.home, null);
+    write(path.join(sb.home, ".claude", "settings.json"), {
+      enabledPlugins: { [PLUGIN_ID]: true },
+      extraKnownMarketplaces: {
+        [MARKETPLACE]: { source: { source: "file", path: path.join(folder, "marketplace.json") } },
+      },
+    });
+    const o = scanPlugin(sb.home)?.origin;
+    expect(o?.kind).toBe("unloaded");
+    expect(o !== undefined && "why" in o ? o.why : "").toContain(
+      "with a file that is not in a .claude-plugin folder: Claude Code loads none of its plugins until it is recorded",
+    );
+  });
+
+  it("a parent directory's .mcp.json is no session of its own: its entry, declined in every project below it, is never counted, never offered for removal but as optional (V-B, V-T)", async () => {
+    sb = sandbox();
+    const one = espnCopy(path.join(sb.home, "src", "espn-fantasy-football-mcp"));
+    const c1 = path.join(one, "dist", "cli.js");
+    const dev = path.join(sb.home, "Developer");
+    const x = path.join(dev, "x");
+    write(path.join(dev, ".mcp.json"), { mcpServers: { "espn-dev": launch(c1) } });
+    write(path.join(x, ".claude", "settings.local.json"), {
+      disabledMcpjsonServers: ["espn-dev"],
+    });
+    const scan = scanClientConfig(
+      "code",
+      claudeJson(sb.home, { "espn-fantasy-football": launch(c1) }, { [x]: {} }),
+    );
+    // it was: sessions [x, ~/Developer] — no session ever opened in ~/Developer (Claude Code records
+    // every session's project directory under `projects`), so espn-dev was counted there
+    expect(scan.sessions.map((s) => s.dir)).toEqual([x]);
+    expect(scan.entries.map((e) => [e.name, e.declined])).toEqual([
+      ["espn-fantasy-football", false],
+      ["espn-dev", true],
+    ]);
+    const r = await checkLaunchConfig(makeIo(sb, { exec: shimOk }), [scan]);
+    // it was: warn "registers this server twice", fix `cd ~/Developer && claude mcp remove … espn-dev`
+    expect(r.status).toBe("ok");
+    expect(r.fix).toBeNull();
+    expect(r.message).toBe("1 client registration with absolute, existing paths");
+    expect(r.details).toContain(
+      `code (project scope, ${path.join(dev, ".mcp.json")}): declined in Claude Code's settings (\`disabledMcpjsonServers\`) — Claude Code does not start it, so it is not counted`,
+    );
+    expect(manualSteps(sb.home, [], findRegistrations(sb.home)).join("\n")).toContain(
+      `Claude Code (project scope, ${path.join(dev, ".mcp.json")} — a file meant to be committed) registers this server under the key "espn-dev", declined in Claude Code's settings (disabledMcpjsonServers), so never started — removing it is optional: cd ${dev} && claude mcp remove --scope project espn-dev`,
+    );
+  });
+
+  it("the fix never leaves a session without the server: it keeps an entry whose removal of the others strips no session, and where every removal would, the choice is the user's (V-B)", async () => {
+    sb = sandbox();
+    const one = espnCopy(path.join(sb.home, "src", "espn-fantasy-football-mcp"));
+    const c1 = path.join(one, "dist", "cli.js");
+    const a = path.join(sb.home, "a");
+    const ax = path.join(a, "x");
+    const axz = path.join(ax, "z");
+    const ay = path.join(a, "y");
+    write(path.join(a, ".mcp.json"), { mcpServers: { "espn-1": launch(c1) } });
+    write(path.join(ax, ".mcp.json"), { mcpServers: { "espn-2": launch(c1) } });
+    write(path.join(axz, ".claude", "settings.local.json"), { disabledMcpjsonServers: ["espn-1"] });
+    const io = makeIo(sb, { exec: shimOk });
+    /** After the fix, every session that started a server still starts one. */
+    const noneStripped = (d: ReturnType<typeof duplicateRegistrations>): boolean =>
+      d.views.every((v) => v.length === 0 || v.some((e) => !d.extra.includes(e)));
+    // a/y runs espn-1 alone, a/x/z espn-2 alone (it declines espn-1), and a/x both: any removal
+    // strips a/y or a/x/z
+    const stuck = scanClientConfig(
+      "code",
+      claudeJson(sb.home, {}, { [ax]: {}, [axz]: {}, [ay]: {} }),
+    );
+    const d = duplicateRegistrations(stuck.entries, stuck.sessions);
+    expect(d.most).toBe(2);
+    // it was: extra [espn-2] — a/x/z, whose only server it is, left with none
+    expect(noneStripped(d)).toBe(true);
+    expect(d.extra).toEqual([]);
+    expect(d.unresolved.map((u) => u.dir)).toEqual([ax]);
+    const r = await checkLaunchConfig(io, [stuck]);
+    expect(r.status).toBe("warn");
+    expect(r.message).toBe(
+      "Claude Code registers this server twice: two `claude mcp add` entries under different keys — two servers, every tool listed twice",
+    );
+    expect(r.fix).toBe(
+      `keep one: in ${ax} ("espn-2", "espn-1"), removing any of them leaves another directory with no server — keep one there and decline the others in ${path.join(ax, ".claude", "settings.local.json")} (\`disabledMcpjsonServers\`); then restart the client`,
+    );
+    // a local-scope entry in a/x as well: still the user's choice there, and it is removed, not declined
+    const stuckLocal = scanClientConfig(
+      "code",
+      claudeJson(sb.home, {}, { [ax]: { "espn-l": launch(c1) }, [axz]: {}, [ay]: {} }),
+    );
+    expect(duplicateRegistrations(stuckLocal.entries, stuckLocal.sessions).extra).toEqual([]);
+    expect((await checkLaunchConfig(io, [stuckLocal])).fix).toBe(
+      `keep one: in ${ax} ("espn-l", "espn-2", "espn-1"), removing any of them leaves another directory with no server — keep one there and decline the others in ${path.join(ax, ".claude", "settings.local.json")} (\`disabledMcpjsonServers\`; a local-scope entry is removed instead, with its own \`claude mcp remove --scope local\`); then restart the client`,
+    );
+    // beside the plugin: removing every entry keeps the plugin; uninstalling it leaves the choice
+    installPlugin(sb.home, folderMarketplace(sb.home));
+    const beside = await checkLaunchConfig(io, [stuck], scanPlugin(sb.home));
+    expect(beside.fix).toBe(
+      `keep one: remove the \`claude mcp add\` entries (\`cd ${ax} && claude mcp remove --scope project espn-2\`, \`cd ${a} && claude mcp remove --scope project espn-1\`), or uninstall the plugin (\`claude plugin uninstall ${PLUGIN_ID}\`) and in ${ax} ("espn-2", "espn-1"), removing any of them leaves another directory with no server — keep one there and decline the others in ${path.join(ax, ".claude", "settings.local.json")} (\`disabledMcpjsonServers\`); then restart the client`,
+    );
+    // a/y with an entry of its own: removing espn-1 strips nobody, so that is the fix — never
+    // espn-2, whose removal strips a/x/z although espn-1 lives farther up
+    const solved = scanClientConfig(
+      "code",
+      claudeJson(sb.home, {}, { [ax]: {}, [axz]: {}, [ay]: { "espn-y": launch(c1) } }),
+    );
+    const s = duplicateRegistrations(solved.entries, solved.sessions);
+    expect(noneStripped(s)).toBe(true);
+    expect(s.extra.map((e) => e.name)).toEqual(["espn-1"]);
+    expect(s.unresolved).toEqual([]);
+    expect((await checkLaunchConfig(io, [solved])).fix).toBe(
+      `keep one: remove the other entry (\`cd ${a} && claude mcp remove --scope project espn-1\`); then restart the client`,
+    );
+  });
+
+  it("an entry the fix already removes counts as gone: a later choice never strips the session it left (V-B)", () => {
+    sb = sandbox();
+    const one = espnCopy(path.join(sb.home, "src", "espn-fantasy-football-mcp"));
+    const c1 = path.join(one, "dist", "cli.js");
+    const a = path.join(sb.home, "a");
+    const a1 = path.join(a, "1");
+    const a2 = path.join(a, "2");
+    const a3 = path.join(a, "3");
+    write(path.join(a, ".mcp.json"), {
+      mcpServers: {
+        "espn-fantasy-football": launch(c1),
+        "espn-b": launch(c1),
+        "espn-c": launch(c1),
+      },
+    });
+    // a/1 sees espn-fantasy-football and espn-b, a/2 espn-fantasy-football, espn-c and its own
+    // espn-d, a/3 espn-b and espn-c
+    write(path.join(a1, ".claude", "settings.local.json"), {
+      disabledMcpjsonServers: ["espn-c"],
+    });
+    write(path.join(a2, ".claude", "settings.local.json"), {
+      disabledMcpjsonServers: ["espn-b"],
+    });
+    write(path.join(a3, ".claude", "settings.local.json"), {
+      disabledMcpjsonServers: ["espn-fantasy-football"],
+    });
+    const scan = scanClientConfig(
+      "code",
+      claudeJson(sb.home, {}, { [a1]: {}, [a2]: { "espn-d": launch(c1) }, [a3]: {} }),
+    );
+    const d = duplicateRegistrations(scan.entries, scan.sessions);
+    // a/1 keeps espn-fantasy-football, so espn-b goes; a/3 then has only espn-c, so a/2 may not drop it
+    expect(d.views.every((v) => v.length === 0 || v.some((e) => !d.extra.includes(e)))).toBe(true);
+    expect(d.extra.map((e) => e.name)).toEqual(["espn-b"]);
+    expect(d.unresolved.map((u) => u.dir)).toEqual([a2]);
+  });
+
+  it("among choices that strip no session, the key kept is the one whose entry reaches the most sessions (V-B)", async () => {
+    sb = sandbox();
+    const one = espnCopy(path.join(sb.home, "src", "espn-fantasy-football-mcp"));
+    const c1 = path.join(one, "dist", "cli.js");
+    const a = path.join(sb.home, "a");
+    const ax = path.join(a, "x");
+    const axz = path.join(ax, "z");
+    write(path.join(a, ".mcp.json"), { mcpServers: { "espn-y": launch(c1) } });
+    write(path.join(ax, ".mcp.json"), { mcpServers: { "espn-x": launch(c1) } });
+    write(path.join(axz, ".claude", "settings.local.json"), { disabledMcpjsonServers: ["espn-y"] });
+    // espn-x reaches a/x and a/x/z (where a local entry under its key is the same server); espn-y,
+    // farther up, only a/x
+    const scan = scanClientConfig(
+      "code",
+      claudeJson(sb.home, {}, { [ax]: {}, [axz]: { "espn-x": launch(c1) } }),
+    );
+    expect((await checkLaunchConfig(makeIo(sb, { exec: shimOk }), [scan])).fix).toBe(
+      `keep one: remove the other entry (\`cd ${a} && claude mcp remove --scope project espn-y\`); then restart the client`,
+    );
+  });
+
+  it("a project entry declined in one session and not in another below it is counted only where it is not declined (V-T)", async () => {
+    sb = sandbox();
+    const one = espnCopy(path.join(sb.home, "src", "espn-fantasy-football-mcp"));
+    const c1 = path.join(one, "dist", "cli.js");
+    const a = path.join(sb.home, "a");
+    const ax = path.join(a, "x");
+    const ay = path.join(a, "y");
+    write(path.join(a, ".mcp.json"), { mcpServers: { "espn-p": launch(c1) } });
+    write(path.join(ax, ".mcp.json"), { mcpServers: { "espn-q": launch(c1) } });
+    write(path.join(ax, ".claude", "settings.local.json"), { disabledMcpjsonServers: ["espn-p"] });
+    const scan = scanClientConfig("code", claudeJson(sb.home, {}, { [ax]: {}, [ay]: {} }));
+    expect(scan.entries.map((e) => [e.name, e.declined])).toEqual([
+      ["espn-q", false],
+      ["espn-p", false],
+    ]);
+    const d = duplicateRegistrations(scan.entries, scan.sessions);
+    expect(d.views.map((v) => v.map((e) => e.name))).toEqual([[], ["espn-q"], ["espn-p"]]);
+    const r = await checkLaunchConfig(makeIo(sb, { exec: shimOk }), [scan]);
+    expect(r.status).toBe("ok");
+    expect(r.message).toBe("2 client registrations with absolute, existing paths");
+  });
+
+  it("a known project below a copy of this plugin: the copy's .mcp.json, read as a parent directory's, is the plugin's own — no registration, never removed (V-T)", async () => {
+    sb = sandbox();
+    const repo = espnCopy(path.join(sb.home, "Developer", "espn-fantasy-football-mcp"));
+    write(path.join(repo, ".mcp.json"), readFileSync(path.join(ROOT, ".mcp.json"), "utf8"));
+    const sub = path.join(repo, "docs");
+    mkdirSync(sub, { recursive: true });
+    const scan = scanClientConfig("code", claudeJson(sb.home, {}, { [sub]: {} }));
+    expect(scan.entries.map((e) => [e.name, e.dir, e.pluginSource])).toEqual([
+      ["espn-fantasy-football", repo, true],
+    ]);
+    const r = await checkLaunchConfig(makeIo(sb, { exec: shimOk }), [scan], null);
+    expect(r.status).toBe("warn");
+    expect(r.message).toBe("no client is configured to launch this server");
+    expect(r.details.join("\n")).toContain(
+      `code (project scope, ${path.join(repo, ".mcp.json")}): the plugin's own .mcp.json in a copy of this plugin, not a registration`,
+    );
+    const steps = manualSteps(sb.home, [], { scans: [scan], plugin: null }).join("\n");
+    expect(steps).toContain(
+      `${path.join(repo, ".mcp.json")} is the plugin's own .mcp.json in a copy of this plugin, not a registration: leave it`,
+    );
+    expect(steps).not.toContain("claude mcp remove --scope project espn-fantasy-football");
+  });
+
+  it("a plugin Claude Code cannot load is no server: beside a `claude mcp add` entry it is never 'twice' (V-T)", async () => {
+    sb = sandbox();
+    const { folder } = installPlugin(sb.home, null);
+    const code = claudeJson(sb.home, {
+      "espn-fantasy-football": launch(path.join(folder, "dist", "cli.js")),
+    });
+    const plugin = scanPlugin(sb.home);
+    expect(plugin?.origin.kind).toBe("unloaded");
+    const r = await checkLaunchConfig(
+      makeIo(sb, { exec: shimOk }),
+      [scanClientConfig("code", code)],
+      plugin,
+    );
+    expect(r.status).toBe("fail");
+    expect(r.message).toBe(
+      "Claude Code cannot load the plugin: its marketplace is not known to it",
+    );
+    expect(r.fix).not.toContain("keep one");
+    expect(r.fix).toContain(
+      "— or keep the `claude mcp add` entry instead and `claude plugin uninstall",
+    );
+  });
+
+  it("an entry running the plugin's command line in one directory drops the plugin there only: beside a user-scope entry it is still 'twice' everywhere else (V-T)", async () => {
+    sb = sandbox();
+    const { folder } = installPlugin(sb.home, folderMarketplace(sb.home));
+    const work = path.join(sb.home, "work");
+    const same = {
+      command: "/bin/sh",
+      args: [path.join(folder, "scripts", "eff-launch.sh"), "serve"],
+    };
+    const code = claudeJson(
+      sb.home,
+      { "espn-fantasy-football": launch(path.join(folder, "dist", "cli.js")) },
+      { [work]: { "espn-fantasy-football": same } },
+    );
+    const r = await checkLaunchConfig(
+      makeIo(sb, { exec: shimOk }),
+      [scanClientConfig("code", code)],
+      scanPlugin(sb.home),
+    );
+    expect(r.status).toBe("warn");
+    expect(r.message).toBe(
+      "Claude Code registers this server twice: the plugin AND a `claude mcp add` entry — two servers, every tool listed twice",
+    );
+  });
+
+  it("`npm exec` and `npm x` of this package are this server under any key (V-T)", () => {
+    for (const spec of [
+      { command: "npm", args: ["exec", "--yes", "espn-fantasy-football-mcp@0.0.0", "serve"] },
+      { command: "/usr/local/bin/npm", args: ["x", "espn-fantasy-football-mcp", "serve"] },
+    ]) {
+      const c = classifyEntry("espn-npm", spec);
+      expect(c.owner, JSON.stringify(spec)).toBe("ours");
+      expect(c.launch.kind, JSON.stringify(spec)).toBe("named");
+    }
+    // `npm run` runs a script of the project in the directory: no program of this package
+    expect(
+      classifyEntry("espn-npm", { command: "npm", args: ["run", "espn-fantasy-football-mcp"] })
+        .owner,
+    ).toBe("other");
   });
 });

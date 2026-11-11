@@ -86,6 +86,7 @@ function installPlugin(home: string, copy: string, enabled = true): void {
     "espn-fantasy-football-mcp": {
       source: { source: "github", repo: "example/espn-fantasy-football-mcp" },
       installLocation: path.join(home, ".claude", "plugins", "marketplaces", "x"),
+      lastUpdated: "2026-11-03T00:00:00.000Z",
     },
   });
   write(path.join(home, ".claude", "plugins", "installed_plugins.json"), {

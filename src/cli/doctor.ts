@@ -417,7 +417,10 @@ function pluginOriginNote(
     case "unresolved":
       return notJudged;
     case "refused":
-      return `${notJudged}, and doctor does not follow the plugin's source there (${o.why})`;
+      // known_marketplaces.json itself not judged: whether the marketplace is a folder is not known
+      return o.registry === true
+        ? `the cache copy ${c.installPath} is not judged: doctor cannot tell what Claude Code runs for the plugin (row 2)`
+        : `${notJudged}, and doctor does not follow the plugin's source there (${o.why})`;
     case "folder":
       if (c.root === null || samePath(c.installPath, c.root)) return null;
       return present(c.installPath)
@@ -484,8 +487,11 @@ function runsPluginLine(e: ClientEntry, root: string | null): boolean {
  * server the user declined is not started (R-P5a); an ancestor's `.mcp.json` is in the view
  * (R-P5b); an entry running the plugin's own command line makes Claude Code drop the plugin's server
  * (R-P4); the plugin counts only where Claude Code may load it, and a marketplace it does not know
- * or cannot read fails (F1). No word holding more than a path is printed, and every line passes the
- * log redaction patterns (R-P1).
+ * or cannot read fails (F1). Refix round 2: one record of known_marketplaces.json that Claude
+ * Code's schema refuses fails too, and a source type it does not have warns (V-A); the sessions are
+ * the projects Claude Code records, and the fix never leaves one without the server — where every
+ * removal would, it names the choice the user makes there (V-B). No word holding more than a path
+ * is printed, and every line passes the log redaction patterns (R-P1).
  */
 export async function checkLaunchConfig(
   io: CliIo,
@@ -662,6 +668,20 @@ async function launchConfigRow(
   const commands = (es: readonly ClientEntry[]): string =>
     es.map((e) => `\`${removeCommand(e)}\``).join(", ");
   const entriesWord = (n: number): string => `entr${n === 1 ? "y" : "ies"}`;
+  // where every removal would strip another session, which entry to keep is the user's (V-B)
+  const choices = code.unresolved.map((u) => {
+    const names = [...new Set(u.entries.map((e) => JSON.stringify(e.name)))].join(", ");
+    const local = u.entries.some((e) => e.scope === "local");
+    return `in ${u.dir} (${names}), removing any of them leaves another directory with no server — keep one there and decline the others in ${path.join(u.dir, ".claude", "settings.local.json")} (\`disabledMcpjsonServers\`${local ? "; a local-scope entry is removed instead, with its own `claude mcp remove --scope local`" : ""})`;
+  });
+  /** The removals and the user's choices, as one clause. */
+  const removals = (lead: string): string =>
+    [
+      ...(code.extra.length > 0
+        ? [`${lead} ${entriesWord(code.extra.length)} (${commands(code.extra)})`]
+        : []),
+      ...choices,
+    ].join("; ");
   const duplicateMessages: string[] = [];
   const duplicateFixes: string[] = [];
   if (worst.servers > 1) {
@@ -677,8 +697,8 @@ async function launchConfigRow(
     // an entry running its command line makes Claude Code drop it, removing that entry restores it
     duplicateFixes.push(
       pluginRuns
-        ? `keep one: remove the \`claude mcp add\` ${entriesWord(live.length)} (${commands(live)}), or uninstall the plugin (\`claude plugin uninstall ${PLUGIN_ID}\`)${code.extra.length > 0 ? ` and remove the other ${entriesWord(code.extra.length)} (${commands(code.extra)})` : ""}; then restart the client`
-        : `keep one: remove the other ${entriesWord(code.extra.length)} (${commands(code.extra)}); then restart the client`,
+        ? `keep one: remove the \`claude mcp add\` ${entriesWord(live.length)} (${commands(live)}), or uninstall the plugin (\`claude plugin uninstall ${PLUGIN_ID}\`)${code.extra.length > 0 || choices.length > 0 ? ` and ${removals("remove the other")}` : ""}; then restart the client`
+        : `keep one: ${removals("remove the other")}; then restart the client`,
     );
   }
   for (const d of desktopDuplicates) {
@@ -759,7 +779,9 @@ async function launchConfigRow(
       "launch_config",
       title,
       "warn",
-      "doctor cannot tell what Claude Code runs for the plugin: it does not follow the plugin's source in its folder marketplace",
+      origin?.kind === "refused" && origin.registry === true
+        ? "doctor cannot tell what Claude Code runs for the plugin: it cannot judge known_marketplaces.json"
+        : "doctor cannot tell what Claude Code runs for the plugin: it does not follow the plugin's source in its folder marketplace",
       'see what Claude Code reads with `claude plugin list` (its "Read from" line); README step 5 adds the marketplace from the built runtime clone, whose committed listing names the plugin `./`',
       details,
     );

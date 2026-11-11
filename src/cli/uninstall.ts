@@ -308,7 +308,9 @@ function pluginWhere(plugin: PluginInstall): string {
     return `${records}; Claude Code cannot load it — its folder marketplace ${o.marketplaceDir}: ${o.why}`;
   if (o.kind === "unloaded") return `${records}; Claude Code cannot load it — ${o.why}`;
   if (o.kind === "refused")
-    return `${records}; doctor does not follow its folder marketplace's source — ${o.why}`;
+    return o.registry === true
+      ? `${records}; doctor cannot tell what Claude Code runs for it — ${o.why}`
+      : `${records}; doctor does not follow its folder marketplace's source — ${o.why}`;
   const roots = [...new Set(plugin.copies.flatMap((c) => (c.root === null ? [] : [c.root])))].join(
     ", ",
   );

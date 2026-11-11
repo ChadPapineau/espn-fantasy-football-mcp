@@ -39,6 +39,12 @@
 // know, or whose known_marketplaces.json it cannot read, loads nothing, while one the user settings
 // declare as a folder (`extraKnownMarketplaces`) is read in place (F1); and a folder marketplace's
 // plugin needs no install record (F2).
+//
+// Refix round 2 (verifiers V-A, V-B): known_marketplaces.json is judged by Claude Code 2.1.308's
+// own per-record schema, under which one bad record of any marketplace makes the client load none
+// (`marketplaceRecordState`); the sessions are the project directories Claude Code records, never a
+// parent directory read for the projects below it; and the duplicate fix never leaves a session
+// without the server (`duplicateRegistrations`).
 import { lstatSync, realpathSync, statSync } from "node:fs";
 import path from "node:path";
 import { PathSecurityError, readSecureFile } from "../config/paths.js";
@@ -87,9 +93,10 @@ export interface ClientEntry {
 }
 
 /**
- * One directory a Claude Code session opens in (a `projects` key of ~/.claude.json, or a directory
- * holding a `.mcp.json` entry of ours), with the project servers its settings decline
- * (`disabledMcpjsonServers`: the user settings, `<dir>/.claude/settings.json` and
+ * One directory Claude Code sessions run in: a `projects` key of ~/.claude.json, which Claude Code
+ * 2.1.308 writes for every session's project (`saveCurrentProjectConfig`) — never a parent directory
+ * read only because a project lies below it (verifier V-B) — with the project servers its settings
+ * decline (`disabledMcpjsonServers`: the user settings, `<dir>/.claude/settings.json` and
  * `<dir>/.claude/settings.local.json`). Its view is the user scope, its own local scope, and the
  * `.mcp.json` of the directory and every ancestor below the filesystem root (`duplicateRegistrations`).
  */
@@ -653,14 +660,10 @@ export function scanClientConfig(client: "desktop" | "code", file: string): Clie
       if (isObj(p.value) && isObj(p.value.mcpServers))
         take({ scope: "project", dir: at, servers: p.value.mcpServers }, f, isPluginRoot(at));
     }
-  // the session directories: every known project, and every directory holding an entry of ours
+  // the session directories: the known projects only — Claude Code records every session's project
+  // under `projects`, so a parent directory read only for the projects below it has had none (V-B)
   const userDeclined = declinedIn(path.join(path.dirname(file), ".claude", "settings.json"));
-  const sessionDirs = [
-    ...new Set([
-      ...known.map((d) => path.resolve(d)),
-      ...entries.flatMap((e) => (e.dir === null ? [] : [path.resolve(e.dir)])),
-    ]),
-  ];
+  const sessionDirs = [...new Set(known.map((d) => path.resolve(d)))];
   const sessions: SessionView[] = sessionDirs.map((dir) => ({
     dir,
     declined: [
@@ -671,7 +674,7 @@ export function scanClientConfig(client: "desktop" | "code", file: string): Clie
       ]),
     ],
   }));
-  // a project entry is declined when every session that sees it declines it
+  // a project entry is declined when every session at or below its directory declines it
   const marked = entries.map((e) => {
     if (e.scope !== "project" || e.dir === null) return e;
     const top = path.resolve(e.dir);
@@ -737,16 +740,20 @@ export function removeCommand(e: Pick<ClientEntry, "scope" | "dir" | "name">): s
 /**
  * Registrations of this server that run beside each other in one client (README "One registration
  * per client"; verifier A-F3: two `claude mcp add` entries under different keys, without the
- * plugin, were never called a duplicate). Claude Code: a session opened in a directory (`sessions`,
- * and every directory an entry lives in) sees the user scope, that directory's local scope, and the
+ * plugin, were never called a duplicate). Claude Code: a session in one of the `sessions`
+ * directories (the projects it records) sees the user scope, that directory's local scope, and the
  * project scope of its `.mcp.json` and every ancestor's (R-P5b) less the project servers its
- * settings decline (R-P5a); a session outside them sees the user scope alone. A key at a narrower
- * scope overrides the same key at a wider one, so each view starts one server per DISTINCT key.
- * Claude Desktop: one map, one server per key. `views`: each view's entries; `most`: the most
- * servers one view starts; `extra`: the entries whose removal leaves one key in every view — in
- * each view the key kept is the one whose entry reaches the most views (the user scope's, else the
- * farthest ancestor's `.mcp.json`: a nearer entry is the one removed, so no other directory loses
- * its server), and among equals `espn-fantasy-football`, else the first. The plugin's own
+ * settings decline (R-P5a); a session outside them sees the user scope alone. A parent directory's
+ * `.mcp.json` counts only in the views of the sessions below it — never as a view of its own
+ * (verifier V-B). A key at a narrower scope overrides the same key at a wider one, so each view
+ * starts one server per DISTINCT key. Claude Desktop: one map, one server per key. `views`: each
+ * view's entries; `most`: the most servers one view starts; `extra`: the entries whose removal
+ * leaves one key in each view it can — never leaving a view that starts a server with none (V-B: a
+ * session declining the entry kept lost its only server). In each view the key kept is the first
+ * that strips no view, ranked by how many views its entry reaches, then by how wide it is (the user
+ * scope's, then the farthest ancestor's `.mcp.json`), then `espn-fantasy-football`, then the first;
+ * `unresolved`: the views where every choice would strip another view, with the entries still there
+ * — which to keep there is the user's (declining the others in that directory). The plugin's own
  * `.mcp.json` declaration is never a registration (`pluginSource`).
  */
 export function duplicateRegistrations(
@@ -756,37 +763,71 @@ export function duplicateRegistrations(
   readonly most: number;
   readonly extra: readonly ClientEntry[];
   readonly views: readonly (readonly ClientEntry[])[];
+  readonly unresolved: readonly {
+    readonly dir: string;
+    readonly entries: readonly ClientEntry[];
+  }[];
 } {
   const regs = entries.filter((e) => !e.pluginSource);
   const narrow = (e: ClientEntry): boolean => e.scope === "local" || e.scope === "project";
+  const at = (e: ClientEntry): string => path.resolve(e.dir ?? ".");
   const wide = regs.filter((e) => !narrow(e)); // the user scope, or Claude Desktop's one map
   const declined = new Map(sessions.map((v) => [path.resolve(v.dir), new Set(v.declined)]));
-  const dirs = [
-    ...new Set([...declined.keys(), ...regs.filter(narrow).map((e) => path.resolve(e.dir ?? "."))]),
-  ];
+  const dirs = [...declined.keys()];
   const sees = (d: string, e: ClientEntry): boolean => {
     if (!narrow(e)) return true;
-    const at = path.resolve(e.dir ?? ".");
-    if (e.scope === "local") return at === d;
-    return within(at, d) && declined.get(d)?.has(e.name) !== true;
+    if (e.scope === "local") return at(e) === d;
+    return within(at(e), d) && declined.get(d)?.has(e.name) !== true;
   };
-  const views: ClientEntry[][] = [wide, ...dirs.map((d) => regs.filter((e) => sees(d, e)))];
+  const views: { dir: string | null; entries: ClientEntry[] }[] = [
+    { dir: null, entries: wide },
+    ...dirs.map((d) => ({ dir: d, entries: regs.filter((e) => sees(d, e)) })),
+  ];
   const reach = new Map<ClientEntry, number>();
-  for (const v of views) for (const e of v) reach.set(e, (reach.get(e) ?? 0) + 1);
-  let most = 0;
+  for (const v of views) for (const e of v.entries) reach.set(e, (reach.get(e) ?? 0) + 1);
+  /** How far up an entry reaches: the user scope above all, then the shallower directory. */
+  const depth = (e: ClientEntry): number =>
+    narrow(e)
+      ? at(e)
+          .split(path.sep)
+          .filter((x) => x !== "").length
+      : -1;
+  const keysOf = (es: readonly ClientEntry[]): string[] => [...new Set(es.map((e) => e.name))];
+  const most = Math.max(0, ...views.map((v) => keysOf(v.entries).length));
   const extra: ClientEntry[] = [];
+  const left = (es: readonly ClientEntry[]): ClientEntry[] => es.filter((e) => !extra.includes(e));
+  /** Removing `drop` beside `extra` leaves every view that starts a server with one. */
+  const strips = (drop: readonly ClientEntry[]): boolean =>
+    views.some(
+      (v) => v.entries.length > 0 && v.entries.every((e) => extra.includes(e) || drop.includes(e)),
+    );
   for (const v of views) {
-    const keys = [...new Set(v.map((e) => e.name))];
-    most = Math.max(most, keys.length);
+    const rest = left(v.entries);
+    const keys = keysOf(rest);
     if (keys.length < 2) continue;
-    const reachOf = (k: string): number =>
-      Math.max(...v.filter((e) => e.name === k).map((e) => reach.get(e) ?? 0));
-    const top = Math.max(...keys.map(reachOf));
-    const widest = keys.filter((k) => reachOf(k) === top);
-    const keep = widest.includes(SERVER_NAME) ? SERVER_NAME : widest[0];
-    for (const e of v) if (e.name !== keep && !extra.includes(e)) extra.push(e);
+    const of = (k: string): ClientEntry[] => rest.filter((e) => e.name === k);
+    const reachOf = (k: string): number => Math.max(...of(k).map((e) => reach.get(e) ?? 0));
+    const depthOf = (k: string): number => Math.min(...of(k).map(depth));
+    const ranked = [...keys].sort(
+      (a, b) =>
+        reachOf(b) - reachOf(a) ||
+        depthOf(a) - depthOf(b) ||
+        Number(b === SERVER_NAME) - Number(a === SERVER_NAME),
+    );
+    const keep = ranked.find((k) => !strips(rest.filter((e) => e.name !== k)));
+    if (keep !== undefined) extra.push(...rest.filter((e) => e.name !== keep));
   }
-  return { most, extra, views: views.filter((v) => v.length > 0 || v === wide) };
+  const unresolved = views.flatMap((v) =>
+    v.dir !== null && keysOf(left(v.entries)).length > 1
+      ? [{ dir: v.dir, entries: left(v.entries) }]
+      : [],
+  );
+  return {
+    most,
+    extra,
+    views: views.filter((v) => v.entries.length > 0 || v.dir === null).map((v) => v.entries),
+    unresolved,
+  };
 }
 
 // --- the Claude Code plugin --------------------------------------------------------------------
@@ -807,33 +848,35 @@ export function knownMarketplacesPath(home: string): string {
 }
 
 /**
- * Where the plugin Claude Code runs comes from, as Claude Code 2.1.308 resolves it (observed in that
- * client, 2026-11-11: a plugin whose catalog entry is a STRING source in a marketplace whose
+ * Where the plugin Claude Code runs comes from, as Claude Code 2.1.308 resolves it (observed in
+ * that client, 2026-11-11: a plugin whose catalog entry is a STRING source in a marketplace whose
  * known_marketplaces.json record is a `file` or `directory` source resolves to the folder, or to
- * "unresolved" and is not loaded — never to a cache copy; `claude plugin list`: "Read from: <root>";
- * `claude plugin update`: "is read from its folder … Edits there take effect at the next session
- * start"; an older client copied such a plugin into the cache and ran that copy, README Upgrade).
- * `folder`: its marketplace is a folder on this Mac (a `directory` source, or a `file` source's
- * `.claude-plugin/marketplace.json`) and lists the plugin by a relative path, so Claude Code reads
- * the plugin IN PLACE from `root` and installed_plugins.json's `installPath` is a leftover cache
- * copy. `copied`: a marketplace or plugin source Claude Code fetches (github, git, url, npm …) —
- * the `installPath` cache copy is what runs. `unresolved` (Claude Code's own term): the record is a
- * folder marketplace, but its listing is missing (the folder moved or deleted), unreadable, not
- * JSON, no longer lists the plugin or gives it no source — Claude Code cannot load the plugin, and
- * the cache copy is not what runs. `refused`: the record is a folder marketplace, but doctor does
- * not follow it (no absolute path, a listing through a symbolic link or past doctor's size bound, a
- * plugin source that leaves the folder), or known_marketplaces.json itself is a symbolic link or
- * past that bound (Claude Code reads it all the same) — what Claude Code runs is not known, and it
- * is never the cache copy. `unloaded` (verifier F1, Claude Code 2.1.308's MDe: "not loaded (hooks
- * module, commands, skills, servers: none of it)"): Claude Code loads no plugin of this marketplace
- * — `registry: "unreadable"`: known_marketplaces.json is not JSON, unreadable or fails its schema
- * (no record of this marketplace with a usable source), and Claude Code then loads no marketplace
- * plugin at all, settings declarations included; `registry: "unrecorded"`: the file is missing or
- * records no such marketplace, and the user settings declare none Claude Code loads before
- * recording it. A folder the user settings declare (`extraKnownMarketplaces`, a `directory` source
- * or a `file` source under `.claude-plugin`, at an absolute path) is read in place like a recorded
- * one (`folder` with `declared`, or `unresolved` / `refused`). The cache copy is judged only for a
- * marketplace Claude Code fetches (`copied`).
+ * "unresolved" and is not loaded — never to a cache copy; `claude plugin list`: "Read from:
+ * <root>"; `claude plugin update`: "is read from its folder … Edits there take effect at the next
+ * session start"; an older client copied such a plugin into the cache and ran that copy, README
+ * Upgrade). `folder`: its marketplace is a folder on this Mac (a `directory` source, or a `file`
+ * source's `.claude-plugin/marketplace.json`) and lists the plugin by a relative path, so Claude
+ * Code reads the plugin IN PLACE from `root` and installed_plugins.json's `installPath` is a
+ * leftover cache copy. `copied`: a marketplace or plugin source Claude Code fetches (github, git,
+ * url, npm …) — the `installPath` cache copy is what runs. `unresolved` (Claude Code's own term):
+ * the record is a folder marketplace, but its listing is missing (the folder moved or deleted),
+ * unreadable, not JSON, no longer lists the plugin or gives it no source — Claude Code cannot load
+ * the plugin, and the cache copy is not what runs. `refused`: the record is a folder marketplace,
+ * but doctor does not follow it (no absolute path, a listing through a symbolic link or past
+ * doctor's size bound, a plugin source that leaves the folder), or known_marketplaces.json itself
+ * is a symbolic link, past that bound (Claude Code reads it all the same) or records a source type
+ * Claude Code 2.1.308 does not have (a newer client may: verifier V-A) — `registry` — so what
+ * Claude Code runs is not known, and it is never the cache copy. `unloaded` (verifier F1, Claude
+ * Code 2.1.308's MDe: "not loaded (hooks module, commands, skills, servers: none of it)"): Claude
+ * Code loads no plugin of this marketplace — `registry: "unreadable"`: known_marketplaces.json is
+ * not JSON, unreadable or fails its schema (one record of ANY marketplace that schema refuses:
+ * `marketplaceRecordState`, V-A), and Claude Code then loads no marketplace plugin at all, settings
+ * declarations included; `registry: "unrecorded"`: the file is missing or records no such
+ * marketplace, and the user settings declare none Claude Code loads before recording it. A folder
+ * the user settings declare (`extraKnownMarketplaces`, a `directory` source or a `file` source
+ * under `.claude-plugin`, at an absolute path) is read in place like a recorded one (`folder` with
+ * `declared`, or `unresolved` / `refused`). The cache copy is judged only for a marketplace Claude
+ * Code fetches (`copied`).
  */
 export type PluginOrigin =
   | {
@@ -845,7 +888,16 @@ export type PluginOrigin =
     }
   | { readonly kind: "copied"; readonly source: string }
   | { readonly kind: "unresolved"; readonly marketplaceDir: string; readonly why: string }
-  | { readonly kind: "refused"; readonly why: string }
+  | {
+      readonly kind: "refused";
+      readonly why: string;
+      /**
+       * What doctor cannot judge is known_marketplaces.json itself (a symbolic link, past doctor's
+       * bound, or a source type Claude Code 2.1.308 does not have: V-A), not a folder marketplace's
+       * listing — so whether the marketplace is a folder at all is not known.
+       */
+      readonly registry?: true;
+    }
   | {
       readonly kind: "unloaded";
       readonly registry: "unreadable" | "unrecorded";
@@ -947,6 +999,63 @@ function declaredMarketplace(home: string): unknown {
 }
 
 /**
+ * The field each marketplace source type of Claude Code 2.1.308 requires in a known_marketplaces.json
+ * record (its `yn` union, keyed by `source`: `url` and `git` a `url`, `github` a `repo`, `npm` a
+ * `package`, `file` and `directory` a `path`, the policy patterns theirs, `settings` a `name`;
+ * `skills-dir` none). A type missing here is one that client does not have (V-A).
+ */
+const MARKETPLACE_SOURCE_FIELD: Readonly<Record<string, string | null>> = {
+  url: "url",
+  github: "repo",
+  git: "url",
+  npm: "package",
+  file: "path",
+  directory: "path",
+  "skills-dir": null,
+  hostPattern: "hostPattern",
+  pathPattern: "pathPattern",
+  settings: "name",
+};
+
+/**
+ * One known_marketplaces.json record against Claude Code 2.1.308's schema of it (its `jo`, observed
+ * in that client's binary, 2026-11-11: `source`, then `installLocation` and `lastUpdated` strings and
+ * an optional boolean `autoUpdate`; one record that fails makes the whole file "corrupted", and the
+ * client then loads no marketplace plugin — verifier V-A). `broken`: that schema refuses it, `what`
+ * saying why (field and type names only, never a value); `unknown`: its source type is one that
+ * client does not have — a newer one may (`type`: the type when it is a plain word, else null).
+ * Doctor checks each type's required field (a `url` source's must parse as a URL, a `settings`
+ * source's `plugins` must be a list), not every optional field a type allows: a file Claude Code
+ * wrote passes all of it.
+ */
+function marketplaceRecordState(
+  m: unknown,
+):
+  | { readonly kind: "ok" }
+  | { readonly kind: "broken"; readonly what: string }
+  | { readonly kind: "unknown"; readonly type: string | null } {
+  const broken = (what: string) => ({ kind: "broken", what }) as const;
+  if (!isObj(m)) return broken("that is not an object");
+  const s = m.source;
+  if (!isObj(s) || typeof s.source !== "string") return broken("with no usable source");
+  if (typeof m.installLocation !== "string") return broken("with no installLocation");
+  if (typeof m.lastUpdated !== "string") return broken("with no lastUpdated");
+  if (Object.hasOwn(m, "autoUpdate") && typeof m.autoUpdate !== "boolean")
+    return broken("whose autoUpdate is not true or false");
+  const type = s.source;
+  if (!Object.hasOwn(MARKETPLACE_SOURCE_FIELD, type))
+    return { kind: "unknown", type: SOURCE_WORD_RE.test(type) ? type : null };
+  const field = MARKETPLACE_SOURCE_FIELD[type] ?? null;
+  if (field !== null && typeof s[field] !== "string")
+    return broken(`whose ${type} source has no ${field}`);
+  if (type === "url" && typeof s.url === "string" && !URL.canParse(s.url.trim()))
+    return broken("whose url source's url is not a URL");
+  if (type === "settings" && !Array.isArray(s.plugins))
+    return broken("whose settings source lists no plugins");
+  return { kind: "ok" };
+}
+
+/**
  * Where the plugin Claude Code runs comes from (`PluginOrigin`), read the way Claude Code 2.1.308
  * reads it (F1): known_marketplaces.json's record of `MARKETPLACE_NAME` — or, when the file is
  * missing or records none, the user settings' declaration of it — then, for a folder marketplace,
@@ -957,7 +1066,8 @@ function declaredMarketplace(home: string): unknown {
 export function pluginOrigin(home: string): PluginOrigin {
   const known = knownMarketplacesPath(home);
   const settings = codeSettingsPath(home);
-  const refused = (why: string): PluginOrigin => ({ kind: "refused", why });
+  const refused = (why: string, registry = false): PluginOrigin =>
+    registry ? { kind: "refused", why, registry: true } : { kind: "refused", why };
   const unloaded = (registry: "unreadable" | "unrecorded", why: string): PluginOrigin => ({
     kind: "unloaded",
     registry,
@@ -968,7 +1078,7 @@ export function pluginOrigin(home: string): PluginOrigin {
   let declared = false;
   if ("why" in record) {
     // a symbolic link or past doctor's bound: Claude Code reads it, doctor does not
-    if (record.doctorOnly) return refused(`${known} is ${record.why}`);
+    if (record.doctorOnly) return refused(`${known} is ${record.why}`, true);
     if (record.why !== "missing")
       return unloaded(
         "unreadable",
@@ -980,20 +1090,28 @@ export function pluginOrigin(home: string): PluginOrigin {
         "unreadable",
         `${known} is not a JSON object: Claude Code loads no marketplace plugin while it cannot read it`,
       );
-    // one record without a usable source fails the whole file's schema (Claude Code 2.1.308's Bcs)
-    const usable = (m: unknown): m is { source: Record<string, unknown> } =>
-      isObj(m) && isObj(m.source) && typeof m.source.source === "string";
+    // one record its schema refuses makes Claude Code 2.1.308 refuse the whole file (V-A), and a
+    // source type it does not have may be one a newer client reads: doctor cannot tell then
     const records = Object.entries(record.value).slice(0, MAX_LISTED_PLUGINS);
-    const broken = records.find(([, m]) => !usable(m));
-    if (broken !== undefined)
+    const states = records.map(([name, m]) => ({ name, state: marketplaceRecordState(m) }));
+    const who = (name: string): string =>
+      name === MARKETPLACE_NAME ? `the ${MARKETPLACE_NAME} marketplace` : "a marketplace";
+    const broken = states.find((r) => r.state.kind === "broken");
+    if (broken?.state.kind === "broken")
       return unloaded(
         "unreadable",
-        `${known} records ${broken[0] === MARKETPLACE_NAME ? `the ${MARKETPLACE_NAME} marketplace` : "a marketplace"} with no usable source, which fails its schema: Claude Code loads no marketplace plugin while it cannot read it`,
+        `${known} records ${who(broken.name)} ${broken.state.what}, which fails its schema: Claude Code loads no marketplace plugin while it cannot read it`,
+      );
+    const strange = states.find((r) => r.state.kind === "unknown");
+    if (strange?.state.kind === "unknown")
+      return refused(
+        `${known} records ${who(strange.name)} with a source type doctor does not know${strange.state.type === null ? "" : ` (${strange.state.type})`}: Claude Code 2.1.308 refuses such a file, and a newer client may read it`,
+        true,
       );
     const m = Object.hasOwn(record.value, MARKETPLACE_NAME)
       ? record.value[MARKETPLACE_NAME]
       : undefined;
-    if (usable(m)) source = m.source;
+    if (isObj(m) && isObj(m.source)) source = m.source;
   }
   if (source === null) {
     const state = "why" in record ? "is missing" : `records no ${MARKETPLACE_NAME} marketplace`;

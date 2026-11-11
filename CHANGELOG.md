@@ -333,38 +333,46 @@ minor version (plan 04 §4.4; plan 09 K6). One version covers the server, the Sk
 
 - **`eff doctor` named the wrong server and the wrong plugin copy.** Row 2 counted the Yahoo
   sibling's server (registered as `fantasy-football-mcp-server`, launching its own `dist/cli.js
-  serve`) as a second registration of this one, called it "entry ok" and pointed at
-  `eff uninstall`; row 24 failed on an old cache copy of the plugin that Claude Code no longer runs.
-  An entry is now this server only when what it launches is this package (its `package.json` name,
-  this plugin's manifest beside the shim, its `eff` link from `npm link` or a global install as the
-  program run, or `npx espn-fantasy-football-mcp`), under any key: the sibling is "also installed
-  (fine)", another package under this server's key is left alone, and an entry whose package cannot
-  be read is said once and never counted or offered for removal. An `eff` that is only another
-  program's argument (`uv --directory eff`) is not this server. Under this server's own key, an
-  entry still counts as this server when it names one of this package's programs that doctor cannot
-  place (a missing build, a relative path, `eff` from the PATH), so a broken registration is
-  diagnosed; one that names none of them (`uv run server.py`, any other program) is said once and
-  left alone, and `eff uninstall` no longer prints a `claude mcp remove espn-fantasy-football` that
-  would remove it. A registration by package name (npx, npm exec) is diagnosed without running npx.
-  Doctor and `eff uninstall` never print a launch word that holds more than a path (an `sh -c`
-  command line can carry `ESPN_S2=…` and other values), and their lines pass the log redaction.
-  Every view of a Claude Code session counts its registrations: the user scope, the session
-  directory's local scope, and the `.mcp.json` of that directory and of every directory above it,
-  less any project server the user declined (`disabledMcpjsonServers`), which is said but never
+  serve`) as a second registration of this one, called it "entry ok" and pointed at `eff uninstall`;
+  row 24 failed on an old cache copy of the plugin that Claude Code no longer runs. An entry is now
+  this server only when what it launches is this package (its `package.json` name, this plugin's
+  manifest beside the shim, its `eff` link from `npm link` or a global install as the program run,
+  or `npx espn-fantasy-football-mcp`), under any key: the sibling is "also installed (fine)",
+  another package under this server's key is left alone, and an entry whose package cannot be read
+  is said once and never counted or offered for removal. An `eff` that is only another program's
+  argument (`uv --directory eff`) is not this server. Under this server's own key, an entry still
+  counts as this server when it names one of this package's programs that doctor cannot place (a
+  missing build, a relative path, `eff` from the PATH), so a broken registration is diagnosed; one
+  that names none of them (`uv run server.py`, any other program) is said once and left alone, and
+  `eff uninstall` no longer prints a `claude mcp remove espn-fantasy-football` that would remove it.
+  A registration by package name (npx, npm exec) is diagnosed without running npx. Doctor and `eff
+  uninstall` never print a launch word that holds more than a path (an `sh -c` command line can
+  carry `ESPN_S2=…` and other values), and their lines pass the log redaction. Each project
+  directory Claude Code records (`~/.claude.json` `projects`) is one session view that counts its
+  registrations: the user scope, that directory's local scope, and the `.mcp.json` of that directory
+  and of every directory above it, less the project servers its settings decline
+  (`disabledMcpjsonServers`). A parent directory's `.mcp.json` counts only in the projects below it,
+  never as a session of its own, and an entry declined in every one of them is said and never
   counted; Claude Desktop's config is one view. Two keys in a view are the duplicate, the plugin or
-  not, and the fix lists the exact `claude mcp remove` of all but one, keeping the entry that reaches
-  the most sessions. A `claude mcp add` entry that runs the plugin's own command line is one server
-  with it (Claude Code drops the plugin's copy), not two. The plugin is judged where Claude Code
-  reads it: in place from a folder marketplace (recorded in `known_marketplaces.json`, or declared
-  under `extraKnownMarketplaces` in the user settings), with or without an install record, or the
-  cache copy for a marketplace Claude Code fetches. A cache copy left from a folder marketplace is
-  never failed on; doctor names it as one the current client does not run (and says when nothing is
+  not, and the fix lists the exact `claude mcp remove` of all but one, keeping the entry that
+  reaches the most sessions — never removing one that leaves a session with no server: where every
+  removal would, it says to keep one there and decline the others in that directory's settings. A
+  `claude mcp add` entry that runs the plugin's own command line is one server with it (Claude Code
+  drops the plugin's copy), not two. The plugin is judged where Claude Code reads it: in place from
+  a folder marketplace (recorded in `known_marketplaces.json`, or declared under
+  `extraKnownMarketplaces` in the user settings), with or without an install record, or the cache
+  copy for a marketplace Claude Code fetches. A cache copy left from a folder marketplace is never
+  failed on; doctor names it as one the current client does not run (and says when nothing is
   there). Row 2 fails when Claude Code cannot load the plugin: a folder marketplace whose listing is
   missing, unreadable, or no longer lists the plugin (the fix adds the marketplace again), a
-  marketplace it does not know, or a `known_marketplaces.json` it cannot read. When doctor does not
-  follow the plugin's source, or `known_marketplaces.json` is a symbolic link, row 2 warns. In none
-  of these cases is the cache copy judged as what runs, and `eff print-config --client code` warns of
-  a duplicate only for a plugin Claude Code loads. `eff uninstall` follows the same rules.
+  marketplace it does not know, or a `known_marketplaces.json` it cannot read: not JSON, or holding
+  one record of any marketplace that Claude Code's own schema refuses (no `installLocation` or
+  `lastUpdated`, a source without the field its type needs), under which Claude Code loads no
+  marketplace plugin at all. When doctor does not follow the plugin's source, or
+  `known_marketplaces.json` is a symbolic link or records a source type Claude Code 2.1.308 does not
+  have, row 2 warns. In none of these cases is the cache copy judged as what runs, and `eff
+  print-config --client code` warns of a duplicate only for a plugin Claude Code loads. `eff
+  uninstall` follows the same rules.
 - **The Linux CI stall (plan 10 A16a).** SQLite's automatic WAL checkpoint ran inside a commit on
   the event loop: on the Linux CI runner one cache `INSERT` held the loop 36–89 ms, waiting on I/O.
   `eff serve` now runs PASSIVE checkpoints on a worker thread with its own connection, at SQLite's
