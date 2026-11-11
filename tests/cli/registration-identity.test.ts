@@ -41,11 +41,19 @@ import {
 } from "node:fs";
 import path from "node:path";
 import { afterEach, describe, expect, it } from "vitest";
-import { removeCommand, scanClientConfig, scanPlugin } from "../../src/cli/client-config.js";
-import { checkLaunchConfig, checkStaleBuild } from "../../src/cli/doctor.js";
+import { fakeEspnS2, fakeGuid } from "../../scripts/ci/secret-fixtures.mjs";
+import {
+  classifyEntry,
+  duplicateRegistrations,
+  installedPluginsPath as installedPluginsPathOf,
+  removeCommand,
+  scanClientConfig,
+  scanPlugin,
+} from "../../src/cli/client-config.js";
+import { checkClientSecrecy, checkLaunchConfig, checkStaleBuild } from "../../src/cli/doctor.js";
 import { main } from "../../src/cli/main.js";
 import { findRegistrations, manualSteps } from "../../src/cli/uninstall.js";
-import { fakeExec, makeIo, ROOT, sandbox, type Sandbox } from "./helpers.js";
+import { fakeExec, fakePackage, makeIo, ROOT, sandbox, type Sandbox } from "./helpers.js";
 
 let sb: Sandbox;
 afterEach(() => {
@@ -322,9 +330,13 @@ describe("Defect A: an entry is this server by what it launches, not by its args
     expect(scan.siblingInstalled).toBe(false);
     const r = await checkLaunchConfig(makeIo(sb, { exec: shimOk }), [scan], scanPlugin(sb.home));
     expect(r.status).toBe("warn");
-    // one session in that project directory sees all four keys and the plugin (verifier A-F3)
+    // one session in that project directory sees all four keys (verifier A-F3); `espn-shim` runs the
+    // plugin's very command line, so Claude Code drops the plugin's server there (R-P4)
     expect(r.message).toBe(
-      "Claude Code registers this server five times: the plugin AND four `claude mcp add` entries under different keys — five servers, every tool listed five times",
+      "Claude Code registers this server four times: four `claude mcp add` entries under different keys — four servers, every tool listed four times",
+    );
+    expect(r.details).toContain(
+      `code (user scope): runs the plugin's own command line (/bin/sh ${path.join(folder, "scripts", "eff-launch.sh")} serve) — Claude Code drops the plugin's server as a duplicate of it, so they are one server`,
     );
     // the exact commands, never a pointer at `eff uninstall` (whose real run deletes the install)
     expect(r.fix).not.toContain("eff uninstall");
@@ -815,38 +827,6 @@ describe("Defect B: the plugin is judged where Claude Code reads it", () => {
     }
   });
 
-  it("known_marketplaces.json missing, malformed or without the marketplace: the cache copy is judged as before, and the source is said to be unknown", () => {
-    for (const record of [
-      null,
-      "{ not json",
-      { "other-market": { source: { source: "github" } } },
-    ]) {
-      sb = sandbox();
-      const { folder, cache } = installPlugin(sb.home, null);
-      const known = path.join(sb.home, ".claude", "plugins", "known_marketplaces.json");
-      if (record !== null) write(known, record);
-      const plugin = scanPlugin(sb.home);
-      expect(plugin?.origin.kind, JSON.stringify(record)).toBe("unknown");
-      expect(plugin?.copies[0]?.root).toBe(cache);
-      const r = checkStaleBuild(folder, plugin);
-      expect(r.status, JSON.stringify(record)).toBe("fail");
-      expect(r.message).toContain("plugin copy is older than this clone");
-      const note = r.details.find((l) => l.startsWith("the plugin's source is unknown — "));
-      expect(note, JSON.stringify(record)).toContain(
-        `so the cache copy ${cache} is judged as what Claude Code runs`,
-      );
-      expect(note).toContain(
-        record === null
-          ? `${known} is missing`
-          : typeof record === "string"
-            ? `${known} is not JSON`
-            : `${known} records no ${MARKETPLACE} marketplace with a source`,
-      );
-      sb.cleanup();
-    }
-    sb = sandbox(); // afterEach cleans one up
-  });
-
   it("a folder marketplace whose plugin source doctor does not follow (absolute, .., a symlink out, a bare name): row 2 warns it cannot tell what runs, and the cache copy is never judged (B1)", async () => {
     sb = sandbox();
     const outside = espnCopy(path.join(sb.dir, "elsewhere"), { builtAt: "2026-11-20T00:00:00Z" });
@@ -1117,5 +1097,479 @@ describe("Defect B: the plugin is judged where Claude Code reads it", () => {
     expect(row2?.message).not.toContain("twice");
     expect(row24?.status).toBe("ok");
     expect(row24?.details.join("\n")).toContain(`and does not run the cache copy ${cache}`);
+  });
+});
+
+// Refix round 1 (verifiers R and F, 2026-11-11): what row 2 and uninstall print, which words are a
+// program, and Claude Code 2.1.308's own load and dedupe rules — each case failed before its fix.
+describe("Refix round 1: never a value printed; a program only in program position (R-P1, R-P2, R-P6)", () => {
+  it("a word holding more than a path (an `sh -c` line with NAME=value assignments) is never printed: not in row 2's details or fix, `--json` or text, nor uninstall's steps (R-P1)", async () => {
+    sb = sandbox({ create: true });
+    const s2 = fakeEspnS2("refix-p1", 220);
+    const guid = fakeGuid("refix-p1");
+    const token = `tok_${"0123456789abcdef".repeat(2)}`;
+    const assigns = `ESPN_S2=${s2} SWID={${guid}} API_TOKEN=${token}`;
+    const folder = espnCopy(path.join(sb.home, "src", "espn-fantasy-football-mcp"));
+    const cli = path.join(folder, "dist", "cli.js");
+    const desk = path.join(sb.dir, "claude_desktop_config.json");
+    write(desk, {
+      mcpServers: {
+        "espn-fantasy-football": {
+          command: "/bin/sh",
+          args: ["-c", `${assigns} exec node ${cli}`],
+        },
+        "espn-desk": {
+          command: "/bin/sh",
+          args: ["-c", `${assigns} exec node /opt/x/dist/cli.js`],
+        },
+      },
+    });
+    const code = claudeJson(sb.home, {
+      "espn-sh": { command: "/bin/sh", args: ["-c", `${assigns} exec /usr/local/bin/eff`] },
+      "espn-node": { command: "/bin/sh", args: ["-c", `${assigns} exec node /opt/x/dist/cli.js`] },
+      "espn-abs": { command: "/opt/run", args: [`/opt/run ${assigns} /opt/x/dist/cli.js`] },
+      "espn-fantasy-football": {
+        command: `SWID={${guid}} API_TOKEN=${token} /usr/bin/uv`,
+        args: ["run", "server.py"],
+      },
+      "espn-two": launch(cli),
+      // a key of ours holding a GUID: printed in the fix and the steps, redacted there (defence)
+      [`espn-{${guid}}`]: launch(cli),
+    });
+    const scans = [scanClientConfig("desktop", desk), scanClientConfig("code", code)];
+    // what is said: never the word, only that a command line is there
+    for (const n of scans.flatMap((s) => s.notOurs))
+      expect(n.target === null || !/[\s=]/u.test(n.target), String(n.target)).toBe(true);
+    const r = await checkLaunchConfig(makeIo(sb, { exec: shimOk }), scans, null);
+    expect(r.details).toContain(
+      "code (user scope): an entry launches a command line doctor does not print, and doctor cannot tell what it launches (it is a shell command line, which doctor does not parse) — not counted as this server",
+    );
+    expect(r.details).toContain(
+      "code (user scope): the `espn-fantasy-football` key launches a command line doctor does not print, and doctor cannot tell what it launches (its command line names no dist/cli.js, scripts/eff-launch.sh or this package's `eff`) — not counted as this server",
+    );
+    const env = { ESPN_LEAGUE_ID: "0", EFF_CREDENTIAL_STORE: "file" };
+    const asJson = makeIo(sb, { exec: shimOk, env });
+    await main(["doctor", "--json", "--client-config", desk], asJson);
+    const asText = makeIo(sb, { exec: shimOk, env });
+    await main(["doctor", "--client-config", desk], asText);
+    const steps = manualSteps(sb.home, [], { scans, plugin: null }).join("\n");
+    expect(steps).toContain("launches a command line uninstall does not print");
+    const rowText = [...r.details, r.message, r.fix ?? ""].join("\n");
+    for (const [label, out] of [
+      ["row 2", rowText],
+      ["--json", asJson.out.text],
+      ["text", asText.out.text],
+      ["uninstall", steps],
+    ] as const) {
+      expect(out, label).not.toContain(s2.slice(0, 24));
+      expect(out.toUpperCase(), label).not.toContain(guid);
+      expect(out, label).not.toContain(token);
+      expect(out, label).not.toMatch(/(?:ESPN_S2|SWID|API_TOKEN)=(?!\[redacted)/u);
+    }
+  });
+
+  it("`eff` counts as this package's program only in program position — `--directory eff`, `--profile eff` and `tools/eff` as arguments are not this server, not counted, never removed, never run (R-P2)", async () => {
+    sb = sandbox();
+    const other = path.join(sb.home, "Developer", "other-mcp", "bin", "server");
+    write(other, "#!/bin/sh\n");
+    chmodSync(other, 0o755);
+    const why =
+      "its command line names no dist/cli.js, scripts/eff-launch.sh or this package's `eff`";
+    for (const spec of [
+      { command: "/usr/bin/env", args: ["uv", "--directory", "eff", "run", "server.py"] },
+      { command: "/usr/bin/env", args: ["uv", "--directory", "tools/eff", "run", "server.py"] },
+      { command: other, args: ["--profile", "eff"] },
+      { command: other, args: ["tools/eff"] },
+    ]) {
+      const label = JSON.stringify(spec);
+      const code = claudeJson(sb.home, { "espn-fantasy-football": spec });
+      const scan = scanClientConfig("code", code);
+      expect(scan.entries, label).toEqual([]);
+      expect(
+        scan.notOurs.map((n) => [n.kind, n.ownKey, n.target, n.why]),
+        label,
+      ).toEqual([["undetermined", true, spec.command, why]]);
+      const ex = fakeExec(() => ({ stdout: "v24.21.0\n" }));
+      const r = await checkLaunchConfig(makeIo(sb, { exec: ex.exec }), [scan], null);
+      // it was: fail "a client launches the server with a bad path…", `<server> --version` run
+      expect(r.status, label).toBe("warn");
+      expect(r.message, label).toBe("no client is configured to launch this server");
+      expect(
+        ex.calls.filter((c) => c.file === other),
+        label,
+      ).toEqual([]);
+      const steps = manualSteps(sb.home, [], { scans: [scan], plugin: null }).join("\n");
+      expect(steps, label).not.toContain("claude mcp remove --scope user espn-fantasy-football");
+    }
+    // in program position `eff` still counts: after env, as node's script, a relative command
+    const folder = espnCopy(path.join(sb.home, "src", "espn-fantasy-football-mcp"));
+    const bin = path.join(sb.dir, "bin");
+    mkdirSync(bin);
+    symlinkSync(path.join(folder, "dist", "cli.js"), path.join(bin, "eff"));
+    const scan = scanClientConfig(
+      "code",
+      claudeJson(sb.home, {
+        "espn-env": {
+          command: "/usr/bin/env",
+          args: ["-i", "HOME=/x", path.join(bin, "eff"), "serve"],
+        },
+        "espn-node": {
+          command: process.execPath,
+          args: ["--no-warnings", path.join(bin, "eff"), "serve"],
+        },
+        "espn-fantasy-football": { command: "tools/eff", args: ["serve"] },
+      }),
+    );
+    expect(scan.entries.map((e) => e.name)).toEqual([
+      "espn-env",
+      "espn-node",
+      "espn-fantasy-football",
+    ]);
+  });
+
+  it("`npx espn-fantasy-football-mcp` names this package: ours under any key — never the sibling's, never undetermined — and diagnosed without running npx (R-P6)", async () => {
+    sb = sandbox();
+    installPlugin(sb.home, folderMarketplace(sb.home));
+    const npx = path.join(sb.dir, "bin", "npx");
+    write(npx, "#!/bin/sh\n");
+    chmodSync(npx, 0o755);
+    const byName = { command: "npx", args: ["-y", "espn-fantasy-football-mcp", "serve"] };
+    for (const key of ["fantasy-football", "espn", "espn-fantasy-football"])
+      expect(classifyEntry(key, byName).owner, key).toBe("ours");
+    // the package named as another program's argument is not this server
+    expect(
+      classifyEntry("espn-label", {
+        command: "/opt/tool",
+        args: ["--label", "espn-fantasy-football-mcp"],
+      }).owner,
+    ).toBe("other");
+    const code = claudeJson(sb.home, {
+      "fantasy-football": byName,
+      "espn-abs": { command: npx, args: ["--yes", "espn-fantasy-football-mcp@0.0.0", "serve"] },
+    });
+    const scan = scanClientConfig("code", code);
+    expect(scan.siblingInstalled).toBe(false);
+    expect(scan.entries.map((e) => e.name)).toEqual(["fantasy-football", "espn-abs"]);
+    const ex = fakeExec(() => ({ stdout: '{"node":"24.21.0","exec_path":"/n/bin/node"}\n' }));
+    const r = await checkLaunchConfig(makeIo(sb, { exec: ex.exec }), [scan], scanPlugin(sb.home));
+    const text = r.details.join("\n");
+    // it was: "the sibling's `fantasy-football` server is also installed (fine)", no duplicate
+    expect(text).not.toContain("the sibling's");
+    expect(r.status).toBe("fail");
+    expect(r.message).toBe("a client launches the server with a bad path, Node or location");
+    expect(text).toContain(
+      "code (user scope): it runs this package by name (npx, npm exec) — doctor cannot tell which install or version that starts: use `eff print-config`'s entry",
+    );
+    expect(r.fix).toContain("`claude mcp remove --scope user fantasy-football`");
+    expect(r.fix).toContain("`claude mcp remove --scope user espn-abs`");
+    expect(ex.calls.filter((c) => c.file === npx)).toEqual([]);
+  });
+});
+
+describe("Refix round 1: Claude Code 2.1.308's own dedupe and project-scope rules (R-P4, R-P5a, R-P5b, R-T1)", () => {
+  it("a `claude mcp add` entry running the plugin's own command line: Claude Code drops the plugin's server, so they are one server, not two (R-P4)", async () => {
+    sb = sandbox();
+    const { folder } = installPlugin(sb.home, folderMarketplace(sb.home));
+    const shim = path.join(folder, "scripts", "eff-launch.sh");
+    const same = { command: "/bin/sh", args: [shim, "serve"], env: { ESPN_LEAGUE_ID: "0" } };
+    const io = makeIo(sb, { exec: shimOk });
+    const one = await checkLaunchConfig(
+      io,
+      [scanClientConfig("code", claudeJson(sb.home, { "espn-fantasy-football": same }))],
+      scanPlugin(sb.home),
+    );
+    // it was: warn "Claude Code registers this server twice: the plugin AND a `claude mcp add` entry"
+    expect(one.status).toBe("ok");
+    expect(one.message).not.toContain("twice");
+    expect(one.details).toContain(
+      `code (user scope): runs the plugin's own command line (/bin/sh ${shim} serve) — Claude Code drops the plugin's server as a duplicate of it, so they are one server`,
+    );
+    // in one project directory only: the plugin is dropped there, and still runs everywhere else
+    const work = path.join(sb.home, "work");
+    const local = await checkLaunchConfig(
+      io,
+      [scanClientConfig("code", claudeJson(sb.home, {}, { [work]: { "espn-w": same } }))],
+      scanPlugin(sb.home),
+    );
+    expect(local.status).toBe("ok");
+    // another command line (one more argument) is a second server, as before
+    const other = await checkLaunchConfig(
+      io,
+      [
+        scanClientConfig(
+          "code",
+          claudeJson(sb.home, {
+            "espn-fantasy-football": { command: "/bin/sh", args: [shim, "serve", "--quiet"] },
+          }),
+        ),
+      ],
+      scanPlugin(sb.home),
+    );
+    expect(other.message).toContain("registers this server twice");
+  });
+
+  it("a project server the user declined (`disabledMcpjsonServers`) is never started: said, its env still scanned, never counted or offered for removal (R-P5a)", async () => {
+    for (const where of ["local", "project", "user"] as const) {
+      sb = sandbox();
+      const one = espnCopy(path.join(sb.home, "src", "espn-fantasy-football-mcp"));
+      const c1 = path.join(one, "dist", "cli.js");
+      const a = path.join(sb.home, "a");
+      write(path.join(a, ".mcp.json"), {
+        mcpServers: { "espn-p": { ...launch(c1), env: { ESPN_S2: "x" } } },
+      });
+      const settings =
+        where === "local"
+          ? path.join(a, ".claude", "settings.local.json")
+          : where === "project"
+            ? path.join(a, ".claude", "settings.json")
+            : path.join(sb.home, ".claude", "settings.json");
+      write(settings, { disabledMcpjsonServers: ["espn-p"] });
+      const scan = scanClientConfig(
+        "code",
+        claudeJson(sb.home, {}, { [a]: { "espn-a": launch(c1) } }),
+      );
+      const r = await checkLaunchConfig(makeIo(sb, { exec: shimOk }), [scan]);
+      // it was: warn "registers this server twice … two `claude mcp add` entries", fix removing espn-p
+      expect(r.status, where).toBe("ok");
+      expect(r.fix, where).toBeNull();
+      expect(r.details, where).toContain(
+        `code (project scope, ${path.join(a, ".mcp.json")}): declined in Claude Code's settings (\`disabledMcpjsonServers\`) — Claude Code does not start it, so it is not counted`,
+      );
+      expect(r.message, where).toBe("1 client registration with absolute, existing paths");
+      // row 3 still reads its env
+      expect(checkClientSecrecy([scan]).details.join("\n"), where).toContain(
+        `code (project scope, ${path.join(a, ".mcp.json")}): an env key named like an ESPN cookie`,
+      );
+      sb.cleanup();
+    }
+    sb = sandbox();
+  });
+
+  it("an ancestor directory's .mcp.json is in every session below it: a duplicate there is caught, its env scanned, and the fix keeps the wider entry (R-P5b)", async () => {
+    sb = sandbox();
+    const one = espnCopy(path.join(sb.home, "src", "espn-fantasy-football-mcp"));
+    const c1 = path.join(one, "dist", "cli.js");
+    const work = path.join(sb.home, "work");
+    write(path.join(sb.home, ".mcp.json"), {
+      mcpServers: { "espn-p": { ...launch(c1), env: { SWID: "x" } } },
+    });
+    const scan = scanClientConfig(
+      "code",
+      claudeJson(sb.home, {}, { [work]: { "espn-a": launch(c1) } }),
+    );
+    expect(scan.entries.map((e) => [e.name, e.scope, e.dir])).toEqual([
+      ["espn-a", "local", work],
+      ["espn-p", "project", sb.home],
+    ]);
+    expect(duplicateRegistrations(scan.entries, scan.sessions).most).toBe(2);
+    const r = await checkLaunchConfig(makeIo(sb, { exec: shimOk }), [scan]);
+    // it was: ok "1 client registration…", fix null, while every session in ~/work ran two servers
+    expect(r.status).toBe("warn");
+    expect(r.message).toBe(
+      "Claude Code registers this server twice: two `claude mcp add` entries under different keys — two servers, every tool listed twice",
+    );
+    // ~/.mcp.json reaches every session under ~: the entry kept; the local one in ~/work goes
+    expect(r.fix).toBe(
+      `keep one: remove the other entry (\`cd ${work} && claude mcp remove --scope local espn-a\`); then restart the client`,
+    );
+    expect(checkClientSecrecy([scan]).details).toContain(
+      `code (project scope, ${path.join(sb.home, ".mcp.json")}): an env key named like an ESPN cookie`,
+    );
+    // an ancestor's entry removed from its own directory
+    write(path.join(work, ".mcp.json"), { mcpServers: { "espn-w": launch(c1) } });
+    const three = scanClientConfig("code", claudeJson(sb.home, {}, { [work]: {} }));
+    const r3 = await checkLaunchConfig(makeIo(sb, { exec: shimOk }), [three]);
+    expect(r3.fix).toBe(
+      `keep one: remove the other entry (\`cd ${work} && claude mcp remove --scope project espn-w\`); then restart the client`,
+    );
+  });
+
+  it("the entry kept is the user scope's `espn-fantasy-football` even when it is not the first key, and in a project directory its `espn-fantasy-football` (R-T1)", async () => {
+    sb = sandbox();
+    const one = espnCopy(path.join(sb.home, "src", "espn-fantasy-football-mcp"));
+    const c1 = path.join(one, "dist", "cli.js");
+    const user = await checkLaunchConfig(makeIo(sb, { exec: shimOk }), [
+      scanClientConfig(
+        "code",
+        claudeJson(sb.home, { "espn-release": launch(c1), "espn-fantasy-football": launch(c1) }),
+      ),
+    ]);
+    expect(user.fix).toBe(
+      "keep one: remove the other entry (`claude mcp remove --scope user espn-release`); then restart the client",
+    );
+    const a = path.join(sb.home, "a");
+    write(path.join(a, ".mcp.json"), { mcpServers: { "espn-fantasy-football": launch(c1) } });
+    const dir = await checkLaunchConfig(makeIo(sb, { exec: shimOk }), [
+      scanClientConfig("code", claudeJson(sb.home, {}, { [a]: { "espn-x": launch(c1) } })),
+    ]);
+    expect(dir.fix).toBe(
+      `keep one: remove the other entry (\`cd ${a} && claude mcp remove --scope local espn-x\`); then restart the client`,
+    );
+  });
+});
+
+describe("Refix round 1: the plugin as Claude Code 2.1.308 loads it (F1, F2, F3)", () => {
+  const settingsOf = (home: string): string => path.join(home, ".claude", "settings.json");
+  const knownOf = (home: string): string =>
+    path.join(home, ".claude", "plugins", "known_marketplaces.json");
+  /** The user settings: the plugin enabled, and `declared` under extraKnownMarketplaces. */
+  const declare = (home: string, declared: unknown): void => {
+    write(settingsOf(home), {
+      enabledPlugins: { [PLUGIN_ID]: true },
+      extraKnownMarketplaces: { [MARKETPLACE]: declared },
+    });
+  };
+
+  it("known_marketplaces.json not JSON, or with no usable record, and no declaration: Claude Code loads nothing — row 2 fails with the re-add, row 24 never judges the cache copy (F1a)", async () => {
+    for (const record of [
+      null,
+      "{ not json",
+      { "other-market": { source: { source: "github" } } },
+      { [MARKETPLACE]: { source: 7 } },
+    ]) {
+      sb = sandbox();
+      const label = JSON.stringify(record);
+      const { folder, cache } = installPlugin(sb.home, null);
+      const known = knownOf(sb.home);
+      if (record !== null) write(known, record);
+      const plugin = scanPlugin(sb.home);
+      // these cases were "unknown" and judged by the cache copy (Defect B's first model): Claude
+      // Code 2.1.308 never runs that copy for them — it loads nothing
+      const unreadable = typeof record === "string" || (record !== null && MARKETPLACE in record);
+      expect(plugin?.origin.kind, label).toBe("unloaded");
+      expect(plugin?.copies[0]?.root, label).toBeNull();
+      // it was: row 24 failed on the cache copy, row 2 ok "the plugin registers the server (<cache>)"
+      const r24 = checkStaleBuild(folder, plugin);
+      expect(r24.status, label).toBe("ok");
+      expect(r24.details.join("\n"), label).not.toContain(`plugin copy ${cache}`);
+      expect(r24.details, label).toContain(
+        `the cache copy ${cache} is not judged: Claude Code cannot load the plugin (row 2)`,
+      );
+      const r2 = await checkLaunchConfig(makeIo(sb, { exec: shimOk }), [], plugin);
+      expect(r2.status, label).toBe("fail");
+      expect(r2.message, label).toBe(
+        unreadable
+          ? "Claude Code cannot load the plugin: it cannot read known_marketplaces.json"
+          : "Claude Code cannot load the plugin: its marketplace is not known to it",
+      );
+      expect(r2.details.join("\n"), label).not.toContain("the plugin registers the server");
+      expect(r2.details.join("\n"), label).toContain("code: Claude Code cannot load the plugin — ");
+      expect(r2.fix, label).toContain("`claude plugin marketplace add <the runtime clone>`");
+      sb.cleanup();
+    }
+    // another marketplace's record with no usable source fails the whole file: nothing loads
+    sb = sandbox();
+    installPlugin(sb.home, folderMarketplace(sb.home));
+    write(knownOf(sb.home), {
+      [MARKETPLACE]: folderMarketplace(sb.home),
+      "other-market": { installLocation: "/x" },
+    });
+    expect(scanPlugin(sb.home)?.origin).toEqual({
+      kind: "unloaded",
+      registry: "unreadable",
+      why: `${knownOf(sb.home)} records a marketplace with no usable source, which fails its schema: Claude Code loads no marketplace plugin while it cannot read it`,
+    });
+  });
+
+  it("no record, but the user settings declare the folder (extraKnownMarketplaces, as on the owner's Mac): read in place, the cache copy a leftover; a symlinked file is doctor's own refusal (F1b)", async () => {
+    for (const record of [null, { "other-market": { source: { source: "github" } } }]) {
+      sb = sandbox();
+      const label = JSON.stringify(record);
+      const { folder, cache } = installPlugin(sb.home, null);
+      if (record !== null) write(knownOf(sb.home), record);
+      declare(sb.home, { source: { source: "directory", path: folder } });
+      const plugin = scanPlugin(sb.home);
+      expect(plugin?.origin, label).toEqual({
+        kind: "folder",
+        root: folder,
+        marketplaceDir: folder,
+        declared: true,
+      });
+      // it was: row 24 FAIL "1 plugin copy is older than this clone", the uninstall/reinstall fix
+      const r24 = checkStaleBuild(folder, plugin);
+      expect(r24.status, label).toBe("ok");
+      expect(r24.details.join("\n"), label).toContain(`does not run the cache copy ${cache}`);
+      const r2 = await checkLaunchConfig(makeIo(sb, { exec: shimOk }), [], plugin);
+      expect(r2.status, label).toBe("ok");
+      expect(r2.details, label).toContain(
+        `code: the ${MARKETPLACE} marketplace is declared in ${settingsOf(sb.home)} (extraKnownMarketplaces), not recorded in known_marketplaces.json: Claude Code reads its folder in place all the same`,
+      );
+      sb.cleanup();
+    }
+    // a declaration Claude Code does not load before recording it: nothing loads
+    for (const [declared, why] of [
+      [{ source: { source: "github", repo: "x/y" } }, "a source Claude Code fetches"],
+      [{ source: { source: "directory", path: "src/x" } }, "no absolute path"],
+    ] as const) {
+      sb = sandbox();
+      installPlugin(sb.home, null);
+      declare(sb.home, declared);
+      const o = scanPlugin(sb.home)?.origin;
+      expect(o?.kind, why).toBe("unloaded");
+      expect(o !== undefined && "why" in o ? o.why : "", why).toContain(why);
+      sb.cleanup();
+    }
+    // known_marketplaces.json through a symbolic link: Claude Code follows it, doctor does not
+    sb = sandbox();
+    const { folder, cache } = installPlugin(sb.home, null);
+    const real = path.join(sb.dir, "known.json");
+    write(real, { [MARKETPLACE]: folderMarketplace(sb.home) });
+    symlinkSync(real, knownOf(sb.home));
+    const plugin = scanPlugin(sb.home);
+    expect(plugin?.origin.kind).toBe("refused");
+    const r24 = checkStaleBuild(folder, plugin);
+    expect(r24.status).toBe("ok");
+    expect(r24.details.join("\n")).not.toContain(`plugin copy ${cache}`);
+    expect((await checkLaunchConfig(makeIo(sb, { exec: shimOk }), [], plugin)).status).toBe("warn");
+  });
+
+  it("an enabled plugin a folder marketplace lists, with no install record: Claude Code loads it — doctor counts it, catches the duplicate, and print-config warns (F2)", async () => {
+    sb = sandbox({ create: true });
+    const { folder } = installPlugin(sb.home, folderMarketplace(sb.home));
+    rmSync(installedPluginsPathOf(sb.home));
+    const plugin = scanPlugin(sb.home);
+    // it was: null — "no client is configured to launch this server", the reinstall pointer
+    expect(plugin?.copies).toEqual([
+      { scope: "user", root: folder, installPath: null, version: null },
+    ]);
+    const alone = await checkLaunchConfig(makeIo(sb, { exec: shimOk }), [], plugin);
+    expect(alone.status).toBe("ok");
+    expect(alone.details).toContain(
+      `code: the plugin registers the server (user scope, ${folder}, read in place from its folder marketplace)`,
+    );
+    expect(alone.details).toContain(
+      `code: installed_plugins.json has no record of the plugin: Claude Code reads it in place from its folder (${folder}) without one`,
+    );
+    const code = claudeJson(sb.home, {
+      "espn-fantasy-football": launch(path.join(folder, "dist", "cli.js")),
+    });
+    const dup = await checkLaunchConfig(
+      makeIo(sb, { exec: shimOk }),
+      [scanClientConfig("code", code)],
+      plugin,
+    );
+    expect(dup.message).toContain("registers this server twice");
+    const pc = makeIo(sb, { packageRoot: fakePackage(sb), env: { ESPN_LEAGUE_ID: "0" } });
+    expect(await main(["print-config", "--client", "code"], pc)).toBe(0);
+    expect(pc.err.text).toContain("lists every tool twice");
+    expect(manualSteps(sb.home, [], findRegistrations(sb.home)).join("\n")).toContain(
+      `It is installed here (${folder}, read in place from its folder marketplace).`,
+    );
+    // enabled, no record, and a marketplace Claude Code does not know: an orphan it skips
+    rmSync(knownOf(sb.home));
+    expect(scanPlugin(sb.home)).toBeNull();
+  });
+
+  it("print-config's duplicate warning only for a plugin Claude Code loads; one it cannot load is said as such (F3)", async () => {
+    sb = sandbox({ create: true });
+    const { folder } = installPlugin(sb.home, folderMarketplace(sb.home));
+    rmSync(path.join(folder, ".claude-plugin", "marketplace.json"));
+    const pc = makeIo(sb, { packageRoot: fakePackage(sb), env: { ESPN_LEAGUE_ID: "0" } });
+    expect(await main(["print-config", "--client", "code"], pc)).toBe(0);
+    // it was: "it registers this server in Claude Code already. Adding the entry above beside it starts two servers"
+    expect(pc.err.text).not.toContain("starts two servers");
+    expect(pc.err.text).toContain(
+      `eff print-config: warning: the ${PLUGIN_ID} plugin is enabled, but Claude Code cannot load it (\`eff doctor\` row 2 says why): re-add its marketplace, or \`claude plugin uninstall ${PLUGIN_ID}\` before using the entry above — never both.`,
+    );
   });
 });

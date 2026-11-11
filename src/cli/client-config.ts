@@ -8,7 +8,9 @@
 // `~/.claude/plugins/installed_plugins.json` — Stage C finding doctor-plugin-install-invisible: a
 // plugin user was told no client launches the server and steered to the duplicate registration the
 // README forbids). Files are read bounded, never through a symlink, never written; nothing read here
-// is printed but names this program owns, paths, scopes and counts — never an env value.
+// is printed but names this program owns, paths, scopes and counts — never an env value, and never a
+// word that holds more than one path (`printable`; verifier R-P1: an `sh -c` command line carries
+// `NAME=value` assignments, a cookie among them).
 //
 // A copy of this plugin (a clone of the repository, an unpacked release: plan 04 §1, §2 `files`)
 // holds the plugin's own `.mcp.json` (plan 09 §4), which Claude Code also reads as a PROJECT-scope
@@ -29,6 +31,14 @@
 // folder, and installed_plugins.json's `installPath` cache copy is a leftover there — doctor judged
 // that leftover as what runs. A folder marketplace doctor cannot follow is never judged by that
 // copy either (verifier B1): Claude Code reads it in place or loads nothing.
+//
+// Refix round 1 (verifiers R and F, Claude Code 2.1.308's own rules): `eff` and the package's name
+// count only in program position (R-P2, R-P6); a project server the user declined
+// (`disabledMcpjsonServers`) is never started, and every ancestor directory's `.mcp.json` is in a
+// session's project scope (R-P5a/b: `SessionView`); a plugin whose marketplace Claude Code does not
+// know, or whose known_marketplaces.json it cannot read, loads nothing, while one the user settings
+// declare as a folder (`extraKnownMarketplaces`) is read in place (F1); and a folder marketplace's
+// plugin needs no install record (F2).
 import { lstatSync, realpathSync, statSync } from "node:fs";
 import path from "node:path";
 import { PathSecurityError, readSecureFile } from "../config/paths.js";
@@ -68,6 +78,24 @@ export interface ClientEntry {
    * checks its env; row 2 and uninstall never treat it as a launch someone registered.
    */
   readonly pluginSource: boolean;
+  /**
+   * A project-scope entry the user declined (`disabledMcpjsonServers` in the user settings or the
+   * settings of every session directory whose project scope holds it): Claude Code never starts it,
+   * so it is said, its env still checked, and it is never counted or offered for removal (R-P5a).
+   */
+  readonly declined: boolean;
+}
+
+/**
+ * One directory a Claude Code session opens in (a `projects` key of ~/.claude.json, or a directory
+ * holding a `.mcp.json` entry of ours), with the project servers its settings decline
+ * (`disabledMcpjsonServers`: the user settings, `<dir>/.claude/settings.json` and
+ * `<dir>/.claude/settings.local.json`). Its view is the user scope, its own local scope, and the
+ * `.mcp.json` of the directory and every ancestor below the filesystem root (`duplicateRegistrations`).
+ */
+export interface SessionView {
+  readonly dir: string;
+  readonly declined: readonly string[];
 }
 
 /** One entry's env block, where it lives (secrecy is checked over ALL entries — plan 03 §5 #3). */
@@ -100,7 +128,10 @@ export interface NotOursEntry {
   readonly scope: RegistrationScope;
   readonly file: string;
   readonly dir: string | null;
-  /** The path it launches (undetermined only), control characters dropped, bounded. */
+  /**
+   * The path it launches (undetermined only), control characters dropped, bounded — or null when
+   * that word holds more than a path (`printable`: an `sh -c` command line), which is never printed.
+   */
   readonly target: string | null;
   /** Why doctor cannot tell (undetermined only): the file and what is wrong with it. */
   readonly why: string | null;
@@ -124,6 +155,8 @@ export interface ClientConfigScan {
   readonly notOurs: readonly NotOursEntry[];
   /** Claude Code: the project `.mcp.json` files read (project scope), and those that were not JSON. */
   readonly projectFiles: readonly { readonly file: string; readonly state: "ok" | "invalid" }[];
+  /** Claude Code: the session directories and what each declines (`SessionView`). */
+  readonly sessions: readonly SessionView[];
 }
 
 function isObj(v: unknown): v is Record<string, unknown> {
@@ -185,20 +218,24 @@ const MAX_BIN_WORDS = 8;
  * What an entry launches, as far as the files it names tell — read bounded, never through a
  * symlink: `ours` — a `dist/cli.js` whose package root (the directory above `dist/`) has a
  * package.json named `espn-fantasy-football-mcp` (a clone, a release install), or a
- * `scripts/eff-launch.sh` under a copy of this plugin (`isPluginRoot`), or an absolute `eff` whose
- * real path is such a `dist/cli.js` (`npm link`, a global install: package.json `bin`); `sibling` —
- * the sibling's package; `another` — another package (its package.json or plugin manifest names
- * another); `none` — its command line names no program of this package at all (`uv run …`, any
- * other program); `unknown` — it names one, but doctor cannot tell which package it is: its path is
- * not absolute, the file that names its package is missing, unreadable, a symbolic link, too large
- * or not JSON, an `eff` is run from the PATH or resolves to no `dist/cli.js`, or the package is run
- * by name (npx).
+ * `scripts/eff-launch.sh` under a copy of this plugin (`isPluginRoot`), or an absolute `eff` in
+ * program position (`programWords`) whose real path is such a `dist/cli.js` (`npm link`, a global
+ * install: package.json `bin`); `named` — this package run by name in program position (`npx
+ * espn-fantasy-football-mcp`, `npm exec …`: verifier R-P6), which no client resolves to a known
+ * install; `sibling` — the sibling's package; `another` — another package (its package.json or
+ * plugin manifest names another); `none` — its command line names no program of this package at all
+ * (`uv run …`, any other program, an `eff` that is only an argument: verifier R-P2); `unknown` — it
+ * names one, but doctor cannot tell which package it is: its path is not absolute, it is inside a
+ * shell command line, the file that names its package is missing, unreadable, a symbolic link, too
+ * large or not JSON, or an `eff` is run from the PATH or resolves to no `dist/cli.js`.
  */
 export type Launch =
   | { readonly kind: "ours" | "sibling" | "another" | "none" }
+  | { readonly kind: "named"; readonly target: string | null }
   | {
       readonly kind: "unknown";
-      readonly target: string;
+      /** The word it launches, when it is printable (`printable`); null: a command line, not printed. */
+      readonly target: string | null;
       readonly why: string;
       /**
        * The word resolved to a file outside this package's layout (an `eff` that is no link to a
@@ -215,12 +252,62 @@ function shown(s: string, max = 300): string {
 }
 
 /**
+ * Whether a word read from a client config may be printed: one token holding neither whitespace nor
+ * `=` (verifier R-P1: `/bin/sh -c "ESPN_S2=… SWID=… exec …/eff"` printed the cookie). A path with a
+ * space in it is not printed either — said as "a command line", never echoed.
+ */
+export function printable(w: string): boolean {
+  return !/[\s=]/u.test(w);
+}
+
+/** A word as a detail line shows it (`shown`), or null when it is not `printable`. */
+function shownWord(w: string): string | null {
+  return printable(w) ? shown(w) : null;
+}
+
+/** Why a matched word is not resolved: it is inside a shell command line. */
+const IN_COMMAND_LINE = "it is a shell command line, which doctor does not parse";
+
+/** The programs that run another program named by their next word (`programWords`). */
+const LAUNCHERS = new Set(["env", "node", "nodejs", "npx"]);
+/** Most launcher hops followed (`env node eff …` is two). */
+const MAX_LAUNCHER_HOPS = 4;
+
+/**
+ * The words of an entry in program position: its `command`, and the program each launcher it names
+ * runs — the first word after `env` (its options and `NAME=value` assignments skipped), the script
+ * after `node` (its options skipped), the package after `npx` or `npm exec` / `npm x` (verifier
+ * R-P2: an `eff` anywhere else is an argument — `uv --directory eff`, `--profile eff`).
+ */
+export function programWords(spec: Record<string, unknown>): string[] {
+  const args: readonly unknown[] = Array.isArray(spec.args) ? spec.args : [];
+  const words: unknown[] = [spec.command, ...args];
+  const out: string[] = [];
+  let i = 0;
+  for (let hop = 0; hop <= MAX_LAUNCHER_HOPS && i < words.length; hop++) {
+    const w = words[i];
+    if (typeof w !== "string") break;
+    out.push(w);
+    const base = path.basename(w);
+    const npmExec = base === "npm" && (words[i + 1] === "exec" || words[i + 1] === "x");
+    if (!LAUNCHERS.has(base) && !npmExec) break;
+    i += npmExec ? 2 : 1;
+    const skip = (x: unknown): boolean =>
+      typeof x === "string" &&
+      (x.startsWith("-") || (base === "env" && /^[A-Za-z_][A-Za-z0-9_]*=/u.test(x)));
+    while (i < words.length && skip(words[i])) i++;
+  }
+  return out;
+}
+
+/**
  * The `dist/cli.js` an `eff` word names, or why doctor cannot tell, or null when the word is no
  * program (a directory named `eff` passed as an argument). Only an absolute word is resolved, and
  * only by `realpathSync` (a stat, nothing read); a bare `eff` is looked up on a PATH doctor does not
  * share with the client.
  */
 function binTarget(word: string): { cli: string } | { why: string; elsewhere: boolean } | null {
+  if (!printable(word) && !path.isAbsolute(word)) return { why: IN_COMMAND_LINE, elsewhere: false };
   if (!word.includes("/") && !word.includes("\\"))
     return { why: "it is run from the PATH, which doctor does not resolve", elsewhere: false };
   if (!path.isAbsolute(word)) return { why: "its path is not absolute", elsewhere: false };
@@ -236,7 +323,10 @@ function binTarget(word: string): { cli: string } | { why: string; elsewhere: bo
     return { why: "it does not exist", elsewhere: false };
   }
   if (!CLI_ENTRY_RE.test(real))
-    return { why: `it resolves to ${shown(real)}, which is not a dist/cli.js`, elsewhere: true };
+    return {
+      why: `it resolves to ${printable(real) ? shown(real) : "a file"}, which is not a dist/cli.js`,
+      elsewhere: true,
+    };
   return { cli: real };
 }
 
@@ -244,45 +334,43 @@ function binTarget(word: string): { cli: string } | { why: string; elsewhere: bo
 export function launchOf(spec: Record<string, unknown>): Launch {
   const args: readonly unknown[] = Array.isArray(spec.args) ? spec.args : [];
   const words = [spec.command, ...args].filter((w): w is string => typeof w === "string");
+  const programs = programWords(spec);
   let target = words.find((w) => CLI_ENTRY_RE.test(w) || SHIM_ENTRY_RE.test(w));
   if (target === undefined) {
-    for (const w of words.filter((x) => EFF_BIN_RE.test(x)).slice(0, MAX_BIN_WORDS)) {
+    for (const w of programs.filter((x) => EFF_BIN_RE.test(x)).slice(0, MAX_BIN_WORDS)) {
       const t = binTarget(w);
       if (t === null) continue;
       if ("why" in t)
-        return { kind: "unknown", target: shown(w), why: t.why, elsewhere: t.elsewhere };
+        return { kind: "unknown", target: shownWord(w), why: t.why, elsewhere: t.elsewhere };
       target = t.cli;
       break;
     }
   }
   if (target === undefined) {
-    const named = words.find((w) => PACKAGE_WORD_RE.test(w));
-    if (named !== undefined)
-      return {
-        kind: "unknown",
-        target: shown(named),
-        why: "it runs the package by name (npx, npm exec), which doctor does not resolve",
-        elsewhere: false,
-      };
-    return { kind: "none" };
+    const named = programs.find((w) => PACKAGE_WORD_RE.test(w));
+    return named === undefined ? { kind: "none" } : { kind: "named", target: shownWord(named) };
   }
   const found = target;
   const unknown = (why: string): Launch => ({
     kind: "unknown",
-    target: shown(found),
+    target: shownWord(found),
     why,
     elsewhere: false,
   });
   if (pluginVariables({ command: target }).length > 0)
     return unknown("its path uses a plugin variable, which only a plugin install expands");
-  if (!path.isAbsolute(target)) return unknown("its path is not absolute");
+  if (!path.isAbsolute(target))
+    return unknown(printable(target) ? "its path is not absolute" : IN_COMMAND_LINE);
   const root = path.dirname(path.dirname(target));
   const shim = SHIM_ENTRY_RE.test(target);
   const file = shim
     ? path.join(root, ".claude-plugin", "plugin.json")
     : path.join(root, "package.json");
   const read = readJsonWhy(file, MAX_PROJECT_FILE_BYTES);
-  if ("why" in read) return unknown(`${shown(file)} is ${read.why}`);
+  if ("why" in read)
+    return unknown(
+      `${printable(file) ? shown(file) : shim ? "its .claude-plugin/plugin.json" : "its package.json"} is ${read.why}`,
+    );
   const name = isObj(read.value) ? read.value.name : undefined;
   if (name === (shim ? PLUGIN_NAME : PACKAGE_NAME)) return { kind: "ours" };
   return { kind: !shim && name === SIBLING_PACKAGE_NAME ? "sibling" : "another" };
@@ -306,7 +394,9 @@ const NAMES_NO_PROGRAM =
  * `eff` resolving to a file that is no `dist/cli.js` — is never ours, whatever its key (verifier
  * A-F1): under `espn-fantasy-football` it is `undetermined` — said once, and neither counted nor
  * removed by uninstall's generic step — and under any other key it is `other` (an `eff`
- * elsewhere: `undetermined`; the sibling's key: `sibling`).
+ * elsewhere: `undetermined`; the sibling's key: `sibling`). This package run by name (`named`: npx,
+ * npm exec) is `ours` under any key, the sibling's included (verifier R-P6): a registration of this
+ * server that doctor diagnoses as unsupported.
  */
 export function classifyEntry(
   name: string,
@@ -318,6 +408,7 @@ export function classifyEntry(
   const launch = launchOf(spec);
   switch (launch.kind) {
     case "ours":
+    case "named":
       return { owner: "ours", launch };
     case "sibling":
       return { owner: name === SERVER_NAME ? "foreign" : "sibling", launch };
@@ -333,7 +424,7 @@ export function classifyEntry(
           owner: "undetermined",
           launch: {
             kind: "unknown",
-            target: typeof spec.command === "string" ? shown(spec.command) : "(no command)",
+            target: typeof spec.command === "string" ? shownWord(spec.command) : "(no command)",
             why: NAMES_NO_PROGRAM,
             elsewhere: true,
           },
@@ -438,10 +529,50 @@ function readJson(file: string, maxBytes: number): { value: unknown } | null | "
   return r.why === "missing" ? null : "invalid";
 }
 
+/** Most directories walked up from one project directory (Claude Code stops at the root). */
+export const MAX_ANCESTORS = 64;
+/** Most distinct project `.mcp.json` files read for one client config. */
+export const MAX_PROJECT_FILES = 4096;
+/** Most `disabledMcpjsonServers` names read from one settings file. */
+const MAX_DECLINED = 256;
+
 /**
- * Reads a client config's `mcpServers` — every scope it holds, and for Claude Code also each known
- * project's `.mcp.json` (project scope: `claude mcp add --scope project`, a file meant to be
- * committed, so the most dangerous place for a cookie in an env block).
+ * Each directory from `dir` up to, but not including, the filesystem root — the directories whose
+ * `.mcp.json` Claude Code 2.1.308 reads for a session opened in `dir` (nearest first; R-P5b).
+ */
+export function ancestorDirs(dir: string): string[] {
+  const out: string[] = [];
+  let at = path.resolve(dir);
+  while (out.length < MAX_ANCESTORS && at !== path.parse(at).root) {
+    out.push(at);
+    at = path.dirname(at);
+  }
+  return out;
+}
+
+/** Whether `dir` is `top` or below it (lexically, as Claude Code walks a session's directory). */
+function within(top: string, dir: string): boolean {
+  const rel = path.relative(top, dir);
+  return rel === "" || (rel !== ".." && !rel.startsWith(`..${path.sep}`) && !path.isAbsolute(rel));
+}
+
+/** A settings file's `disabledMcpjsonServers` (bounded; unreadable or malformed → none). */
+function declinedIn(file: string): string[] {
+  const r = readJson(file, MAX_PROJECT_FILE_BYTES);
+  if (r === null || r === "invalid" || !isObj(r.value)) return [];
+  const list = r.value.disabledMcpjsonServers;
+  return Array.isArray(list)
+    ? list.slice(0, MAX_DECLINED).filter((n): n is string => typeof n === "string")
+    : [];
+}
+
+/**
+ * Reads a client config's `mcpServers` — every scope it holds, and for Claude Code also the
+ * `.mcp.json` of each known project directory and of every ancestor of it below the filesystem root
+ * (project scope: `claude mcp add --scope project`, a file meant to be committed, so the most
+ * dangerous place for a cookie in an env block; Claude Code 2.1.308 reads every one of them for a
+ * session there — R-P5b), and each session directory's declined project servers (R-P5a). Claude
+ * Code's user settings are read beside its config (`<dir of file>/.claude/settings.json`).
  */
 export function scanClientConfig(client: "desktop" | "code", file: string): ClientConfigScan {
   const empty = {
@@ -454,6 +585,7 @@ export function scanClientConfig(client: "desktop" | "code", file: string): Clie
     siblingInstalled: false,
     notOurs: [],
     projectFiles: [],
+    sessions: [],
   } as const;
   const read = readJson(file, MAX_CLIENT_CONFIG_BYTES);
   if (read === "invalid") return { ...empty, state: "invalid" };
@@ -478,15 +610,39 @@ export function scanClientConfig(client: "desktop" | "code", file: string): Clie
         notOurs.push({ kind: "undetermined", ...at, target: launch.target, why: launch.why });
       if (ours) {
         const pluginSource = pluginCopy && pluginVariables(spec).includes("${CLAUDE_PLUGIN_ROOT}");
-        entries.push({ name, spec, scope: m.scope, file: holder, dir: m.dir, pluginSource });
+        entries.push({
+          name,
+          spec,
+          scope: m.scope,
+          file: holder,
+          dir: m.dir,
+          pluginSource,
+          declined: false,
+        });
       } else others++;
     }
   };
   for (const m of scopedServerMaps(client, read.value)) take(m, file);
   const projectFiles: { file: string; state: "ok" | "invalid" }[] = [];
-  if (client === "code")
-    for (const dir of projectDirs(read.value)) {
-      const f = path.join(dir, ".mcp.json");
+  if (client !== "code")
+    return {
+      ...empty,
+      state: "ok",
+      entries,
+      envs: envBlocks.map((b) => b.env),
+      envBlocks,
+      others,
+      siblingInstalled,
+      notOurs,
+    };
+  const known = projectDirs(read.value);
+  const seen = new Set<string>();
+  for (const dir of known)
+    for (const at of ancestorDirs(dir)) {
+      if (seen.has(at)) continue;
+      if (seen.size >= MAX_PROJECT_FILES) break;
+      seen.add(at);
+      const f = path.join(at, ".mcp.json");
       const p = readJson(f, MAX_PROJECT_FILE_BYTES);
       if (p === null) continue;
       if (p === "invalid") {
@@ -495,19 +651,46 @@ export function scanClientConfig(client: "desktop" | "code", file: string): Clie
       }
       projectFiles.push({ file: f, state: "ok" });
       if (isObj(p.value) && isObj(p.value.mcpServers))
-        take({ scope: "project", dir, servers: p.value.mcpServers }, f, isPluginRoot(dir));
+        take({ scope: "project", dir: at, servers: p.value.mcpServers }, f, isPluginRoot(at));
     }
+  // the session directories: every known project, and every directory holding an entry of ours
+  const userDeclined = declinedIn(path.join(path.dirname(file), ".claude", "settings.json"));
+  const sessionDirs = [
+    ...new Set([
+      ...known.map((d) => path.resolve(d)),
+      ...entries.flatMap((e) => (e.dir === null ? [] : [path.resolve(e.dir)])),
+    ]),
+  ];
+  const sessions: SessionView[] = sessionDirs.map((dir) => ({
+    dir,
+    declined: [
+      ...new Set([
+        ...userDeclined,
+        ...declinedIn(path.join(dir, ".claude", "settings.json")),
+        ...declinedIn(path.join(dir, ".claude", "settings.local.json")),
+      ]),
+    ],
+  }));
+  // a project entry is declined when every session that sees it declines it
+  const marked = entries.map((e) => {
+    if (e.scope !== "project" || e.dir === null) return e;
+    const top = path.resolve(e.dir);
+    const seeing = sessions.filter((v) => within(top, v.dir));
+    const declined = seeing.length > 0 && seeing.every((v) => v.declined.includes(e.name));
+    return declined ? { ...e, declined } : e;
+  });
   return {
     client,
     file,
     state: "ok",
-    entries,
+    entries: marked,
     envs: envBlocks.map((b) => b.env),
     envBlocks,
     others,
     siblingInstalled,
     notOurs,
     projectFiles,
+    sessions,
   };
 }
 
@@ -554,37 +737,56 @@ export function removeCommand(e: Pick<ClientEntry, "scope" | "dir" | "name">): s
 /**
  * Registrations of this server that run beside each other in one client (README "One registration
  * per client"; verifier A-F3: two `claude mcp add` entries under different keys, without the
- * plugin, were never called a duplicate). Claude Code: a session sees the user scope plus its
- * project directory's local and project scopes, and a key at a narrower scope overrides the same
- * key at a wider one, so each such view starts one server per DISTINCT key. Claude Desktop: one map,
- * one server per key. `most`: the most servers one view starts; `extra`: the entries whose removal
- * leaves one key in every view — the user scope's `espn-fantasy-football` (else its first entry) is
- * kept, else in each project directory its `espn-fantasy-football` (else its first entry). The
- * plugin's own `.mcp.json` declaration is never a registration (`pluginSource`).
+ * plugin, were never called a duplicate). Claude Code: a session opened in a directory (`sessions`,
+ * and every directory an entry lives in) sees the user scope, that directory's local scope, and the
+ * project scope of its `.mcp.json` and every ancestor's (R-P5b) less the project servers its
+ * settings decline (R-P5a); a session outside them sees the user scope alone. A key at a narrower
+ * scope overrides the same key at a wider one, so each view starts one server per DISTINCT key.
+ * Claude Desktop: one map, one server per key. `views`: each view's entries; `most`: the most
+ * servers one view starts; `extra`: the entries whose removal leaves one key in every view — in
+ * each view the key kept is the one whose entry reaches the most views (the user scope's, else the
+ * farthest ancestor's `.mcp.json`: a nearer entry is the one removed, so no other directory loses
+ * its server), and among equals `espn-fantasy-football`, else the first. The plugin's own
+ * `.mcp.json` declaration is never a registration (`pluginSource`).
  */
-export function duplicateRegistrations(entries: readonly ClientEntry[]): {
+export function duplicateRegistrations(
+  entries: readonly ClientEntry[],
+  sessions: readonly SessionView[] = [],
+): {
   readonly most: number;
   readonly extra: readonly ClientEntry[];
+  readonly views: readonly (readonly ClientEntry[])[];
 } {
   const regs = entries.filter((e) => !e.pluginSource);
   const narrow = (e: ClientEntry): boolean => e.scope === "local" || e.scope === "project";
   const wide = regs.filter((e) => !narrow(e)); // the user scope, or Claude Desktop's one map
-  const dirs = [...new Set(regs.filter(narrow).map((e) => e.dir ?? ""))];
-  const views: ClientEntry[][] = [
-    wide,
-    ...dirs.map((d) => [...wide, ...regs.filter((e) => narrow(e) && (e.dir ?? "") === d)]),
+  const declined = new Map(sessions.map((v) => [path.resolve(v.dir), new Set(v.declined)]));
+  const dirs = [
+    ...new Set([...declined.keys(), ...regs.filter(narrow).map((e) => path.resolve(e.dir ?? "."))]),
   ];
-  const keep0 = wide.some((e) => e.name === SERVER_NAME) ? SERVER_NAME : (wide[0]?.name ?? null);
+  const sees = (d: string, e: ClientEntry): boolean => {
+    if (!narrow(e)) return true;
+    const at = path.resolve(e.dir ?? ".");
+    if (e.scope === "local") return at === d;
+    return within(at, d) && declined.get(d)?.has(e.name) !== true;
+  };
+  const views: ClientEntry[][] = [wide, ...dirs.map((d) => regs.filter((e) => sees(d, e)))];
+  const reach = new Map<ClientEntry, number>();
+  for (const v of views) for (const e of v) reach.set(e, (reach.get(e) ?? 0) + 1);
   let most = 0;
   const extra: ClientEntry[] = [];
   for (const v of views) {
     const keys = [...new Set(v.map((e) => e.name))];
     most = Math.max(most, keys.length);
     if (keys.length < 2) continue;
-    const keep = keep0 ?? (keys.includes(SERVER_NAME) ? SERVER_NAME : keys[0]);
+    const reachOf = (k: string): number =>
+      Math.max(...v.filter((e) => e.name === k).map((e) => reach.get(e) ?? 0));
+    const top = Math.max(...keys.map(reachOf));
+    const widest = keys.filter((k) => reachOf(k) === top);
+    const keep = widest.includes(SERVER_NAME) ? SERVER_NAME : widest[0];
     for (const e of v) if (e.name !== keep && !extra.includes(e)) extra.push(e);
   }
-  return { most, extra };
+  return { most, extra, views: views.filter((v) => v.length > 0 || v === wide) };
 }
 
 // --- the Claude Code plugin --------------------------------------------------------------------
@@ -620,29 +822,55 @@ export function knownMarketplacesPath(home: string): string {
  * JSON, no longer lists the plugin or gives it no source — Claude Code cannot load the plugin, and
  * the cache copy is not what runs. `refused`: the record is a folder marketplace, but doctor does
  * not follow it (no absolute path, a listing through a symbolic link or past doctor's size bound, a
- * plugin source that leaves the folder) — what Claude Code runs is not known, and it is never the
- * cache copy. `unknown`: known_marketplaces.json is missing, unreadable or holds no usable record of
- * this marketplace — Claude Code then treats the plugin as a copy, so the `installPath` copy is
- * judged, and `why` says what was not known.
+ * plugin source that leaves the folder), or known_marketplaces.json itself is a symbolic link or
+ * past that bound (Claude Code reads it all the same) — what Claude Code runs is not known, and it
+ * is never the cache copy. `unloaded` (verifier F1, Claude Code 2.1.308's MDe: "not loaded (hooks
+ * module, commands, skills, servers: none of it)"): Claude Code loads no plugin of this marketplace
+ * — `registry: "unreadable"`: known_marketplaces.json is not JSON, unreadable or fails its schema
+ * (no record of this marketplace with a usable source), and Claude Code then loads no marketplace
+ * plugin at all, settings declarations included; `registry: "unrecorded"`: the file is missing or
+ * records no such marketplace, and the user settings declare none Claude Code loads before
+ * recording it. A folder the user settings declare (`extraKnownMarketplaces`, a `directory` source
+ * or a `file` source under `.claude-plugin`, at an absolute path) is read in place like a recorded
+ * one (`folder` with `declared`, or `unresolved` / `refused`). The cache copy is judged only for a
+ * marketplace Claude Code fetches (`copied`).
  */
 export type PluginOrigin =
-  | { readonly kind: "folder"; readonly root: string; readonly marketplaceDir: string }
+  | {
+      readonly kind: "folder";
+      readonly root: string;
+      readonly marketplaceDir: string;
+      /** Declared in the user settings, not recorded in known_marketplaces.json (F1). */
+      readonly declared?: true;
+    }
   | { readonly kind: "copied"; readonly source: string }
   | { readonly kind: "unresolved"; readonly marketplaceDir: string; readonly why: string }
   | { readonly kind: "refused"; readonly why: string }
-  | { readonly kind: "unknown"; readonly why: string };
+  | {
+      readonly kind: "unloaded";
+      readonly registry: "unreadable" | "unrecorded";
+      readonly why: string;
+    };
+
+/** Whether Claude Code may start the plugin's server from this origin (all but `unresolved`/`unloaded`). */
+export function pluginMayLoad(o: PluginOrigin): boolean {
+  return o.kind !== "unresolved" && o.kind !== "unloaded";
+}
 
 /** One installed copy of the plugin. */
 export interface PluginCopy {
   readonly scope: string;
   /**
    * The plugin Claude Code runs (`<root>/scripts/eff-launch.sh serve` → its `dist/cli.js`): the
-   * marketplace folder's copy for a `folder` origin, `installPath` for a `copied` or `unknown` one,
-   * and null for an `unresolved` or `refused` one (nothing doctor can judge as what runs).
+   * marketplace folder's copy for a `folder` origin, `installPath` for a `copied` one, and null for
+   * an `unresolved`, `refused` or `unloaded` one (nothing doctor can judge as what runs).
    */
   readonly root: string | null;
-  /** installed_plugins.json's record: the cache copy (a leftover for a folder marketplace). */
-  readonly installPath: string;
+  /**
+   * installed_plugins.json's record: the cache copy (a leftover for a folder marketplace); null when
+   * there is no record — a folder marketplace's plugin loads without one (verifier F2).
+   */
+  readonly installPath: string | null;
   readonly version: string | null;
 }
 
@@ -710,23 +938,88 @@ export function pluginDirIn(
   return { root };
 }
 
+/** The marketplace's declaration in the user settings (`extraKnownMarketplaces`), or null. */
+function declaredMarketplace(home: string): unknown {
+  const settings = readJson(codeSettingsPath(home), MAX_PROJECT_FILE_BYTES);
+  if (settings === null || settings === "invalid" || !isObj(settings.value)) return null;
+  const extra = settings.value.extraKnownMarketplaces;
+  return isObj(extra) && Object.hasOwn(extra, MARKETPLACE_NAME) ? extra[MARKETPLACE_NAME] : null;
+}
+
 /**
- * Where the plugin Claude Code runs comes from (`PluginOrigin`), read the way Claude Code reads it:
- * known_marketplaces.json's record of `MARKETPLACE_NAME`, then — for a folder marketplace — its
- * `.claude-plugin/marketplace.json` listing of the plugin. Bounded reads, never through a symlink.
- * Once the record names a folder marketplace, nothing that follows falls back to the cache copy
+ * Where the plugin Claude Code runs comes from (`PluginOrigin`), read the way Claude Code 2.1.308
+ * reads it (F1): known_marketplaces.json's record of `MARKETPLACE_NAME` — or, when the file is
+ * missing or records none, the user settings' declaration of it — then, for a folder marketplace,
+ * its `.claude-plugin/marketplace.json` listing of the plugin. Bounded reads, never through a
+ * symlink. Once a folder marketplace is named, nothing that follows falls back to the cache copy
  * (verifier B1): Claude Code reads such a plugin in place or loads nothing.
  */
 export function pluginOrigin(home: string): PluginOrigin {
   const known = knownMarketplacesPath(home);
-  const unknown = (why: string): PluginOrigin => ({ kind: "unknown", why });
+  const settings = codeSettingsPath(home);
   const refused = (why: string): PluginOrigin => ({ kind: "refused", why });
+  const unloaded = (registry: "unreadable" | "unrecorded", why: string): PluginOrigin => ({
+    kind: "unloaded",
+    registry,
+    why,
+  });
   const record = readJsonWhy(known, MAX_PROJECT_FILE_BYTES);
-  if ("why" in record) return unknown(`${known} is ${record.why}`);
-  const m = isObj(record.value) ? record.value[MARKETPLACE_NAME] : undefined;
-  const source = isObj(m) && isObj(m.source) ? m.source : null;
-  if (source === null || typeof source.source !== "string")
-    return unknown(`${known} records no ${MARKETPLACE_NAME} marketplace with a source`);
+  let source: Record<string, unknown> | null = null;
+  let declared = false;
+  if ("why" in record) {
+    // a symbolic link or past doctor's bound: Claude Code reads it, doctor does not
+    if (record.doctorOnly) return refused(`${known} is ${record.why}`);
+    if (record.why !== "missing")
+      return unloaded(
+        "unreadable",
+        `${known} is ${record.why}: Claude Code loads no marketplace plugin while it cannot read it`,
+      );
+  } else {
+    if (!isObj(record.value))
+      return unloaded(
+        "unreadable",
+        `${known} is not a JSON object: Claude Code loads no marketplace plugin while it cannot read it`,
+      );
+    // one record without a usable source fails the whole file's schema (Claude Code 2.1.308's Bcs)
+    const usable = (m: unknown): m is { source: Record<string, unknown> } =>
+      isObj(m) && isObj(m.source) && typeof m.source.source === "string";
+    const records = Object.entries(record.value).slice(0, MAX_LISTED_PLUGINS);
+    const broken = records.find(([, m]) => !usable(m));
+    if (broken !== undefined)
+      return unloaded(
+        "unreadable",
+        `${known} records ${broken[0] === MARKETPLACE_NAME ? `the ${MARKETPLACE_NAME} marketplace` : "a marketplace"} with no usable source, which fails its schema: Claude Code loads no marketplace plugin while it cannot read it`,
+      );
+    const m = Object.hasOwn(record.value, MARKETPLACE_NAME)
+      ? record.value[MARKETPLACE_NAME]
+      : undefined;
+    if (usable(m)) source = m.source;
+  }
+  if (source === null) {
+    const state = "why" in record ? "is missing" : `records no ${MARKETPLACE_NAME} marketplace`;
+    const d = declaredMarketplace(home);
+    const ds = isObj(d) && isObj(d.source) ? d.source : null;
+    if (ds === null)
+      return unloaded(
+        "unrecorded",
+        `${known} ${state}, and ${settings} declares none under extraKnownMarketplaces`,
+      );
+    const notYet = (what: string): PluginOrigin =>
+      unloaded(
+        "unrecorded",
+        `${known} ${state}, and ${settings} declares the ${MARKETPLACE_NAME} marketplace (extraKnownMarketplaces) with ${what}: Claude Code loads none of its plugins until it is recorded`,
+      );
+    if (ds.source !== "directory" && ds.source !== "file")
+      return notYet("a source Claude Code fetches");
+    if (typeof ds.path !== "string" || !path.isAbsolute(ds.path)) return notYet("no absolute path");
+    if (
+      ds.source === "file" &&
+      path.basename(path.dirname(path.resolve(ds.path))) !== ".claude-plugin"
+    )
+      return notYet("a file that is not in a .claude-plugin folder");
+    source = ds;
+    declared = true;
+  }
   const word = (v: unknown): string =>
     typeof v === "string" && SOURCE_WORD_RE.test(v) ? v : "another";
   if (source.source !== "directory" && source.source !== "file")
@@ -772,7 +1065,12 @@ export function pluginOrigin(home: string): PluginOrigin {
     return refused(
       `the plugin's source in ${shown(listing)} (${shown(JSON.stringify(entry.source), 120)}) ${dir.why}`,
     );
-  return { kind: "folder", root: dir.root, marketplaceDir };
+  return {
+    kind: "folder",
+    root: dir.root,
+    marketplaceDir,
+    ...(declared ? { declared: true } : {}),
+  };
 }
 
 /** Whether two paths name the same directory (their real paths when both resolve). */
@@ -790,17 +1088,21 @@ export function samePath(a: string, b: string): boolean {
 /**
  * The espn-fantasy-football plugin's install (`PLUGIN_ID` in installed_plugins.json, enabled in
  * the user settings) and where what runs comes from (`pluginOrigin`), or null when it is not
- * installed. Bounded reads; a malformed file reads as not installed / not enabled / source unknown.
+ * installed. Bounded reads; a malformed file reads as not installed / not enabled. An enabled plugin
+ * that a folder marketplace lists by a string source needs no install record (verifier F2, Claude
+ * Code 2.1.308's MDe: a record is required only for a non-string source): with none it is still the
+ * install, its copy `installPath: null`. With no record and no folder marketplace, an enabled entry
+ * is an orphan Claude Code skips: not installed.
  */
 export function scanPlugin(home: string): PluginInstall | null {
   const installed = readJson(installedPluginsPath(home), MAX_PROJECT_FILE_BYTES);
-  if (installed === null || installed === "invalid" || !isObj(installed.value)) return null;
-  const plugins = installed.value.plugins;
-  if (!isObj(plugins)) return null;
-  const list = plugins[PLUGIN_ID];
-  if (!Array.isArray(list)) return null;
+  const plugins =
+    installed !== null && installed !== "invalid" && isObj(installed.value)
+      ? installed.value.plugins
+      : undefined;
+  const list = isObj(plugins) ? plugins[PLUGIN_ID] : undefined;
   const records: { scope: string; installPath: string; version: string | null }[] = [];
-  for (const c of list.slice(0, 16)) {
+  for (const c of Array.isArray(list) ? list.slice(0, 16) : []) {
     if (!isObj(c) || typeof c.installPath !== "string" || !path.isAbsolute(c.installPath)) continue;
     records.push({
       scope: typeof c.scope === "string" && SCOPE_RE.test(c.scope) ? c.scope : "user",
@@ -808,17 +1110,6 @@ export function scanPlugin(home: string): PluginInstall | null {
       version: typeof c.version === "string" && VERSION_RE.test(c.version) ? c.version : null,
     });
   }
-  if (records.length === 0) return null;
-  const origin = pluginOrigin(home);
-  const copies: PluginCopy[] = records.map((r) => ({
-    ...r,
-    root:
-      origin.kind === "folder"
-        ? origin.root
-        : origin.kind === "copied" || origin.kind === "unknown"
-          ? r.installPath
-          : null,
-  }));
   const settings = readJson(codeSettingsPath(home), MAX_PROJECT_FILE_BYTES);
   const enabled =
     settings !== null &&
@@ -826,5 +1117,27 @@ export function scanPlugin(home: string): PluginInstall | null {
     isObj(settings.value) &&
     isObj(settings.value.enabledPlugins) &&
     settings.value.enabledPlugins[PLUGIN_ID] === true;
+  if (records.length === 0 && !enabled) return null;
+  const origin = pluginOrigin(home);
+  if (records.length === 0) {
+    if (origin.kind !== "folder" && origin.kind !== "unresolved" && origin.kind !== "refused")
+      return null;
+    return {
+      enabled,
+      origin,
+      copies: [
+        {
+          scope: "user",
+          root: origin.kind === "folder" ? origin.root : null,
+          installPath: null,
+          version: null,
+        },
+      ],
+    };
+  }
+  const copies: PluginCopy[] = records.map((r) => ({
+    ...r,
+    root: origin.kind === "folder" ? origin.root : origin.kind === "copied" ? r.installPath : null,
+  }));
   return { enabled, origin, copies };
 }

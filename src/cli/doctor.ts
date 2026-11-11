@@ -53,8 +53,11 @@ import { MIGRATIONS } from "../store/index.js";
 import type { CredentialStateRow, Store, StoreFactory } from "../store/types.js";
 import { VERSION } from "../version.js";
 import {
+  codeSettingsPath,
   cookieFindings,
   duplicateRegistrations,
+  launchOf,
+  pluginMayLoad,
   pluginVariables,
   removeCommand,
   samePath,
@@ -64,6 +67,7 @@ import {
   type ClientConfigScan,
   type ClientEntry,
   type PluginInstall,
+  type SessionView,
 } from "./client-config.js";
 import { onlineRows } from "./doctor-online.js";
 import { DRIFT_REFRESH_TARGET, redViewsOutsideProbe } from "./drift-recheck.js";
@@ -238,6 +242,15 @@ export async function entryProblems(
   const soft: string[] = [];
   const command = spec.command;
   const args = Array.isArray(spec.args) ? (spec.args as unknown[]) : [];
+  // this package run by name (verifier R-P6): never run — npx is not this server's Node
+  if (launchOf(spec).kind === "named") {
+    if (typeof command !== "string" || !path.isAbsolute(command))
+      hard.push("`command` is not an absolute path (GUI clients have no shell PATH)");
+    hard.push(
+      "it runs this package by name (npx, npm exec) — doctor cannot tell which install or version that starts: use `eff print-config`'s entry",
+    );
+    return { hard, soft };
+  }
   const variables = pluginVariables(spec);
   if (variables.length > 0) {
     hard.push(
@@ -384,18 +397,23 @@ function present(p: string): boolean {
  * Where the plugin's root comes from, as one detail line (rows #2, #24): a folder read in place
  * and the cache copy installed_plugins.json still records (absent, or kept — which the current
  * Claude Code does not run and an older one may: README Upgrade; verifier B2), a folder marketplace
- * doctor cannot judge (its cache copy is never judged instead: verifier B1), or a source doctor
- * could not read at all (the cache copy is judged, as Claude Code treats it as a copy).
+ * doctor cannot judge (its cache copy is never judged instead: verifier B1), a marketplace Claude
+ * Code does not load at all (F1: neither is the cache copy), or a folder plugin with no install
+ * record, which Claude Code loads all the same (F2).
  */
 function pluginOriginNote(
   plugin: PluginInstall,
   c: PluginInstall["copies"][number],
 ): string | null {
   const o = plugin.origin;
+  if (c.installPath === null)
+    return o.kind === "folder"
+      ? `installed_plugins.json has no record of the plugin: Claude Code reads it in place from its folder (${o.root}) without one`
+      : null;
   const notJudged = `the cache copy ${c.installPath} is not judged: the current Claude Code reads a folder marketplace's plugin in place, never from the cache`;
   switch (o.kind) {
-    case "unknown":
-      return `the plugin's source is unknown — ${o.why} — so the cache copy ${c.installPath} is judged as what Claude Code runs`;
+    case "unloaded":
+      return `the cache copy ${c.installPath} is not judged: Claude Code cannot load the plugin (row 2)`;
     case "unresolved":
       return notJudged;
     case "refused":
@@ -422,6 +440,30 @@ function countWord(n: number): string {
 
 /** The fix that re-adds a folder marketplace Claude Code cannot load the plugin from. */
 const UNRESOLVED_PLUGIN_FIX = `add the marketplace and the plugin again from the built runtime clone: \`claude plugin marketplace remove ${MARKETPLACE_NAME}\`, then \`claude plugin marketplace add <the runtime clone>\` and \`claude plugin install ${PLUGIN_ID}\` (README step 5), then restart the client`;
+/** The fix for a marketplace Claude Code does not know (F1). */
+const UNRECORDED_PLUGIN_FIX =
+  "add the marketplace from the built runtime clone: `claude plugin marketplace add <the runtime clone>` (README step 5), then restart the client";
+/** The fix for a known_marketplaces.json Claude Code cannot read (F1). */
+const UNREADABLE_REGISTRY_FIX =
+  "repair or move aside ~/.claude/plugins/known_marketplaces.json (while Claude Code cannot read it, it loads no marketplace plugin), then `claude plugin marketplace add <the runtime clone>` (README step 5) and restart the client";
+
+/** One row-2 or uninstall line as printed: the log redaction patterns over it (R-P1, defence). */
+export function redactedLine(line: string): string {
+  return redactString(line, new SecretRegistry());
+}
+
+/**
+ * The plugin's server as Claude Code 2.1.308 starts it (the plugin's `.mcp.json`, plan 09 §4), and
+ * whether a `claude mcp add` entry runs exactly that command line: Claude Code then drops the
+ * plugin's server as its duplicate (B5r: the `[command, ...args]` signature, env aside — R-P4).
+ */
+function runsPluginLine(e: ClientEntry, root: string | null): boolean {
+  if (root === null) return false;
+  const want = ["/bin/sh", path.join(root, "scripts", "eff-launch.sh"), "serve"];
+  const args = Array.isArray(e.spec.args) ? (e.spec.args as unknown[]) : [];
+  const got = [e.spec.command, ...args];
+  return got.length === want.length && got.every((w, i) => w === want[i]);
+}
 
 /**
  * Row 2: launch configuration paths in every client config found — and the Claude Code plugin, the
@@ -438,12 +480,32 @@ const UNRESOLVED_PLUGIN_FIX = `add the marketplace and the plugin again from the
  * neither is judged by its cache copy (verifier B1). Every client's registrations are counted per
  * view (client-config.ts `duplicateRegistrations`): two `claude mcp add` keys in one Claude Code
  * view, or two keys in Claude Desktop's config, are the duplicate too, the plugin or not (verifier
- * A-F3), and the fix keeps exactly one.
+ * A-F3), and the fix keeps exactly one. As Claude Code 2.1.308 does (refix round 1): a project
+ * server the user declined is not started (R-P5a); an ancestor's `.mcp.json` is in the view
+ * (R-P5b); an entry running the plugin's own command line makes Claude Code drop the plugin's server
+ * (R-P4); the plugin counts only where Claude Code may load it, and a marketplace it does not know
+ * or cannot read fails (F1). No word holding more than a path is printed, and every line passes the
+ * log redaction patterns (R-P1).
  */
 export async function checkLaunchConfig(
   io: CliIo,
   scans: readonly ClientConfigScan[],
   plugin: PluginInstall | null = null,
+): Promise<DoctorRow> {
+  const r = await launchConfigRow(io, scans, plugin);
+  return {
+    ...r,
+    message: redactedLine(r.message),
+    fix: r.fix === null ? null : redactedLine(r.fix),
+    details: r.details.map(redactedLine),
+  };
+}
+
+/** Row 2 before its lines are redacted (`checkLaunchConfig`). */
+async function launchConfigRow(
+  io: CliIo,
+  scans: readonly ClientConfigScan[],
+  plugin: PluginInstall | null,
 ): Promise<DoctorRow> {
   const title = "Launch config paths";
   const details: string[] = [];
@@ -454,6 +516,7 @@ export async function checkLaunchConfig(
   let entryHard = false;
   let found = 0;
   const codeRegistrations: ClientEntry[] = [];
+  const codeSessions: SessionView[] = [];
   const desktopDuplicates: {
     file: string;
     most: number;
@@ -480,7 +543,7 @@ export async function checkLaunchConfig(
       details.push(
         n.kind === "foreign"
           ? `${where}: the \`${SERVER_NAME}\` key launches another package, not this server — leave it`
-          : `${where}: ${n.ownKey ? `the \`${SERVER_NAME}\` key` : "an entry"} launches ${n.target ?? "?"}, and doctor cannot tell what it launches (${n.why ?? "?"}) — not counted as this server`,
+          : `${where}: ${n.ownKey ? `the \`${SERVER_NAME}\` key` : "an entry"} launches ${n.target ?? "a command line doctor does not print"}, and doctor cannot tell what it launches (${n.why ?? "?"}) — not counted as this server`,
       );
     }
     // the plugin's own .mcp.json in a copy of the plugin: said, never counted as a registration
@@ -489,6 +552,7 @@ export async function checkLaunchConfig(
         details.push(
           `${whereOf(e.scope, e.dir)}: the plugin's own .mcp.json in a copy of this plugin, not a registration — Claude Code opened in that directory reads it as a project server, which cannot start there (\${CLAUDE_PLUGIN_ROOT} and \${user_config.…} expand only in a plugin install): leave the file, and leave that project server unapproved there (\`disabledMcpjsonServers: ["${SERVER_NAME}"]\` in its .claude/settings.local.json declines it)`,
         );
+    if (s.client === "code") codeSessions.push(...s.sessions);
     const registrations = s.entries.filter((e) => !e.pluginSource);
     if (registrations.length === 0) {
       details.push(`${s.client}: ${s.file} has no \`${SERVER_NAME}\` entry`);
@@ -499,9 +563,15 @@ export async function checkLaunchConfig(
       if (d.most > 1) desktopDuplicates.push({ file: s.file, most: d.most, extra: d.extra });
     }
     for (const e of registrations) {
+      const where = whereOf(e.scope, e.dir);
+      if (e.declined) {
+        details.push(
+          `${where}: declined in Claude Code's settings (\`disabledMcpjsonServers\`) — Claude Code does not start it, so it is not counted`,
+        );
+        continue;
+      }
       found++;
       if (s.client === "code") codeRegistrations.push(e);
-      const where = whereOf(e.scope, e.dir);
       if (e.name !== SERVER_NAME)
         details.push(
           `${where}: an entry launches this server under another key (expected \`${SERVER_NAME}\`)`,
@@ -530,13 +600,24 @@ export async function checkLaunchConfig(
       );
       pluginUnresolved = pluginHard = hard = true;
     }
+    // a marketplace Claude Code does not know, or a registry it cannot read: nothing loads (F1)
+    if (pluginOn && origin?.kind === "unloaded") {
+      details.push(`code: Claude Code cannot load the plugin — ${origin.why}`);
+      pluginUnresolved = pluginHard = hard = true;
+    }
+    if (pluginOn && origin?.kind === "folder" && origin.declared === true)
+      details.push(
+        `code: the ${MARKETPLACE_NAME} marketplace is declared in ${codeSettingsPath(io.home)} (extraKnownMarketplaces), not recorded in known_marketplaces.json: Claude Code reads its folder in place all the same`,
+      );
     if (pluginOn && origin?.kind === "refused") {
       details.push(`code: doctor cannot tell what Claude Code runs for the plugin — ${origin.why}`);
       pluginRefused = true;
     }
     for (const c of plugin.copies) {
       if (!plugin.enabled) {
-        details.push(`code: the plugin is installed (${c.root ?? c.installPath}) but disabled`);
+        details.push(
+          `code: the plugin is installed (${c.root ?? c.installPath ?? "no install record"}) but disabled`,
+        );
         continue;
       }
       const note = pluginOriginNote(plugin, c);
@@ -559,25 +640,44 @@ export async function checkLaunchConfig(
   }
   if (!pluginOn) details.push(await shimResolution(io));
   // registrations that run beside each other in one client: each removal is its exact command
-  const code = duplicateRegistrations(codeRegistrations);
-  const codeServers = code.most + (pluginOn ? 1 : 0);
+  const code = duplicateRegistrations(codeRegistrations, codeSessions);
+  // the plugin starts a server only where Claude Code may load it (F1), and Claude Code drops it in
+  // a view holding an entry that runs its very command line (R-P4)
+  const pluginRuns = pluginOn && origin !== null && pluginMayLoad(origin);
+  const pluginRoot = plugin?.copies.find((c) => c.root !== null)?.root ?? null;
+  const dropping = codeRegistrations.filter((e) => runsPluginLine(e, pluginRoot));
+  if (pluginRuns)
+    for (const e of dropping)
+      details.push(
+        `${whereOf(e.scope, e.dir)}: runs the plugin's own command line (/bin/sh ${path.join(pluginRoot ?? "", "scripts", "eff-launch.sh")} serve) — Claude Code drops the plugin's server as a duplicate of it, so they are one server`,
+      );
+  let worst = { servers: 0, keys: 0, plugin: false };
+  for (const v of code.views) {
+    const keys = new Set(v.map((e) => e.name)).size;
+    const withPlugin = pluginRuns && !v.some((e) => dropping.includes(e));
+    const servers = keys + (withPlugin ? 1 : 0);
+    if (servers > worst.servers) worst = { servers, keys, plugin: withPlugin };
+  }
+  const live = [...new Set(code.views.flat())];
   const commands = (es: readonly ClientEntry[]): string =>
     es.map((e) => `\`${removeCommand(e)}\``).join(", ");
   const entriesWord = (n: number): string => `entr${n === 1 ? "y" : "ies"}`;
   const duplicateMessages: string[] = [];
   const duplicateFixes: string[] = [];
-  if (codeServers > 1) {
-    const what = pluginOn
-      ? code.most === 1
+  if (worst.servers > 1) {
+    const what = worst.plugin
+      ? worst.keys === 1
         ? "the plugin AND a `claude mcp add` entry"
-        : `the plugin AND ${countWord(code.most)} \`claude mcp add\` entries under different keys`
-      : `${countWord(code.most)} \`claude mcp add\` entries under different keys`;
+        : `the plugin AND ${countWord(worst.keys)} \`claude mcp add\` entries under different keys`
+      : `${countWord(worst.keys)} \`claude mcp add\` entries under different keys`;
     duplicateMessages.push(
-      `Claude Code registers this server ${timesWord(codeServers)}: ${what} — ${countWord(codeServers)} servers, every tool listed ${timesWord(codeServers)}`,
+      `Claude Code registers this server ${timesWord(worst.servers)}: ${what} — ${countWord(worst.servers)} servers, every tool listed ${timesWord(worst.servers)}`,
     );
+    // beside a plugin Claude Code loads, keeping one entry means uninstalling the plugin — even where
+    // an entry running its command line makes Claude Code drop it, removing that entry restores it
     duplicateFixes.push(
-      pluginOn
-        ? `keep one: remove the \`claude mcp add\` ${entriesWord(codeRegistrations.length)} (${commands(codeRegistrations)}), or uninstall the plugin (\`claude plugin uninstall ${PLUGIN_ID}\`)${code.extra.length > 0 ? ` and remove the other ${entriesWord(code.extra.length)} (${commands(code.extra)})` : ""}; then restart the client`
+      pluginRuns
+        ? `keep one: remove the \`claude mcp add\` ${entriesWord(live.length)} (${commands(live)}), or uninstall the plugin (\`claude plugin uninstall ${PLUGIN_ID}\`)${code.extra.length > 0 ? ` and remove the other ${entriesWord(code.extra.length)} (${commands(code.extra)})` : ""}; then restart the client`
         : `keep one: remove the other ${entriesWord(code.extra.length)} (${commands(code.extra)}); then restart the client`,
     );
   }
@@ -597,13 +697,23 @@ export async function checkLaunchConfig(
       title,
       "fail",
       pluginUnresolved && !entryHard
-        ? "Claude Code cannot load the plugin from its folder marketplace"
+        ? origin?.kind === "unloaded"
+          ? origin.registry === "unreadable"
+            ? "Claude Code cannot load the plugin: it cannot read known_marketplaces.json"
+            : "Claude Code cannot load the plugin: its marketplace is not known to it"
+          : "Claude Code cannot load the plugin from its folder marketplace"
         : "a client launches the server with a bad path, Node or location",
       (pluginOn
         ? [
             pluginHard
               ? pluginUnresolved
-                ? UNRESOLVED_PLUGIN_FIX
+                ? `${
+                    origin?.kind === "unloaded"
+                      ? origin.registry === "unreadable"
+                        ? UNREADABLE_REGISTRY_FIX
+                        : UNRECORDED_PLUGIN_FIX
+                      : UNRESOLVED_PLUGIN_FIX
+                  }${live.length > 0 ? ` — or keep the \`claude mcp add\` ${entriesWord(live.length)} instead and \`claude plugin uninstall ${PLUGIN_ID}\`: never both` : ""}`
                 : inFolder
                   ? "build the plugin's folder (`npm run build` there: Claude Code reads the plugin in place) and restart the client"
                   : "install the plugin again from the built clone (README step 5)"
@@ -2006,7 +2116,7 @@ export function checkStaleBuild(root: string, plugin: PluginInstall | null = nul
       "stale_build",
       title,
       "skip",
-      `no plugin build to judge: ${plugin?.origin.kind === "unresolved" ? "Claude Code cannot load the plugin" : "doctor cannot tell what Claude Code runs for the plugin"} (row 2)`,
+      `no plugin build to judge: ${plugin !== null && !pluginMayLoad(plugin.origin) ? "Claude Code cannot load the plugin" : "doctor cannot tell what Claude Code runs for the plugin"} (row 2)`,
       null,
       unique,
     );

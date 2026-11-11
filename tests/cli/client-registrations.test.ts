@@ -76,8 +76,18 @@ function pluginCopy(home: string, built = true): string {
   return copy;
 }
 
-/** The plugin installed (installed_plugins.json) and, when `enabled`, enabled in the settings. */
+/**
+ * The plugin installed (installed_plugins.json) and, when `enabled`, enabled in the settings, from a
+ * marketplace Claude Code clones from GitHub (known_marketplaces.json): the cache copy is what runs.
+ * Without that record Claude Code 2.1.308 loads no plugin of the marketplace (verifier F1).
+ */
 function installPlugin(home: string, copy: string, enabled = true): void {
+  write(path.join(home, ".claude", "plugins", "known_marketplaces.json"), {
+    "espn-fantasy-football-mcp": {
+      source: { source: "github", repo: "example/espn-fantasy-football-mcp" },
+      installLocation: path.join(home, ".claude", "plugins", "marketplaces", "x"),
+    },
+  });
   write(path.join(home, ".claude", "plugins", "installed_plugins.json"), {
     version: 2,
     plugins: {
@@ -101,13 +111,10 @@ describe("the Claude Code plugin is a registration (doctor #2, #24; print-config
     expect(scanPlugin(sb.home)).toBeNull();
     const copy = pluginCopy(sb.home);
     installPlugin(sb.home, copy);
-    // no known_marketplaces.json: the source is unknown, and the cache copy is the root judged
+    // a marketplace Claude Code fetches: the cache copy is the root judged
     expect(scanPlugin(sb.home)).toEqual({
       enabled: true,
-      origin: {
-        kind: "unknown",
-        why: `${path.join(sb.home, ".claude", "plugins", "known_marketplaces.json")} is missing`,
-      },
+      origin: { kind: "copied", source: "github" },
       copies: [{ scope: "user", root: copy, installPath: copy, version: "0.0.0" }],
     });
     installPlugin(sb.home, copy, false);

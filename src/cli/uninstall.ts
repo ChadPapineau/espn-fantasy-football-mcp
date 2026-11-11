@@ -59,7 +59,7 @@ import { EXIT } from "./exit.js";
 import { isTty, writeLine, type CliIo } from "./io.js";
 import { JOB_STATE_FILE, JOB_STATE_LOCK, NOTIFICATION_LOG_FILE } from "./job-state.js";
 import { JOB_NAMES, logDir, removeJobs } from "./launchd.js";
-import type { Logger } from "./log.js";
+import { redactString, SecretRegistry, type Logger } from "./log.js";
 import { privatizeNewFile, resolveBackupDestination } from "./maintenance.js";
 import {
   cookieFindings,
@@ -297,18 +297,30 @@ export function findRegistrations(home: string): FoundRegistrations {
  */
 function pluginWhere(plugin: PluginInstall): string {
   const o = plugin.origin;
-  const records = [...new Set(plugin.copies.map((c) => c.installPath))].join(", ");
+  const paths = [
+    ...new Set(plugin.copies.flatMap((c) => (c.installPath === null ? [] : [c.installPath]))),
+  ];
+  const records =
+    paths.length === 0
+      ? "installed_plugins.json has no record of it"
+      : `installed_plugins.json records ${paths.join(", ")}`;
   if (o.kind === "unresolved")
-    return `installed_plugins.json records ${records}; Claude Code cannot load it — its folder marketplace ${o.marketplaceDir}: ${o.why}`;
+    return `${records}; Claude Code cannot load it — its folder marketplace ${o.marketplaceDir}: ${o.why}`;
+  if (o.kind === "unloaded") return `${records}; Claude Code cannot load it — ${o.why}`;
   if (o.kind === "refused")
-    return `installed_plugins.json records ${records}; doctor does not follow its folder marketplace's source — ${o.why}`;
-  const roots = [...new Set(plugin.copies.map((c) => c.root ?? c.installPath))].join(", ");
+    return `${records}; doctor does not follow its folder marketplace's source — ${o.why}`;
+  const roots = [...new Set(plugin.copies.flatMap((c) => (c.root === null ? [] : [c.root])))].join(
+    ", ",
+  );
   if (o.kind !== "folder") return roots;
   const leftovers = [
     ...new Set(
       plugin.copies
-        .filter((c) => c.root !== null && !samePath(c.installPath, c.root))
-        .map((c) => c.installPath)
+        .flatMap((c) =>
+          c.root !== null && c.installPath !== null && !samePath(c.installPath, c.root)
+            ? [c.installPath]
+            : [],
+        )
         .filter((p) => {
           try {
             lstatSync(p);
@@ -350,6 +362,16 @@ export function manualSteps(
   home: string,
   copiedSkills: readonly string[] = [],
   found: FoundRegistrations = { scans: [], plugin: null },
+): string[] {
+  // every line passes the log redaction patterns (verifier R-P1: defence in depth — no word holding
+  // more than a path is printed in the first place)
+  return stepLines(home, copiedSkills, found).map((l) => redactString(l, new SecretRegistry()));
+}
+
+function stepLines(
+  home: string,
+  copiedSkills: readonly string[],
+  found: FoundRegistrations,
 ): string[] {
   const out: string[] = [
     `Claude Code with the plugin: claude plugin uninstall ${PLUGIN_ID}, then claude plugin marketplace remove ${MARKETPLACE_NAME} — until then every Claude Code session starts the server, which creates the cache again.${found.plugin === null ? "" : ` It is installed here (${pluginWhere(found.plugin)}${found.plugin.enabled ? "" : "; disabled"}).`} The plugin's league id and season settings live in Claude Code's settings: remove them there if the uninstall leaves them.`,
@@ -405,7 +427,9 @@ export function manualSteps(
           ? `local scope, project ${e.dir ?? "?"}`
           : `user scope, ${e.file}`;
     out.push(
-      `Claude Code (${where})${e.name === SERVER_NAME ? "" : ` registers this server under the key "${e.name}"`}: ${removeCommand(e)}`,
+      e.declined
+        ? `Claude Code (${where})${e.name === SERVER_NAME ? "" : ` registers this server under the key "${e.name}"`}, declined in Claude Code's settings (disabledMcpjsonServers), so never started — removing it is optional: ${removeCommand(e)}`
+        : `Claude Code (${where})${e.name === SERVER_NAME ? "" : ` registers this server under the key "${e.name}"`}: ${removeCommand(e)}`,
     );
     if (cookieIn(e)) out.push(`  ${COOKIE_NOTE}`);
   }
@@ -443,7 +467,7 @@ export function manualSteps(
   for (const n of [...notOurs("code", "undetermined"), ...notOurs("desktop", "undetermined")]) {
     const where = n.scope === "desktop" ? `${n.file} (Claude Desktop)` : whereOf(n.scope, n.dir);
     out.push(
-      `${n.ownKey ? `The "${SERVER_NAME}" key in` : "An entry in"} ${where} launches ${n.target ?? "?"}, and uninstall cannot tell what it launches (${n.why ?? "?"}): it is not removed here — check what it is before removing anything.`,
+      `${n.ownKey ? `The "${SERVER_NAME}" key in` : "An entry in"} ${where} launches ${n.target ?? "a command line uninstall does not print"}, and uninstall cannot tell what it launches (${n.why ?? "?"}): it is not removed here — check what it is before removing anything.`,
     );
   }
   // another server's env block holding an ESPN cookie: said (value-free), never edited
