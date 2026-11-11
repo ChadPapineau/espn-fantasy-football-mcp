@@ -289,13 +289,34 @@ export function findRegistrations(home: string): FoundRegistrations {
   };
 }
 
-/** Where the plugin Claude Code runs is (client-config.ts `PluginCopy.root`), for the first step. */
+/**
+ * Where the plugin Claude Code runs is (client-config.ts `PluginCopy.root`), for the first step: a
+ * folder read in place and the leftover cache copy still there (an absent one is not named:
+ * verifier B2), the cache copy of a fetched marketplace, or — for a folder marketplace Claude Code
+ * cannot load the plugin from, or one doctor does not follow — the record and why (verifier B1).
+ */
 function pluginWhere(plugin: PluginInstall): string {
-  const roots = [...new Set(plugin.copies.map((c) => c.root))].join(", ");
-  if (plugin.origin.kind !== "folder") return roots;
+  const o = plugin.origin;
+  const records = [...new Set(plugin.copies.map((c) => c.installPath))].join(", ");
+  if (o.kind === "unresolved")
+    return `installed_plugins.json records ${records}; Claude Code cannot load it — its folder marketplace ${o.marketplaceDir}: ${o.why}`;
+  if (o.kind === "refused")
+    return `installed_plugins.json records ${records}; doctor does not follow its folder marketplace's source — ${o.why}`;
+  const roots = [...new Set(plugin.copies.map((c) => c.root ?? c.installPath))].join(", ");
+  if (o.kind !== "folder") return roots;
   const leftovers = [
     ...new Set(
-      plugin.copies.filter((c) => !samePath(c.installPath, c.root)).map((c) => c.installPath),
+      plugin.copies
+        .filter((c) => c.root !== null && !samePath(c.installPath, c.root))
+        .map((c) => c.installPath)
+        .filter((p) => {
+          try {
+            lstatSync(p);
+            return true;
+          } catch {
+            return false;
+          }
+        }),
     ),
   ];
   return `${roots}, read in place from its folder marketplace${leftovers.length === 0 ? "" : `; ${leftovers.join(", ")} is a leftover cache copy`}`;
@@ -316,12 +337,14 @@ const PLUGIN_FILE_COOKIE_NOTE =
  * entries under another key included, and Claude Desktop's entry; an env block holding a cookie is
  * said. With nothing found, the generic user-scope and Desktop steps stand (Stage C findings
  * uninstall-steps-omit-plugin, uninstall-local-scope-registration-unnamed) — unless this server's
- * key there launches another package (client-config.ts `classifyEntry`): that one is left, and an
- * entry whose package cannot be read is said without a remove command, so uninstall never steers
- * the user to remove another project's server (found on the owner's Mac, 2026-11-11: the sibling's
- * Yahoo server was counted as a registration of this one). The plugin is named where Claude Code
- * reads it (in place from a folder marketplace). Then the copy-installed Skills, the ESPN session,
- * the backups and the global package.
+ * key there launches another package or what uninstall cannot tell is this server (client-config.ts
+ * `classifyEntry`; verifier A-F1: `uv run server.py` under this key got the generic remove): that one
+ * is left, and an entry whose package cannot be read is said without a remove command, so
+ * uninstall never steers the user to remove another project's server (found on the owner's Mac,
+ * 2026-11-11: the sibling's Yahoo server was counted as a registration of this one). The plugin is
+ * named where Claude Code reads it (in place from a folder marketplace; for one it cannot load,
+ * the record and why). Then the copy-installed Skills, the ESPN session, the backups and the global
+ * package.
  */
 export function manualSteps(
   home: string,
@@ -352,12 +375,27 @@ export function manualSteps(
     found.scans
       .filter((x) => x.client === client)
       .flatMap((x) => x.notOurs.filter((n) => n.kind === kind));
+  // this server's own key held by an entry that is not this server (another package, or one
+  // uninstall cannot tell): the generic step would remove it, so it is replaced (verifier A-F1)
+  const ownKeyUndetermined = (client: "desktop" | "code") =>
+    notOurs(client, "undetermined").filter((n) => n.ownKey);
   const foreignCode = notOurs("code", "foreign");
+  const heldCode = ownKeyUndetermined("code");
   if (code.length === 0)
     out.push(
-      foreignCode.length === 0
+      foreignCode.length === 0 && heldCode.length === 0
         ? `Claude Code without the plugin: claude mcp remove --scope user ${SERVER_NAME} (entries live in ${codeConfigPath(home)}; a local-scope entry is removed from its project directory with --scope local)`
-        : `Claude Code without the plugin: no \`claude mcp add\` entry of this server was found. The "${SERVER_NAME}" key in ${foreignCode.map((n) => whereOf(n.scope, n.dir)).join(", ")} launches another package, not this server: leave it (never run \`claude mcp remove ${SERVER_NAME}\` there).`,
+        : [
+            "Claude Code without the plugin: no `claude mcp add` entry of this server was found.",
+            foreignCode.length === 0
+              ? null
+              : `The "${SERVER_NAME}" key in ${foreignCode.map((n) => whereOf(n.scope, n.dir)).join(", ")} launches another package, not this server: leave it (never run \`claude mcp remove ${SERVER_NAME}\` there).`,
+            heldCode.length === 0
+              ? null
+              : `The "${SERVER_NAME}" key in ${heldCode.map((n) => whereOf(n.scope, n.dir)).join(", ")} launches what uninstall cannot tell is this server (said below): never run a generic \`claude mcp remove ${SERVER_NAME}\` there.`,
+          ]
+            .filter((x) => x !== null)
+            .join(" "),
     );
   for (const e of code) {
     const where =
@@ -378,11 +416,22 @@ export function manualSteps(
     if (cookieIn(e)) out.push(`  ${PLUGIN_FILE_COOKIE_NOTE}`);
   }
   const foreignDesktop = notOurs("desktop", "foreign");
+  const heldDesktop = ownKeyUndetermined("desktop");
   if (desktop.length === 0)
     out.push(
-      foreignDesktop.length === 0
+      foreignDesktop.length === 0 && heldDesktop.length === 0
         ? `Remove the "${SERVER_NAME}" entry from ${desktopConfigPath(home)} (Claude Desktop), then restart it; Skills you uploaded to Claude Desktop as zips are removed in its settings.`
-        : `The "${SERVER_NAME}" entry in ${foreignDesktop.map((n) => n.file).join(", ")} (Claude Desktop) launches another package, not this server: leave it. Skills you uploaded to Claude Desktop as zips are removed in its settings.`,
+        : [
+            foreignDesktop.length === 0
+              ? null
+              : `The "${SERVER_NAME}" entry in ${foreignDesktop.map((n) => n.file).join(", ")} (Claude Desktop) launches another package, not this server: leave it.`,
+            heldDesktop.length === 0
+              ? null
+              : `The "${SERVER_NAME}" entry in ${heldDesktop.map((n) => n.file).join(", ")} (Claude Desktop) launches what uninstall cannot tell is this server (said below): check it before removing it.`,
+            "Skills you uploaded to Claude Desktop as zips are removed in its settings.",
+          ]
+            .filter((x) => x !== null)
+            .join(" "),
     );
   for (const e of desktop) {
     out.push(
@@ -391,10 +440,12 @@ export function manualSteps(
     if (cookieIn(e)) out.push(`  ${COOKIE_NOTE}`);
   }
   // an entry whose package cannot be read: said, never given a remove command
-  for (const n of [...notOurs("code", "undetermined"), ...notOurs("desktop", "undetermined")])
+  for (const n of [...notOurs("code", "undetermined"), ...notOurs("desktop", "undetermined")]) {
+    const where = n.scope === "desktop" ? `${n.file} (Claude Desktop)` : whereOf(n.scope, n.dir);
     out.push(
-      `An entry in ${n.scope === "desktop" ? `${n.file} (Claude Desktop)` : whereOf(n.scope, n.dir)} launches ${n.target ?? "?"}, and uninstall cannot tell what it launches (${n.why ?? "?"}): it is not removed here — check what it is before removing anything.`,
+      `${n.ownKey ? `The "${SERVER_NAME}" key in` : "An entry in"} ${where} launches ${n.target ?? "?"}, and uninstall cannot tell what it launches (${n.why ?? "?"}): it is not removed here — check what it is before removing anything.`,
     );
+  }
   // another server's env block holding an ESPN cookie: said (value-free), never edited
   for (const x of found.scans)
     for (const b of x.envBlocks)

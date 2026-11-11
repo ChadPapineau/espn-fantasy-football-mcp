@@ -336,12 +336,24 @@ minor version (plan 04 §4.4; plan 09 K6). One version covers the server, the Sk
   serve`) as a second registration of this one, called it "entry ok" and pointed at
   `eff uninstall`; row 24 failed on an old cache copy of the plugin that Claude Code no longer runs.
   An entry is now this server only when what it launches is this package (its `package.json` name,
-  or this plugin's manifest beside the shim), under any key: the sibling is "also installed (fine)",
-  another package under this server's key is left alone, and an entry whose package cannot be read
-  is said once and never counted or offered for removal. A real duplicate's fix is its exact
-  `claude mcp remove` command. The plugin is judged where Claude Code reads it: in place from a
-  folder marketplace (the cache copy is named as a leftover, never failed on), or the cache copy
-  for a marketplace Claude Code fetches. `eff uninstall` follows the same rules.
+  this plugin's manifest beside the shim, or its `eff` link from `npm link` or a global install),
+  under any key: the sibling is "also installed (fine)", another package under this server's key
+  is left alone, and an entry whose package cannot be read is said once and never counted or
+  offered for removal. Under this server's own key, an entry still counts as this server when it
+  names one of this package's programs that doctor cannot place (a missing build, a relative path,
+  `eff` or `npx espn-fantasy-football-mcp` from the PATH), so a broken registration is diagnosed;
+  one that names none of them (`uv run server.py`, any other program) is said once and left alone,
+  and `eff uninstall` no longer prints a `claude mcp remove espn-fantasy-football` that would remove
+  it. Every view of a Claude Code session (the user scope plus one project directory's local and
+  project scopes), and Claude Desktop's config, counts its registrations: two keys there are the
+  duplicate, the plugin or not, and the fix lists the exact `claude mcp remove` of all but one. The
+  plugin is judged where Claude Code reads it: in place from a folder marketplace, or the cache copy
+  for a marketplace Claude Code fetches. A cache copy left from a folder marketplace is never failed
+  on; doctor names it as one the current client does not run (and says when nothing is there).
+  When a folder marketplace's listing is missing, unreadable, or no longer lists the plugin, row 2
+  fails: Claude Code cannot load the plugin, and the fix adds the marketplace again. When doctor
+  does not follow the plugin's source there, row 2 warns. In neither case is the cache copy judged
+  as what runs. `eff uninstall` follows the same rules.
 - **The Linux CI stall (plan 10 A16a).** SQLite's automatic WAL checkpoint ran inside a commit on
   the event loop: on the Linux CI runner one cache `INSERT` held the loop 36–89 ms, waiting on I/O.
   `eff serve` now runs PASSIVE checkpoints on a worker thread with its own connection, at SQLite's
