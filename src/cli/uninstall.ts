@@ -346,7 +346,8 @@ function pluginWhere(plugin: PluginInstall): string {
  * How to remove a local-scope entry recorded for a path that is not a directory a session can run
  * in (gone, or no directory): `mkdir -p` and `claude mcp remove` there only when no git work tree is
  * at or above it (`gitWorkTreeAt`: Claude Code 2.1.308 files a session under the work tree, so the
- * command would act on that record — V3-3) and the path, once made, is its own real path (that
+ * command would act on that record — V3-3; where doctor cannot tell, a `.git` it cannot check or a
+ * path deeper than it walks, neither — VR6-3) and the path, once made, is its own real path (that
  * client keys a session by the real path of its working directory: D-7), else `claude purge` while
  * nothing is at the path (with something there, purge also acts on the other record). A key or
  * directory holding a terminal control gets the hand edit, never a command (D-8).
@@ -361,19 +362,22 @@ function goneRemoval(who: string, e: ClientEntry, dir: string, notDirectory: boo
   const real = tree === null ? realPathOnceMade(dir) : null;
   /** The other record a command there would act on, as said, or null: the path's own. */
   const other =
-    tree !== null
-      ? { at: tree, said: `the git work tree at ${tree}` }
-      : real === dir
-        ? null
-        : real === null
-          ? { at: null, said: null }
-          : { at: real, said: `its real path ${real}` };
+    typeof tree === "string"
+      ? { at: tree, said: `the git work tree at ${tree}`, why: null }
+      : tree !== null
+        ? // a walk doctor could not finish: never "no work tree" (VR6-3)
+          { at: null, said: null, why: tree.unknown }
+        : real === dir
+          ? null
+          : real === null
+            ? { at: null, said: null, why: null }
+            : { at: real, said: `its real path ${real}`, why: null };
   if (!notDirectory) {
     if (other === null)
       return `${who}: recorded for ${dir}, which does not exist, so never started — to remove it: mkdir -p ${d} && ${r.command} (or claude purge ${d}, which deletes all of Claude Code's state for that directory)`;
     const why =
       other.at === null
-        ? "uninstall cannot tell which record Claude Code would file a session there under, so `claude mcp remove` there, or `claude purge` once it exists, may act on another record"
+        ? `uninstall cannot tell which record Claude Code would file a session there under${other.why === null ? "" : ` (${other.why})`}, so \`claude mcp remove\` there, or \`claude purge\` once it exists, may act on another record`
         : `Claude Code files a session there under ${other.said}, so \`claude mcp remove\` there, or \`claude purge\` once it exists, acts on ${other.at}'s record`;
     return `${who}: recorded for ${dir}, which does not exist, so never started — to remove it: claude purge ${d} while ${dir} does not exist (it deletes all of Claude Code's state for that directory); never make ${dir} first: ${why}`;
   }

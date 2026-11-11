@@ -317,6 +317,41 @@ describe("ESPN pattern redaction (plan 01 §8; plan 02 §2.3)", () => {
       ),
     ).toBe("[redacted:private_key]");
   });
+  it("a terminal control or escape sequence beside a secret's name, or before the secret, never lets it through — and a sequence never takes the value's first digit (verifier VR6-5)", () => {
+    const id = fakeLeagueId("log-vr6-5", 7);
+    const guid = fakeGuid("log-vr6-5");
+    // a separator: every control class and escape sequence form
+    for (const [sep, shown] of [
+      ["\u001b", "\u001b"],
+      ["\u001b[31m", "\u001b[31m"],
+      ["\u009b31m", "\u009b31m"],
+      ["\u001b]0;x\u0007", "\u001b]0;x\u0007"],
+      ["\u001b(B", "\u001b(B"],
+      ["\u0085", "\u0085"],
+      ["\u202e", "\u202e"],
+    ] as const) {
+      expect(redactString(`leagueId=${sep}${id}`, r()), JSON.stringify(sep)).toBe(
+        `leagueId=${shown}[league]`,
+      );
+      expect(redactString(`Bearer${sep}abcdefghijklmnop`, r()), JSON.stringify(sep)).toBe(
+        "Bearer [redacted:token]",
+      );
+    }
+    // a word boundary: a secret right after a sequence whose final byte is a letter
+    expect(redactString(`{x}\u001b[31mleagueId=${id}`, r())).toBe("{x}\u001b[31mleagueId=[league]");
+    expect(redactString(`\u001b[0m${guid}`, r())).not.toContain(guid);
+    expect(redactString(`\u001b(Bespn_s2=${S2}`, r())).not.toContain(S2);
+    // every mark already in the string: the second pass is skipped (the first one still ran)
+    const marks = "\u0000\u0001\u0002\u0003\u0004";
+    expect(redactString(`${marks}\u001b[31mleagueId=${id}`, r())).toBe(
+      `${marks}\u001b[31mleagueId=${id}`,
+    );
+    expect(redactString(`${marks}\u001b[31m leagueId=${id}`, r())).toBe(
+      `${marks}\u001b[31m leagueId=[league]`,
+    );
+    // no sequence: one pass, the text as it was
+    expect(redactString("plain text", r())).toBe("plain text");
+  });
   it("leaves ordinary text alone, and every pattern is global", () => {
     expect(redactString("Team A beat Team B 112.4 to 98.1 in week 4", r())).toBe(
       "Team A beat Team B 112.4 to 98.1 in week 4",

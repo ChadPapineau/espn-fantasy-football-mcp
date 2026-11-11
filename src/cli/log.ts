@@ -269,6 +269,19 @@ interface PatternRule {
 
 const HEX = "[0-9A-Fa-f]";
 const GUID = `${HEX}{8}-${HEX}{4}-${HEX}{4}-${HEX}{4}-${HEX}{12}`;
+/**
+ * One unit of the gap a pattern allows between a secret's name, its `:`/`=` and its value: a
+ * whitespace character, a terminal control (C0, DEL, C1, the bidi controls, the line and paragraph
+ * separators — client-config.ts `TERMINAL_CONTROL_RE`), or a whole escape sequence (CSI `ESC [ … final`
+ * or `U+009B … final`, OSC `ESC ] … BEL|ESC \`, any other `ESC … final` — a final that is no digit,
+ * so a sequence never takes the value's first digit). Verifier VR6-5: a path read
+ * from a client config holding `leagueId=<ESC>[31m<id>` printed the id, as `\s` matched none of them;
+ * doctor escapes controls only after redacting (V5-1). Bounded, as every pattern here is.
+ */
+const GAP =
+  "(?:\\u001b\\[[0-?]{0,16}[ -/]{0,4}[@-~]|\\u009b[0-?]{0,16}[ -/]{0,4}[@-~]|\\u001b\\][^\\u0007\\u001b]{0,64}(?:\\u0007|\\u001b\\\\)|\\u001b[ -/]{0,4}[:-~]|[\\s\\u0000-\\u001f\\u007f-\\u009f\\u061c\\u200e\\u200f\\u202a-\\u202e\\u2066-\\u2069])";
+/** `GAP` repeated between `min` and `max` times, as a pattern source. */
+const gap = (min: number, max: number): string => `${GAP}{${String(min)},${String(max)}}`;
 
 /** The pattern rules, applied in order to every string after registered values. */
 export const REDACTION_PATTERNS: readonly PatternRule[] = Object.freeze([
@@ -280,17 +293,20 @@ export const REDACTION_PATTERNS: readonly PatternRule[] = Object.freeze([
   {
     // Cookie / Set-Cookie headers wholesale, to the end of the line (plan 01 §8).
     id: "cookie_header",
-    re: /\b((?:set-)?cookie)(["']?\s{0,8}[:=]\s{0,8})[^\r\n]*/gi,
+    re: new RegExp(`\\b((?:set-)?cookie)(["']?${gap(0, 8)}[:=]${gap(0, 8)})[^\\r\\n]*`, "gi"),
     replace: "$1$2[redacted:cookie]",
   },
   {
     id: "espn_s2",
-    re: /\b(espn[_-]?s2)(["']?\s{0,8}[:=]\s{0,8}["']?)[^;\s&"',}]{1,8192}/gi,
+    re: new RegExp(
+      `\\b(espn[_-]?s2)(["']?${gap(0, 8)}[:=]${gap(0, 8)}["']?)[^;\\s&"',}]{1,8192}`,
+      "gi",
+    ),
     replace: "$1$2[redacted:espn_s2]",
   },
   {
     id: "swid",
-    re: /\b(swid)(["']?\s{0,8}[:=]\s{0,8}["']?)[^;\s&"',}]{1,512}/gi,
+    re: new RegExp(`\\b(swid)(["']?${gap(0, 8)}[:=]${gap(0, 8)}["']?)[^;\\s&"',}]{1,512}`, "gi"),
     replace: "$1$2[redacted:swid]",
   },
   {
@@ -315,18 +331,24 @@ export const REDACTION_PATTERNS: readonly PatternRule[] = Object.freeze([
   },
   {
     id: "authorization",
-    re: /\b(authorization["']?\s{0,8}[:=]\s{0,8}["']?)(?:(?:bearer|basic|token)\s{1,8})?[^\s"',;}]{1,4096}/gi,
+    re: new RegExp(
+      `\\b(authorization["']?${gap(0, 8)}[:=]${gap(0, 8)}["']?)(?:(?:bearer|basic|token)${gap(1, 8)})?[^\\s"',;}]{1,4096}`,
+      "gi",
+    ),
     replace: "$1[redacted:authorization]",
   },
   {
     id: "bearer",
-    re: /\b(bearer|basic)\s{1,8}[A-Za-z0-9._~+/=-]{8,4096}/gi,
+    re: new RegExp(`\\b(bearer|basic)${gap(1, 8)}[A-Za-z0-9._~+/=-]{8,4096}`, "gi"),
     replace: "$1 [redacted:token]",
   },
   {
     // ESPN league paths and assignments carry the league id (plan 01 §8 `[league]`)
     id: "league_id",
-    re: /(\bleagues\/|\bleagueHistory\/|\bleague[_-]?id["']?\s{0,8}[:=]\s{0,8}["']?)[0-9]{1,12}/gi,
+    re: new RegExp(
+      `((?:\\bleagues\\/|\\bleagueHistory\\/|\\bleague[_-]?id["']?${gap(0, 8)}[:=])${gap(0, 8)}["']?)[0-9]{1,12}`,
+      "gi",
+    ),
     replace: "$1[league]",
   },
   {
@@ -341,7 +363,10 @@ export const REDACTION_PATTERNS: readonly PatternRule[] = Object.freeze([
   },
   {
     id: "json_secret",
-    re: /("(?:access_token|refresh_token|id_token|client_secret|password|passwd|api_key|apikey|token|secret|authorization|cookie|espn_s2|swid)"\s{0,8}:\s{0,8}")[^"]{0,8192}(")/gi,
+    re: new RegExp(
+      `("(?:access_token|refresh_token|id_token|client_secret|password|passwd|api_key|apikey|token|secret|authorization|cookie|espn_s2|swid)"${gap(0, 8)}:${gap(0, 8)}")[^"]{0,8192}(")`,
+      "gi",
+    ),
     replace: "$1[redacted]$2",
   },
   {
@@ -425,15 +450,40 @@ export function looksLikeBareEspnS2(run: string): boolean {
   return entropy(run) >= (run.length >= 100 ? 4.0 : 3.5);
 }
 
-/** Redacts one string: registered values, then every pattern. */
-export function redactString(s: string, secrets: SecretRegistry): string {
-  let out = secrets.apply(s);
+/** Every pattern rule over one string, in order. */
+function redactPatterns(s: string): string {
+  let out = s;
   for (const rule of REDACTION_PATTERNS)
     out =
       typeof rule.replace === "string"
         ? out.replace(rule.re, rule.replace)
         : out.replace(rule.re, rule.replace);
   return out;
+}
+
+/**
+ * A terminal escape sequence (`GAP`'s CSI, OSC and other `ESC … final` forms, `ESC [` and `ESC ]`
+ * only as the CSI and OSC they open) right before a word character, which its final byte would join
+ * (`ESC[31m` + `leagueId`: no `\b` between them).
+ */
+const ESCAPE_SEQUENCE_RE =
+  /(?:\u001b\[[0-?]{0,16}[ -/]{0,4}[@-~]|\u009b[0-?]{0,16}[ -/]{0,4}[@-~]|\u001b\][^\u0007\u001b]{0,64}(?:\u0007|\u001b\\)|\u001b(?![[\]])[ -/]{0,4}[:-~])(?=[A-Za-z0-9_])/gu;
+/** Controls tried, in order, as the mark `redactString` puts after an escape sequence. */
+const SEQUENCE_MARKS = ["\u0000", "\u0001", "\u0002", "\u0003", "\u0004"];
+
+/**
+ * Redacts one string: registered values, then every pattern — then, where the string holds a
+ * terminal escape sequence right before a word character, every pattern again with a control marked
+ * after each such sequence (and the marks dropped): a sequence's final byte is a word character
+ * (`ESC[31m`), so a secret right after one had lost the `\b` or look-behind its pattern starts with
+ * (verifier VR6-5). The second pass only redacts more.
+ */
+export function redactString(s: string, secrets: SecretRegistry): string {
+  const out = redactPatterns(secrets.apply(s));
+  if (out.search(ESCAPE_SEQUENCE_RE) < 0) return out;
+  const mark = SEQUENCE_MARKS.find((m) => !out.includes(m));
+  if (mark === undefined) return out;
+  return redactPatterns(out.replace(ESCAPE_SEQUENCE_RE, (m) => `${m}${mark}`)).replaceAll(mark, "");
 }
 
 /** Truncates to `max` UTF-16 units without splitting a surrogate pair, noting the dropped length. */

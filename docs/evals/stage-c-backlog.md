@@ -838,13 +838,25 @@ the owner's delegation:
   worktrees.
 - **D-3 — the keep rule is greedy** (accepted). It never strips a session's only server, and where
   it cannot settle a view it names the choice as the user's; no global search.
-- **One entry per key (round-6 verifiers V5-2, V5-3, U2; Claude Code 2.1.308's `dC`).** A session
-  starts one server per key, the narrowest scope's: the local scope over the approved project
-  servers over the user scope, and of the `.mcp.json` files the nearer over the farther. An entry
-  that is not this server under one of this server's keys at a narrower scope is what a session
-  there starts, so doctor does not count ours there and no fix step relies on it there. Doctor
-  takes every project server not declined (`disabledMcpjsonServers`) as approved, as it does for
-  counting (R-P5a); one still awaiting approval does not override in Claude Code.
+- **One entry per key (round-6 verifiers V5-2, V5-3, U2; round-7 VR6-1, F2, F3; Claude Code
+  2.1.308's `dC`).** A session starts one server per key: a local-scope entry over all; else the
+  nearest `.mcp.json`'s entry (the files are merged before any approval) where it is approved
+  (`enabledMcpjsonServers` or `enableAllProjectMcpServers` in the user settings, the project's
+  `.claude/settings.json` or `settings.local.json`, or the legacy fields of its `projects` record,
+  which 2.1.308 moves into `settings.local.json` at startup); else the user scope's. A project
+  server that is not approved is skipped while the user or local scope holds its key, and 2.1.308
+  never offers it for approval then, so that state is stable, not a wait: our user-scope entry
+  starts there, and a project server of ours that is not approved, under a key another program's
+  entry holds at user scope, does not. An entry that is not this server is what a session starts
+  instead only where it wins that order, so doctor does not count ours there and no fix step relies
+  on it there. Known limits: a project server not approved whose key neither the user nor the local
+  scope holds is taken as the approval dialog's (counted, R-P5a); a session run non-interactively
+  (`claude -p`) or in bypass-permissions mode approves every project server (2.1.308's `Hst`), which
+  doctor does not model — it models an interactive session; approvals and declines are matched by
+  exact key (2.1.308 also folds some spellings), and an untrusted workspace's gating of the
+  project's own settings is not modelled. An entry of a `projects` record no session reads (a key
+  2.1.308 files under another one, such as a trailing-slash key) overrides nothing and counts for
+  no session.
 - **D-4 — optional source fields are not checked.** The optional fields of each marketplace source
   type (github `ref`/`sparsePaths`/`skipLfs`, url `headers`, npm name syntax, a settings plugin's
   own source fields) are not checked; a file Claude Code wrote passes them.
@@ -872,7 +884,11 @@ the owner's delegation:
   broken entry there still fails — but its local entries are removed by hand, the detail saying why.
   Project-scope removal (`cd <dir> && claude mcp remove --scope project …`) writes the working
   directory's `.mcp.json` and stays. The gone-directory route keeps its V3-3 behaviour, and offers
-  `mkdir -p` only where the path, once made, would be its own real path. Known limit: where 2.1.308
+  `mkdir -p` only where the path, once made, would be its own real path and doctor can tell that no
+  work tree is above it (round-7 VR6-3: a `.git` it cannot check, or a path deeper than the 64
+  directories it walks, is "cannot tell", never "none" — 2.1.308's walk up has no bound). A choice
+  that keeps entries at local scope in some projects offers that add only where doctor can tell the
+  record (VR6-2); elsewhere it turns the plugin back on. Known limit: where 2.1.308
   keeps a linked worktree as its own root after a path-safety check of its own on a plain path,
   doctor files it under the main repository (its entries are said as never started).
 - **D-8 — display safety.** Every path, key or name read from a client config, settings file or
@@ -883,7 +899,10 @@ the owner's delegation:
   step lines, print-config's warnings). Doctor's and uninstall's lines pass the log redaction
   first and are escaped after it (round-6 verifier V5-1: escaped first, a TAB before a fake league
   id hid it from the pattern), every doctor row included (V5-4), and a word quoted in a line is
-  redacted before it is quoted. A command whose words hold one is never printed; the line
+  redacted before it is quoted. The log redaction allows a terminal control or a whole escape
+  sequence (CSI, OSC, `ESC … final`) wherever a pattern allows whitespace beside a secret's name,
+  and a sequence's final letter is no word boundary to it (round-7 VR6-5: `leagueId=ESC[31m<id>`
+  printed the id). A command whose words hold one is never printed; the line
   says that the entry's key or directory holds a control character and gives the hand edit of its
   record instead. print-config's stdout snippet is built from this install's own paths and is
   printed as it runs.

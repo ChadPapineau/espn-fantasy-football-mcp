@@ -466,11 +466,18 @@ const PLUGIN_LIST =
  * record is repaired before the marketplace is added again (V3-4).
  */
 const REFUSED_REGISTRY_FIX = `${PLUGIN_LIST}; if it does not, repair the record of ~/.claude/plugins/known_marketplaces.json that row 2's detail names first — until then Claude Code 2.1.308 also refuses \`claude plugin marketplace add\` — and if it still does not load, add the marketplace again from the built runtime clone (\`claude plugin marketplace add <the runtime clone>\`, README step 5); then restart the client`;
-/** The most directories one detail or fix line lists ("…" after them). */
+/** The most directories one detail line lists ("…" after them). */
 const MAX_LISTED_DIRS = 5;
-/** Directories as one line lists them: the first `MAX_LISTED_DIRS`, then "…". */
+/** Directories as one detail line lists them: the first `MAX_LISTED_DIRS`, then "…". */
 function listedDirs(dirs: readonly string[]): string {
   return `${dirs.slice(0, MAX_LISTED_DIRS).join(", ")}${dirs.length > MAX_LISTED_DIRS ? " …" : ""}`;
+}
+/**
+ * Directories a fix step acts on, every one of them (verifier VR6-4: the first five, then "…", left
+ * the rest of a step's projects named nowhere, and following the step stripped them).
+ */
+function allDirs(dirs: readonly string[]): string {
+  return dirs.join(", ");
 }
 
 /**
@@ -544,8 +551,13 @@ function runsPluginLine(e: ClientEntry, root: string | null): boolean {
  * scope there (V5-2, V5-3, U2); a choice the keep rule leaves to the user says what stays beside
  * the entries there (U5) and, outside the projects, which projects it strips (U3); one key is turned
  * back on per project, said per key (U1); and beside a plugin Claude Code cannot load, its re-add is
- * followed by the keep-one fix of a plugin it loads, never "never both" (F1). Doctor models Claude
- * Code 2.1.308's rules; its known limits are listed in docs/evals/stage-c-backlog.md.
+ * followed by the keep-one fix of a plugin it loads, never "never both" (F1). Refix round 7
+ * (verifiers VR6, F): a project server wins its key over the user scope only where it is approved,
+ * as in Claude Code 2.1.308's dC (VR6-1, F2), and an entry of a record no session reads overrides
+ * nothing (F3); keeping entries only in the projects a choice strips adds in each the keys it starts,
+ * only where doctor can tell the record (F1, VR6-2); every directory a fix step acts on is named
+ * (VR6-4). Doctor models Claude Code 2.1.308's rules; its known limits are listed in
+ * docs/evals/stage-c-backlog.md.
  */
 export async function checkLaunchConfig(
   io: CliIo,
@@ -784,7 +796,9 @@ async function launchConfigRow(
   for (const o of code.overriddenIn)
     if (codeRegistrations.includes(o.entry))
       details.push(
-        `${whereOf(o.entry.scope, o.entry.dir)}: in ${listedDirs(o.dirs)}, an entry that is not this server holds its key at a narrower scope — Claude Code starts that one there instead`,
+        o.by === "narrower"
+          ? `${whereOf(o.entry.scope, o.entry.dir)}: in ${listedDirs(o.dirs)}, an entry that is not this server holds its key at a narrower scope — Claude Code starts that one there instead`
+          : `${whereOf(o.entry.scope, o.entry.dir)}: in ${listedDirs(o.dirs)}, it is not approved there (\`enabledMcpjsonServers\`) and an entry that is not this server holds its key at user scope — Claude Code starts that one there instead`,
       );
   if (pluginRuns)
     for (const e of dropping)
@@ -815,12 +829,27 @@ async function launchConfigRow(
   const choiceOf = (u: UnresolvedView): string => {
     const names = named(u.entries);
     const it = new Set(u.entries.map((e) => e.name)).size === 1 ? "it" : "them";
-    if (u.dir === null)
-      return u.beside === "plugin"
-        ? // the projects it would strip, named: turning the plugin back on anywhere else starts it
-          // beside an entry there (U3)
-          `outside the projects Claude Code records, the plugin and ${names} start, and removing ${it} leaves ${listedDirs(u.leaves)} (which turn${u.leaves.length === 1 ? "s" : ""} the plugin off) with no server — turn the plugin back on there (\`/mcp enable ${PLUGIN_SERVER_KEY}\` in a session in each), or keep ${it} only there (\`claude mcp add --scope local\` in each, then ${commands(u.entries)})`
-        : `outside the projects Claude Code records, ${names} all start, and removing any of them leaves a project with no server — keep one at user scope and the others only in the projects that need them (\`claude mcp add --scope local\` there, then their \`claude mcp remove --scope user\`)`;
+    if (u.dir === null) {
+      if (u.beside !== "plugin")
+        return `outside the projects Claude Code records, ${names} all start, and removing any of them leaves a project with no server — keep one at user scope and the others only in the projects that need them (\`claude mcp add --scope local\` there, then their \`claude mcp remove --scope user\`)`;
+      // the projects it would strip, every one named: turning the plugin back on anywhere else
+      // starts it beside an entry there (U3, VR6-4); keeping the entries there adds in each only
+      // the keys it starts (F1), and only where doctor can tell which record that writes (VR6-2)
+      const add = u.leaves.filter((l) => l.addable);
+      const unsure = u.leaves.filter((l) => !l.addable).map((l) => l.dir);
+      const byKeys = new Map<string, string[]>();
+      for (const l of add) {
+        const ks = l.keys.map(quotedWord).join(", ");
+        byKeys.set(ks, [...(byKeys.get(ks) ?? []), l.dir]);
+      }
+      const under = [...byKeys].map(([ks, ds]) => `${ks} in ${allDirs(ds)}`).join(" and ");
+      const enable = `turn the plugin back on there (\`/mcp enable ${PLUGIN_SERVER_KEY}\` in a session in each${add.length === 0 ? "; doctor cannot tell which record `claude mcp add --scope local` writes there, so it offers no local entry" : ""})`;
+      const keep =
+        add.length === 0
+          ? ""
+          : `, or keep ${it} only there (\`claude mcp add --scope local\` in a terminal there, under ${under}${unsure.length === 0 ? "" : `, and the plugin turned back on in ${allDirs(unsure)}, where doctor cannot tell which record that command writes`}; then ${commands(u.entries)})`;
+      return `outside the projects Claude Code records, the plugin and ${names} start, and removing ${it} leaves ${allDirs(u.leaves.map((l) => l.dir))} (which turn${u.leaves.length === 1 ? "s" : ""} the plugin off) with no server — ${enable}${keep}`;
+    }
     const locals = u.entries.filter((e) => e.scope === "local");
     const how = `\`/mcp disable <name>\` in a session there${u.entries.some((e) => e.scope === "project") ? `; a project server can be declined in ${path.join(u.dir, ".claude", "settings.local.json")} instead, \`disabledMcpjsonServers\`` : ""}${locals.length === 0 ? "" : locals.every((e) => "command" in removalOf(e)) ? "; a local-scope entry is removed instead, with its own `claude mcp remove --scope local`" : `; a local-scope entry is removed instead: ${commands(locals)}`}`;
     return u.beside !== null
@@ -849,7 +878,7 @@ async function launchConfigRow(
         : []),
       ...(heldIn.some((d) => d !== null)
         ? [
-            `in ${listedDirs(heldIn.flatMap((d) => (d === null ? [] : [d])))} an entry that is not this server holds \`${SERVER_NAME}\` at a narrower scope, which Claude Code starts there instead`,
+            `in ${allDirs(heldIn.flatMap((d) => (d === null ? [] : [d])))} an entry that is not this server holds \`${SERVER_NAME}\` at a narrower scope, which Claude Code starts there instead`,
           ]
         : []),
     ].join("; ");
@@ -872,7 +901,7 @@ async function launchConfigRow(
     const firstly = `uninstall the plugin (\`claude plugin uninstall ${PLUGIN_ID}\`)${planU === "" ? "" : ` and ${planU}`}`;
     const projects = strips.flatMap((v) => (v.dir === null ? [] : [{ ...v, dir: v.dir }]));
     const where = [
-      ...(projects.length > 0 ? [listedDirs(projects.map((v) => v.dir))] : []),
+      ...(projects.length > 0 ? [allDirs(projects.map((v) => v.dir))] : []),
       ...(strips.some((v) => v.dir === null)
         ? ["every session outside the projects Claude Code records"]
         : []),
@@ -901,17 +930,17 @@ async function launchConfigRow(
           ]),
       ...(on.length > 0
         ? [
-            `${on.map(([k, ds], i) => `${quotedWord(k)} ${i === 0 ? "is turned back on in" : "in"} ${listedDirs(ds)}`).join(" and ")} (\`/mcp enable <name>\` in a session there)`,
+            `${on.map(([k, ds], i) => `${quotedWord(k)} ${i === 0 ? "is turned back on in" : "in"} ${allDirs(ds)}`).join(" and ")} (\`/mcp enable <name>\` in a session there)`,
           ]
         : []),
       ...(local.length > 0
         ? [
-            `this server is added at local scope ${local.map(([k, ds]) => `under the key \`${k}\` in ${listedDirs(ds)}`).join(" and ")} (in a terminal there, the command \`eff print-config --client code\` prints, with \`--scope local\` and that key)`,
+            `this server is added at local scope ${local.map(([k, ds]) => `under the key \`${k}\` in ${allDirs(ds)}`).join(" and ")} (in a terminal there, the command \`eff print-config --client code\` prints, with \`--scope local\` and that key)`,
           ]
         : []),
       ...(bare.length > 0
         ? [
-            `${listedDirs(bare)} ${bare.length === 1 ? "starts an entry of its own" : "each start an entry of their own"}`,
+            `${allDirs(bare)} ${bare.length === 1 ? "starts an entry of its own" : "each start an entry of their own"}`,
           ]
         : []),
     ];

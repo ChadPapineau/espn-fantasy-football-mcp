@@ -76,6 +76,15 @@
 // not started there and no step relies on it (`ClientConfigScan.held`; V5-2, V5-3, U2); and each
 // choice the keep rule leaves to the user says what it keeps beside the entries and, outside the
 // projects, which projects it would strip (U1, U3, U5).
+//
+// Refix round 7 (verifiers VR6, F): a project server wins its key over the user scope only where it
+// is approved — Claude Code 2.1.308 skips one that is not while the user or local scope holds its
+// key, and never offers it (`SessionView.approved`; VR6-1, F2: another program's unapproved server
+// hid a duplicate of ours, and its local add made one); an entry of a record no session reads
+// overrides nothing and counts for no session (`HeldEntry.unread`, `absent`; F3); keeping entries
+// only in the projects a choice strips adds in each the keys it starts, and only where doctor can
+// tell the record (`UnresolvedView.leaves`; F1, VR6-2); and a gone directory too deep to walk is
+// "cannot tell", never "no work tree" (`gitWorkTreeAt`; VR6-3).
 import { lstatSync, realpathSync, statSync } from "node:fs";
 import path from "node:path";
 import { PathSecurityError, readSecureFile } from "../config/paths.js";
@@ -188,6 +197,15 @@ export interface SessionView {
    * local entries are removed by hand, never with `claude mcp remove` (D-7 (d)).
    */
   readonly keyUnknown?: string;
+  /**
+   * The project servers approved here (`enabledMcpjsonServers` in the user settings,
+   * `<dir>/.claude/settings.json` or `settings.local.json`, or the legacy field of its `projects`
+   * record, which Claude Code 2.1.308 migrates into settings.local.json at startup): only an approved
+   * one is started over the user scope's entry under its key (verifiers VR6-1, F2). Absent: none.
+   */
+  readonly approved?: readonly string[];
+  /** `enableAllProjectMcpServers: true` in any of those: every project server is approved here. */
+  readonly approvesAll?: true;
 }
 
 /** One entry's env block, where it lives (secrecy is checked over ALL entries — plan 03 §5 #3). */
@@ -235,12 +253,20 @@ export interface NotOursEntry {
  * Claude Code 2.1.308 starts one server per key in a session, the narrowest scope's (its dC: the
  * local scope over the approved project servers over the user scope; of the `.mcp.json` files, the
  * nearer over the farther): such an entry under a key of this server's at a narrower scope is what a
- * session there starts, never ours (verifiers V5-2, V5-3, U2).
+ * session there starts, never ours (verifiers V5-2, V5-3, U2) — a project server only where it is
+ * approved (VR6-1, F2: one that is not is skipped while the user scope holds its key).
  */
 export interface HeldEntry {
   readonly name: string;
   readonly scope: RegistrationScope;
   readonly dir: string | null;
+  /**
+   * A local-scope entry of a `projects` record no session reads (one Claude Code 2.1.308 files
+   * under another key, a gone path, or a path that is no directory): it overrides nothing (F3: a
+   * trailing-slash key's entry was matched to the session at the resolved path). Its key is still
+   * one an entry uses.
+   */
+  readonly unread?: true;
 }
 
 /** A parsed client config and our entries in it. */
@@ -757,15 +783,17 @@ function gitRootWalk(
  * The git work tree Claude Code 2.1.308 files a session in `dir` under (its `t6e`: the nearest of
  * `dir` and its ancestors, the filesystem root included, holding a `.git` directory or file — read
  * with lstat, never followed), or null when none does: then Claude Code files the session under
- * `dir` itself. A `.git` doctor cannot lstat (a symbolic link Claude Code does not follow, a
- * permission error) is taken as one: what `claude mcp remove --scope local` acts on is then not
- * certainly `dir`'s record (V3-3). The lexical walk the gone-directory route keeps (V3-3);
- * `codeProjectKey` is the full mapping of a directory that exists (D-7).
+ * `dir` itself. `unknown` (why): doctor cannot tell — a `.git` it cannot lstat or does not follow
+ * (a symbolic link, a permission error), or a path deeper than it walks (verifier VR6-3: that was
+ * null, so a gone directory 65 levels below a work tree was made and `claude mcp remove` run in it,
+ * while Claude Code's walk up has no bound and acts on the work tree's record). The lexical walk the
+ * gone-directory route keeps (V3-3); `codeProjectKey` is the full mapping of a directory that exists
+ * (D-7).
  */
-export function gitWorkTreeAt(dir: string): string | null {
+export function gitWorkTreeAt(dir: string): string | null | { readonly unknown: string } {
   const w = gitRootWalk(dir);
-  if (w === null || "deep" in w) return null;
-  return "root" in w ? w.root : w.at;
+  if (w === null) return null;
+  return "root" in w ? w.root : { unknown: w.why };
 }
 
 /**
@@ -982,11 +1010,32 @@ function within(top: string, dir: string): boolean {
   return rel === "" || (rel !== ".." && !rel.startsWith(`..${path.sep}`) && !path.isAbsolute(rel));
 }
 
-/** A settings file's `disabledMcpjsonServers` (bounded; unreadable or malformed → none). */
-function declinedIn(file: string): string[] {
+/** What one settings object (or a legacy `projects` record) says of the project servers. */
+interface ProjectChoices {
+  readonly declined: readonly string[];
+  readonly approved: readonly string[];
+  readonly all: boolean;
+}
+
+/**
+ * The project-server choices of a settings object: `disabledMcpjsonServers`, `enabledMcpjsonServers`
+ * and `enableAllProjectMcpServers: true` (bounded; anything else → none). Claude Code 2.1.308 reads
+ * the same fields of a `projects` record as legacy choices and moves them into the project's
+ * settings.local.json at startup (its migration of enableAllProjectMcpServers to settings).
+ */
+function choicesOf(v: unknown): ProjectChoices {
+  if (!isObj(v)) return { declined: [], approved: [], all: false };
+  return {
+    declined: namesIn(v.disabledMcpjsonServers),
+    approved: namesIn(v.enabledMcpjsonServers),
+    all: v.enableAllProjectMcpServers === true,
+  };
+}
+
+/** A settings file's project-server choices (`choicesOf`; unreadable or malformed → none). */
+function choicesIn(file: string): ProjectChoices {
   const r = readJson(file, MAX_PROJECT_FILE_BYTES);
-  if (r === null || r === "invalid" || !isObj(r.value)) return [];
-  return namesIn(r.value.disabledMcpjsonServers);
+  return choicesOf(r === null || r === "invalid" ? null : r.value);
 }
 
 /**
@@ -1090,9 +1139,13 @@ export function scanClientConfig(client: "desktop" | "code", file: string): Clie
   // missing directory (F2); and only those Claude Code 2.1.308 files a session under (D-7: a
   // directory below a git work tree, in a linked worktree, or not its own real path is filed under
   // another key, so no session reads its record)
-  const userDeclined = declinedIn(path.join(path.dirname(file), ".claude", "settings.json"));
+  const userChoices = choicesIn(path.join(path.dirname(file), ".claude", "settings.json"));
   const records = isObj(read.value) && isObj(read.value.projects) ? read.value.projects : {};
   const turnedOff = new Map<string, string[]>();
+  /** The legacy project-server choices of the records each session reads (VR6-1). */
+  const legacy = new Map<string, ProjectChoices[]>();
+  /** The recorded keys a session reads: only their local entries can override ours (F3). */
+  const read_ = new Set<string>();
   /** A recorded path that is there but is no directory (no session either: V3-5). */
   const files = new Set<string>();
   /** A directory doctor cannot stat: a session all the same, said (V3-5). */
@@ -1121,28 +1174,39 @@ export function scanClientConfig(client: "desktop" | "code", file: string): Clie
       keyUnknown.set(dir, `doctor cannot check ${dir} (${state.code})`);
     }
     const rec = records[key];
+    read_.add(key);
     turnedOff.set(dir, [
       ...(turnedOff.get(dir) ?? []),
       ...(isObj(rec) ? namesIn(rec.disabledMcpServers) : []),
     ]);
+    legacy.set(dir, [...(legacy.get(dir) ?? []), choicesOf(rec)]);
   }
   const sessions: SessionView[] = [...turnedOff].map(([dir, off]) => {
     const code = unchecked.get(dir);
     const unknownKey = keyUnknown.get(dir);
+    // the project-server choices Claude Code 2.1.308 reads for a session here: the user settings,
+    // the project's settings and local settings, and its records' legacy fields (R-P5a, VR6-1)
+    const choices = [
+      userChoices,
+      choicesIn(path.join(dir, ".claude", "settings.json")),
+      choicesIn(path.join(dir, ".claude", "settings.local.json")),
+      ...(legacy.get(dir) ?? []),
+    ];
+    const approved = [...new Set(choices.flatMap((c) => c.approved))];
     return {
       dir,
-      declined: [
-        ...new Set([
-          ...userDeclined,
-          ...declinedIn(path.join(dir, ".claude", "settings.json")),
-          ...declinedIn(path.join(dir, ".claude", "settings.local.json")),
-        ]),
-      ],
+      declined: [...new Set(choices.flatMap((c) => c.declined))],
       disabled: [...new Set(off)],
       ...(code === undefined ? {} : { unchecked: code }),
       ...(unknownKey === undefined ? {} : { keyUnknown: unknownKey }),
+      ...(approved.length === 0 ? {} : { approved }),
+      ...(choices.some((c) => c.all) ? { approvesAll: true as const } : {}),
     };
   });
+  // a local entry of a record no session reads overrides nothing (F3); its key stays one in use
+  const heldRead = held.map((h): HeldEntry =>
+    h.scope === "local" && h.dir !== null && !read_.has(h.dir) ? { ...h, unread: true } : h,
+  );
   // an entry is declined when every session that would see it declines it or turns it off (a
   // local-scope one: its own project's session; a project-scope one: every session at or below
   // its directory), and absent when no such session exists (F1, F2) — a local one of a directory
@@ -1187,7 +1251,7 @@ export function scanClientConfig(client: "desktop" | "code", file: string): Clie
     others,
     siblingInstalled,
     notOurs,
-    held,
+    held: heldRead,
     projectFiles,
     sessions,
   };
@@ -1312,9 +1376,18 @@ export interface UnresolvedView {
   readonly beside: "plugin" | "added" | null;
   /**
    * Outside the projects, beside the plugin: the projects that turn the plugin off and start none of
-   * this server's entries but these, which removing them would leave with no server (verifier U3).
+   * this server's entries but these, which removing them would leave with no server (verifier U3) —
+   * each with the keys of these it starts, the only ones keeping them there adds at local scope (F1:
+   * every key added in every project overrode another program's entry where it held one, and started
+   * two of this server's), and whether that local add is offered: only where doctor can tell which
+   * record `claude mcp add --scope local` writes there and the path holds no terminal control
+   * (VR6-2, D-7 (d), D-8 — the same gate as `StrippedView.addLocal`).
    */
-  readonly leaves: readonly string[];
+  readonly leaves: readonly {
+    readonly dir: string;
+    readonly keys: readonly string[];
+    readonly addable: boolean;
+  }[];
 }
 
 /** A view where uninstalling the plugin (and the plan without it) leaves no server (V3-1). */
@@ -1417,6 +1490,9 @@ export function duplicateRegistrations(
   readonly overriddenIn: readonly {
     readonly entry: ClientEntry;
     readonly dirs: readonly string[];
+    /** `narrower`: held at a narrower scope there; `unapproved`: a project server of ours not
+     * approved there, its key held at user scope (VR6-1). */
+    readonly by: "narrower" | "unapproved";
   }[];
   readonly withPlugin: {
     readonly worst: { readonly servers: number; readonly keys: number; readonly plugin: boolean };
@@ -1432,7 +1508,7 @@ export function duplicateRegistrations(
   const regs = entries.filter((e) => !e.pluginSource);
   // every entry that is not a registration of this server, by key: the plugin's own declaration in
   // a copy of the plugin is one too (Claude Code reads it there as a project server)
-  const others = new Map<string, Placed[]>();
+  const others = new Map<string, (Placed & { readonly unread?: true })[]>();
   for (const h of [...held, ...entries.filter((e) => e.pluginSource)])
     others.set(h.name, [...(others.get(h.name) ?? []), h]);
   const narrow = (e: Placed): boolean => e.scope === "local" || e.scope === "project";
@@ -1448,24 +1524,71 @@ export function duplicateRegistrations(
         declined: new Set(v.declined),
         disabled: new Set(v.disabled),
         keyUnknown: v.keyUnknown !== undefined,
+        approved: new Set(v.approved ?? []),
+        approvesAll: v.approvesAll === true,
       },
     ]),
   );
   const off = (d: string | null, key: string): boolean =>
     d !== null && byDir.get(d)?.disabled.has(key) === true;
-  /** Whether a session in `d` reads `e` at all: its scope, less a project server declined there. */
-  const reads = (d: string | null, e: Placed): boolean => {
+  /**
+   * Whether a session in `d` reads `e` at all: its scope, less a project server declined there —
+   * never an entry of a record no session reads (F3: a held one `unread`, one of this server's
+   * `absent`; a trailing-slash key resolves to the session's own path, yet Claude Code 2.1.308 reads
+   * only the record keyed exactly so).
+   */
+  const reads = (
+    d: string | null,
+    e: Placed & { readonly unread?: true; readonly absent?: boolean },
+  ): boolean => {
+    if (e.unread === true || e.absent === true) return false;
     if (d === null) return !narrow(e); // the user scope, or Claude Desktop's one map
     if (!narrow(e)) return true;
     if (e.scope === "local") return at(e) === d;
     return within(at(e), d) && byDir.get(d)?.declined.has(e.name) !== true;
   };
-  /** How narrow an entry's scope is in a session that reads it (the higher wins its key there). */
-  const rank = (e: Placed): number =>
-    e.scope === "local" ? Number.POSITIVE_INFINITY : e.scope === "project" ? segments(e) : -1;
-  /** Whether another program's entry under `e`'s key is the one a session in `d` starts instead. */
-  const shadowed = (d: string | null, e: Placed): boolean =>
-    d !== null && (others.get(e.name) ?? []).some((h) => reads(d, h) && rank(h) > rank(e));
+  /** Whether a session in `d` approves the project server `key` (VR6-1, F2). */
+  const approved = (d: string, key: string): boolean => {
+    const v = byDir.get(d);
+    return v !== undefined && (v.approvesAll || v.approved.has(key));
+  };
+  const otherEntries = new Set([...others.values()].flat());
+  /**
+   * The entry a session in `d` starts under the key of `e` (one of this server's, or one a step
+   * adds), of every entry under that key it reads — Claude Code 2.1.308's dC: a local-scope entry
+   * over all; else the nearest `.mcp.json`'s (the files merged before any approval) where that key
+   * is approved there or the user scope does not hold it (then it is offered: doctor's reading,
+   * R-P5a); else the user scope's — a project server not approved is skipped while the user or local
+   * scope holds its key, and never offered (verifiers VR6-1, F2).
+   */
+  const winner = (d: string, e: Placed): Placed | undefined => {
+    const cs = [
+      e,
+      ...regs.filter((x) => x !== e && x.name === e.name),
+      ...(others.get(e.name) ?? []),
+    ].filter((x) => reads(d, x));
+    const local = cs.find((x) => x.scope === "local");
+    if (local !== undefined) return local;
+    const user = cs.find((x) => x.scope === "user");
+    let near: Placed | undefined;
+    for (const x of cs)
+      if (x.scope === "project" && (near === undefined || segments(x) > segments(near))) near = x;
+    if (near === undefined) return user;
+    return user === undefined || approved(d, e.name) ? near : user;
+  };
+  /**
+   * Why an entry that is not this server is what a session in `d` starts under `e`'s key instead,
+   * or null: it is not — `narrower` (a local entry, a nearer `.mcp.json`'s, an approved project
+   * server over the user scope) or `unapproved` (a user-scope entry over a project server of this
+   * server's not approved there: VR6-1).
+   */
+  const overrider = (d: string | null, e: Placed): "narrower" | "unapproved" | null => {
+    if (d === null) return null;
+    const w = winner(d, e);
+    if (w === undefined || !otherEntries.has(w)) return null;
+    return w.scope === "user" ? "unapproved" : "narrower";
+  };
+  const shadowed = (d: string | null, e: Placed): boolean => overrider(d, e) !== null;
   /** Whether a session in `d` would start `e` but for `/mcp disable` there. */
   const reaches = (d: string | null, e: Placed): boolean => reads(d, e) && !shadowed(d, e);
   const sees = (d: string | null, e: ClientEntry): boolean => reaches(d, e) && !off(d, e.name);
@@ -1474,10 +1597,12 @@ export function duplicateRegistrations(
     const dirs = sessionDirs.filter((d) => reaches(d, entry) && off(d, entry.name));
     return dirs.length > 0 ? [{ entry, dirs }] : [];
   });
-  const overriddenIn = regs.flatMap((entry) => {
-    const dirs = sessionDirs.filter((d) => reads(d, entry) && shadowed(d, entry));
-    return dirs.length > 0 ? [{ entry, dirs }] : [];
-  });
+  const overriddenIn = regs.flatMap((entry) =>
+    (["narrower", "unapproved"] as const).flatMap((by) => {
+      const dirs = sessionDirs.filter((d) => reads(d, entry) && overrider(d, entry) === by);
+      return dirs.length > 0 ? [{ entry, dirs, by }] : [];
+    }),
+  );
   const views = [null, ...sessionDirs].map((dir) => ({
     dir,
     entries: regs.filter((e) => sees(dir, e)),
@@ -1543,13 +1668,21 @@ export function duplicateRegistrations(
       // holding what is pinned never is: that is in neither list)
       const leaves =
         v.dir === null && beside !== null
-          ? vs.flatMap((w) =>
-              w.dir !== null &&
-              w.entries.length > 0 &&
-              w.entries.every((e) => extra.includes(e) || choice.includes(e))
-                ? [w.dir]
-                : [],
-            )
+          ? vs.flatMap((w) => {
+              const d = w.dir;
+              if (d === null || !w.entries.every((e) => extra.includes(e) || choice.includes(e)))
+                return [];
+              const keys = keysOf(w.entries.filter((e) => choice.includes(e)));
+              return keys.length === 0
+                ? []
+                : [
+                    {
+                      dir: d,
+                      keys,
+                      addable: byDir.get(d)?.keyUnknown !== true && !holdsControl(d),
+                    },
+                  ];
+            })
           : [];
       return [{ dir: v.dir, entries: choice, beside, leaves }];
     });
