@@ -331,6 +331,17 @@ minor version (plan 04 §4.4; plan 09 K6). One version covers the server, the Sk
 
 ### Fixed
 
+- **`eff doctor` named the wrong server and the wrong plugin copy.** Row 2 counted the Yahoo
+  sibling's server (registered as `fantasy-football-mcp-server`, launching its own `dist/cli.js
+  serve`) as a second registration of this one, called it "entry ok" and pointed at
+  `eff uninstall`; row 24 failed on an old cache copy of the plugin that Claude Code no longer runs.
+  An entry is now this server only when what it launches is this package (its `package.json` name,
+  or this plugin's manifest beside the shim), under any key: the sibling is "also installed (fine)",
+  another package under this server's key is left alone, and an entry whose package cannot be read
+  is said once and never counted or offered for removal. A real duplicate's fix is its exact
+  `claude mcp remove` command. The plugin is judged where Claude Code reads it: in place from a
+  folder marketplace (the cache copy is named as a leftover, never failed on), or the cache copy
+  for a marketplace Claude Code fetches. `eff uninstall` follows the same rules.
 - **The Linux CI stall (plan 10 A16a).** SQLite's automatic WAL checkpoint ran inside a commit on
   the event loop: on the Linux CI runner one cache `INSERT` held the loop 36–89 ms, waiting on I/O.
   `eff serve` now runs PASSIVE checkpoints on a worker thread with its own connection, at SQLite's
