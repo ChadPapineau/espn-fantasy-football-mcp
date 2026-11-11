@@ -826,7 +826,9 @@ the owner's delegation:
   with no `plugins` list or listing a plugin with no name or no remote source) warns that doctor
   cannot judge the file, as does a source type 2.1.308 does not have; row 24 then judges no copy.
   Such a plugin is no certain server: beside a `claude mcp add` entry, the fix asks `claude plugin
-  list` first.
+  list` first. When it does not load, the fix orders the steps: repair the record first (until
+  then 2.1.308 also refuses `claude plugin marketplace add`), and only then add the marketplace
+  again.
 - **D-2 — sessions doctor does not see.** Claude Code files a session under its git root (or its
   working directory). A session opened in a subdirectory of a recorded project also reads that
   subdirectory's `.mcp.json`; one opened in a linked worktree outside its main repository is filed

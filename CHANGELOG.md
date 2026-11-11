@@ -353,16 +353,25 @@ minor version (plan 04 §4.4; plan 09 K6). One version covers the server, the Sk
   that directory's local scope, and the `.mcp.json` of that directory and of every directory above
   it, less the project servers its settings decline (`disabledMcpjsonServers`) and every server
   `/mcp disable` turned off in that project (`disabledMcpServers`: any scope, the plugin's
-  included). A recorded directory that no longer exists is no session: an entry recorded there is
-  said once, never counted or judged, and `eff uninstall` gives it a removal that works (`mkdir -p`
-  first, or `claude purge`). A parent directory's `.mcp.json` counts only in the projects below it,
+  included). A recorded directory that no longer exists, or a recorded path that is no directory, is
+  no session: an entry recorded there is said once, never counted or judged, and `eff uninstall`
+  gives it a removal that acts on that path's own record — `mkdir -p` first, then `claude mcp
+  remove` there, or `claude purge`; where a git work tree lies above it (Claude Code would file a
+  session made there under the work tree, and the command would change the work tree's record),
+  only `claude purge` while nothing is at the path. A recorded directory doctor cannot stat (a
+  permission error) stays a session, and doctor says it cannot check it. A parent directory's
+  `.mcp.json` counts only in the projects below it,
   never as a session of its own, and an entry declined in every one of them is said and never
   counted; Claude Desktop's config is one view. Two keys in a view are the duplicate, the plugin or
   not, and the fix lists the exact `claude mcp remove` of all but one, keeping the entry that
   reaches the most sessions — never removing one that leaves a session with no server: where every
   removal would, it says to keep one there and turn the others off there (`/mcp disable`, or
   `disabledMcpjsonServers` for a project server). Beside the plugin, the fix that keeps the plugin
-  never removes an entry a project that turned the plugin off still needs. A `claude mcp add` entry
+  never removes an entry a project that turned the plugin off still needs, and uninstalling the
+  plugin is offered as is only when every session keeps a server; otherwise the fix names the
+  sessions it would leave with none and what gives them one first (the entry at user scope, or
+  `/mcp enable` where an entry is turned off). An entry `/mcp disable` turned off in some projects
+  is said. A `claude mcp add` entry
   that runs the plugin's own command line is one server with it (Claude Code drops the plugin's
   copy), not two. The plugin is judged where Claude Code reads it: in place from
   a folder marketplace (recorded in `known_marketplaces.json`, or declared under
@@ -378,10 +387,13 @@ minor version (plan 04 §4.4; plan 09 K6). One version covers the server, the Sk
   `installLocation` or `lastUpdated`, an `autoUpdate` that is not true or false, a source without
   the field its type needs) or has a source type 2.1.308 does not have — another client version may
   read it — and when the file is a symbolic link; the detail names the field, never a value, and the
-  fix points at `claude plugin list`, then at repairing the record or adding the marketplace again.
-  Such a plugin is no certain server: beside a `claude mcp add` entry, row 2 asks `claude plugin
-  list` first instead of advising a removal. When doctor does not follow the plugin's source in its
-  folder marketplace, row 2 warns too. In none of these cases is the cache copy judged as what runs,
+  fix points at `claude plugin list`, then at repairing the record (until then Claude Code 2.1.308
+  also refuses `claude plugin marketplace add`), then at adding the marketplace again. Such a plugin
+  is no certain server: beside a `claude mcp add` entry, row 2 asks `claude plugin list` first
+  instead of advising a removal. When doctor does not follow the plugin's source in its folder
+  marketplace (an absolute path or a bare name, which Claude Code 2.1.308 loads nothing from; a
+  listing through a symbolic link), row 2 warns too, and that plugin is no certain server either.
+  In none of these cases is the cache copy judged as what runs,
   and `eff print-config --client code` warns of a duplicate only for a plugin Claude Code loads (for
   one doctor cannot judge, it says `claude plugin list` shows whether it is loaded). `eff uninstall`
   follows the same rules. Doctor models Claude Code 2.1.308's config rules; its known limits are

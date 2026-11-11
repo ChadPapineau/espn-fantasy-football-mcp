@@ -69,6 +69,7 @@ import {
   type ClientEntry,
   type PluginInstall,
   type SessionView,
+  type StrippedView,
   type UnresolvedView,
 } from "./client-config.js";
 import { onlineRows } from "./doctor-online.js";
@@ -455,8 +456,18 @@ const UNREADABLE_REGISTRY_FIX =
 /** Where Claude Code says whether it loads the plugin (a registry doctor cannot judge: D-1, MK-1). */
 const PLUGIN_LIST =
   'see whether Claude Code loads the plugin with `claude plugin list` (its "Read from" line)';
-/** The fix for a known_marketplaces.json doctor cannot judge (D-1). */
-const REFUSED_REGISTRY_FIX = `${PLUGIN_LIST}; if it does not, repair ~/.claude/plugins/known_marketplaces.json as row 2's detail says, or add the marketplace again from the built runtime clone (\`claude plugin marketplace add <the runtime clone>\`, README step 5), then restart the client`;
+/**
+ * The fix for a known_marketplaces.json doctor cannot judge (D-1), in order: Claude Code 2.1.308's
+ * `claude plugin marketplace add` reads the file first and fails while it refuses any record, so the
+ * record is repaired before the marketplace is added again (V3-4).
+ */
+const REFUSED_REGISTRY_FIX = `${PLUGIN_LIST}; if it does not, repair the record of ~/.claude/plugins/known_marketplaces.json that row 2's detail names first — until then Claude Code 2.1.308 also refuses \`claude plugin marketplace add\` — and if it still does not load, add the marketplace again from the built runtime clone (\`claude plugin marketplace add <the runtime clone>\`, README step 5); then restart the client`;
+/** The most directories one detail or fix line lists ("…" after them). */
+const MAX_LISTED_DIRS = 5;
+/** Directories as one line lists them: the first `MAX_LISTED_DIRS`, then "…". */
+function listedDirs(dirs: readonly string[]): string {
+  return `${dirs.slice(0, MAX_LISTED_DIRS).join(", ")}${dirs.length > MAX_LISTED_DIRS ? " …" : ""}`;
+}
 
 /** One row-2 or uninstall line as printed: the log redaction patterns over it (R-P1, defence). */
 export function redactedLine(line: string): string {
@@ -504,7 +515,11 @@ function runsPluginLine(e: ClientEntry, root: string | null): boolean {
  * such a registry is no certain server — beside an entry the fix asks `claude plugin list` first
  * (MK-1); a server `/mcp disable` turned off in a project is not started there, the plugin's
  * included, and the fix that keeps the plugin never strips a project that turned it off (F1); a
- * projects key whose directory is gone is no session (F2). No word holding more than a path is
+ * projects key whose directory is gone is no session (F2). Refix round 4 (verifiers V3): uninstalling
+ * the plugin is offered as is only where every session keeps a server, else with the sessions it
+ * would strip and what gives them one first (V3-1); a plugin whose folder-marketplace source doctor
+ * does not follow is no certain server either (V3-2); the registry fix orders its steps (V3-4); a
+ * directory doctor cannot stat stays a session, said (V3-5). No word holding more than a path is
  * printed, and every line passes the log redaction patterns (R-P1; a key on the choices line is
  * redacted before it is quoted: F4). Doctor models Claude Code 2.1.308's rules; its known limits
  * are listed in docs/evals/stage-c-backlog.md.
@@ -538,6 +553,9 @@ async function launchConfigRow(
   let entryHard = false;
   let found = 0;
   const codeRegistrations: ClientEntry[] = [];
+  /** Every Claude Code registration, declined and absent ones too (the keep rule sees none of
+   * those in a view, but `/mcp enable` brings back one turned off: V3-1). */
+  const codeAll: ClientEntry[] = [];
   const codeSessions: SessionView[] = [];
   const desktopDuplicates: {
     file: string;
@@ -575,7 +593,14 @@ async function launchConfigRow(
           `${whereOf(e.scope, e.dir)}: the plugin's own .mcp.json in a copy of this plugin, not a registration — Claude Code opened in that directory reads it as a project server, which cannot start there (\${CLAUDE_PLUGIN_ROOT} and \${user_config.…} expand only in a plugin install): leave the file, and leave that project server unapproved there (\`disabledMcpjsonServers: ["${SERVER_NAME}"]\` in its .claude/settings.local.json declines it)`,
         );
     if (s.client === "code") codeSessions.push(...s.sessions);
+    // a project directory doctor cannot stat is still a session: said (V3-5)
+    for (const v of s.sessions)
+      if (v.unchecked !== undefined)
+        details.push(
+          `${s.client}: doctor cannot check ${v.dir} (${v.unchecked}): it is counted as a session, as Claude Code may still open it`,
+        );
     const registrations = s.entries.filter((e) => !e.pluginSource);
+    if (s.client === "code") codeAll.push(...registrations);
     if (registrations.length === 0) {
       details.push(`${s.client}: ${s.file} has no \`${SERVER_NAME}\` entry`);
       continue;
@@ -590,7 +615,7 @@ async function launchConfigRow(
       if (e.absent) {
         details.push(
           e.scope === "local"
-            ? `${where}: recorded for ${e.dir ?? "?"}, which does not exist — Claude Code starts it only in a session there, so it is not counted`
+            ? `${where}: recorded for ${e.dir ?? "?"}, which ${e.notDirectory === true ? "is not a directory" : "does not exist"} — Claude Code starts it only in a session there, so it is not counted`
             : `${where}: no project directory Claude Code records at or below ${e.dir ?? "?"} still exists — Claude Code starts it only in a session there, so it is not counted`,
         );
         continue;
@@ -680,7 +705,7 @@ async function launchConfigRow(
   const dropping = codeRegistrations.filter((e) => runsPluginLine(e, pluginRoot));
   // registrations that run beside each other in one client: each removal is its exact command
   const code = duplicateRegistrations(
-    codeRegistrations,
+    codeAll,
     codeSessions,
     pluginRuns || pluginMaybe
       ? { key: PLUGIN_SERVER_KEY, drops: (e) => runsPluginLine(e, pluginRoot) }
@@ -690,14 +715,16 @@ async function launchConfigRow(
     const offIn = codeSessions.filter((v) => v.disabled.includes(PLUGIN_SERVER_KEY));
     if (offIn.length > 0)
       details.push(
-        `code: the plugin is turned off in ${offIn
-          .slice(0, 5)
-          .map((v) => v.dir)
-          .join(
-            ", ",
-          )}${offIn.length > 5 ? " …" : ""} (\`/mcp disable\`: \`disabledMcpServers\` in ~/.claude.json) — Claude Code does not start it there`,
+        `code: the plugin is turned off in ${listedDirs(offIn.map((v) => v.dir))} (\`/mcp disable\`: \`disabledMcpServers\` in ~/.claude.json) — Claude Code does not start it there`,
       );
   }
+  // a counted entry `/mcp disable` turned off in some projects: said the same way (V3-1); one
+  // turned off everywhere it is seen is declined, said above
+  for (const o of code.offIn)
+    if (codeRegistrations.includes(o.entry))
+      details.push(
+        `${whereOf(o.entry.scope, o.entry.dir)}: turned off in ${listedDirs(o.dirs)} (\`/mcp disable\`: \`disabledMcpServers\` in ~/.claude.json) — Claude Code does not start it there`,
+      );
   if (pluginRuns)
     for (const e of dropping)
       details.push(
@@ -751,7 +778,35 @@ async function launchConfigRow(
           "remove the `claude mcp add`",
           true,
         );
-  const uninstallPlugin = `uninstall the plugin (\`claude plugin uninstall ${PLUGIN_ID}\`)${planB === "" ? "" : ` and ${planB}`}`;
+  /**
+   * Uninstalling the plugin (and the plan without it), offered as is only where that leaves every
+   * session a server; else with the sessions it would strip and what gives them one first (V3-1).
+   */
+  const uninstallPlugin = ((strips: readonly StrippedView[]): string => {
+    const plain = `uninstall the plugin (\`claude plugin uninstall ${PLUGIN_ID}\`)${planB === "" ? "" : ` and ${planB}`}`;
+    if (strips.length === 0) return plain;
+    const outside = strips.some((v) => v.dir === null);
+    const dirs = strips.flatMap((v) => (v.dir === null ? [] : [v.dir]));
+    const offDirs = strips.filter((v) => v.dir !== null && v.off.length > 0);
+    const offKeys = [...new Set(offDirs.flatMap((v) => v.off))];
+    const where = [
+      ...(dirs.length > 0 ? [listedDirs(dirs)] : []),
+      ...(outside ? ["every session outside the projects Claude Code records"] : []),
+    ].join(" and ");
+    const first = [
+      ...(outside
+        ? [
+            "this server is added at user scope (`eff print-config --client code` prints the command)",
+          ]
+        : []),
+      ...(offKeys.length > 0
+        ? [
+            `${[...new Set(offKeys.map((k) => JSON.stringify(redactedLine(k))))].join(", ")} ${offKeys.length === 1 ? "is" : "are"} turned back on in ${listedDirs(offDirs.flatMap((v) => (v.dir === null ? [] : [v.dir])))} (\`/mcp enable <name>\` in a session there)`,
+          ]
+        : []),
+    ];
+    return `${plain} — only once ${first.length > 0 ? first.join(" and ") : "they start an entry of their own"}: uninstalling it now leaves ${where} with no server`;
+  })(code.withPlugin?.uninstallStrips ?? []);
   const duplicateMessages: string[] = [];
   const duplicateFixes: string[] = [];
   if (worst.servers > 1) {
@@ -767,9 +822,12 @@ async function launchConfigRow(
   // beside a plugin doctor cannot tell Claude Code loads: whether it is a second server is the
   // user's to see (`claude plugin list`), never a removal advised unconditionally (MK-1)
   const maybeBeside = pluginMaybe && code.withPlugin?.beside === true;
+  // what doctor cannot judge: known_marketplaces.json itself, or the plugin's source in its folder
+  // marketplace's listing (V3-2) — and the repair that makes the plugin certain
+  const registryUnjudged = origin?.kind === "refused" && origin.registry === true;
   if (maybeBeside)
     duplicateMessages.push(
-      `doctor cannot tell whether Claude Code loads the plugin beside the \`claude mcp add\` ${entriesWord(live.length)}: it cannot judge known_marketplaces.json`,
+      `doctor cannot tell whether Claude Code loads the plugin beside the \`claude mcp add\` ${entriesWord(live.length)}: ${registryUnjudged ? "it cannot judge known_marketplaces.json" : "it does not follow the plugin's source in its folder marketplace"}`,
     );
   if (pluginRuns && worst.servers > 1)
     // beside a plugin Claude Code loads, keeping one entry means uninstalling the plugin — even where
@@ -779,7 +837,7 @@ async function launchConfigRow(
     );
   else if (maybeBeside)
     duplicateFixes.push(
-      `${PLUGIN_LIST}: if it does, keep one: ${[planA, uninstallPlugin].filter((x) => x !== "").join(", or ")}; if it does not, ${planB === "" ? `keep the ${entriesWord(live.length)}` : `keep one: ${planB}`} — or repair ~/.claude/plugins/known_marketplaces.json as row 2's detail says and keep only the plugin; then restart the client`,
+      `${PLUGIN_LIST}: if it does, keep one: ${[planA, uninstallPlugin].filter((x) => x !== "").join(", or ")}; if it does not, ${planB === "" ? `keep the ${entriesWord(live.length)}` : `keep one: ${planB}`} — or ${registryUnjudged ? "repair ~/.claude/plugins/known_marketplaces.json as row 2's detail says" : "repair the plugin's source in its marketplace listing as row 2's detail says (the runtime clone's committed listing names it `./`, README step 5)"} and keep only the plugin; then restart the client`,
     );
   else if (worst.servers > 1) duplicateFixes.push(`keep one: ${planB}; then restart the client`);
   for (const d of desktopDuplicates) {

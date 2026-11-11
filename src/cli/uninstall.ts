@@ -63,6 +63,7 @@ import { redactString, SecretRegistry, type Logger } from "./log.js";
 import { privatizeNewFile, resolveBackupDestination } from "./maintenance.js";
 import {
   cookieFindings,
+  gitWorkTreeAt,
   removeCommand,
   shellWord,
   samePath,
@@ -337,6 +338,25 @@ function pluginWhere(plugin: PluginInstall): string {
   return `${roots}, read in place from its folder marketplace${leftovers.length === 0 ? "" : `; ${leftovers.join(", ")} is a leftover cache copy`}`;
 }
 
+/**
+ * How to remove a local-scope entry recorded for a path that is not a directory a session can run
+ * in (gone, or no directory): `mkdir -p` and `claude mcp remove` there only when no git work tree is
+ * at or above it (`gitWorkTreeAt`: Claude Code 2.1.308 files a session under the work tree, so the
+ * command would act on that record — V3-3), else `claude purge` while nothing is at the path (with
+ * something there, purge also acts on the work tree's record).
+ */
+function goneRemoval(who: string, dir: string, notDirectory: boolean, remove: string): string {
+  const d = shellWord(dir);
+  const tree = gitWorkTreeAt(dir);
+  if (!notDirectory)
+    return tree === null
+      ? `${who}: recorded for ${dir}, which does not exist, so never started — to remove it: mkdir -p ${d} && ${remove} (or claude purge ${d}, which deletes all of Claude Code's state for that directory)`
+      : `${who}: recorded for ${dir}, which does not exist, so never started — to remove it: claude purge ${d} while ${dir} does not exist (it deletes all of Claude Code's state for that directory); never make ${dir} first: Claude Code files a session there under the git work tree at ${tree}, so \`claude mcp remove\` there, or \`claude purge\` once it exists, acts on ${tree}'s record`;
+  return tree === null
+    ? `${who}: recorded for ${dir}, which is not a directory, so never started — to remove it: claude purge ${d} (it deletes all of Claude Code's state for that path; \`claude mcp remove\` cannot run there)`
+    : `${who}: recorded for ${dir}, which is not a directory, so never started — to remove it: move ${dir} aside, then claude purge ${d} while nothing is there, then move it back; with ${dir} there, claude purge also acts on the record of the git work tree at ${tree}`;
+}
+
 const COOKIE_NOTE =
   "its env block holds an ESPN cookie (a key named ESPN_S2/SWID or a cookie-shaped value): removing the entry takes it out of that file — the file's backups and history may keep it, and logging out at espn.com is the only way to try to end the session";
 /** The same, for the plugin's own file (its entry stays: only the env key holding the cookie goes). */
@@ -431,11 +451,14 @@ function stepLines(
           : `user scope, ${e.file}`;
     const who = `Claude Code (${where})${e.name === SERVER_NAME ? "" : ` registers this server under the key "${e.name}"`}`;
     // a local-scope entry of a projects key whose directory is gone: `claude mcp remove` needs a
-    // session there, so the directory is made first (F2)
+    // session there, so the directory is made first (F2) — unless Claude Code 2.1.308 would file
+    // that session under a git work tree above it, whose record the command would then change
+    // (V3-3); `claude purge` touches only the path's own record while nothing is there, and also
+    // the work tree's once it exists. A path that is no directory gets no `mkdir -p` (V3-5).
     const gone = e.absent && e.scope === "local" ? e.dir : null;
     out.push(
       gone !== null
-        ? `${who}: recorded for ${gone}, which does not exist, so never started — to remove it: mkdir -p ${shellWord(gone)} && ${removeCommand(e)} (or claude purge ${shellWord(gone)}, which deletes all of Claude Code's state for that directory)`
+        ? goneRemoval(who, gone, e.notDirectory === true, removeCommand(e))
         : e.declined
           ? `${who}, declined in Claude Code's settings (${e.declinedBy.join(" or ")}), so never started — removing it is optional: ${removeCommand(e)}`
           : `${who}: ${removeCommand(e)}`,

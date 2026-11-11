@@ -52,6 +52,13 @@
 // plugin from such a registry is no certain server (MK-1: `pluginLoads`); a server `/mcp disable`
 // turned off in a project (`projects[<dir>].disabledMcpServers`, any scope, the plugin's included) is
 // not started there (F1); a projects key whose directory no longer exists is no session (F2).
+//
+// Refix round 4 (verifiers V3): a plugin whose folder-marketplace source doctor does not follow is
+// no certain server either (V3-2: Claude Code 2.1.308 loads nothing from an absolute or bare-name
+// source); the keep rule says where uninstalling the plugin would leave a session with no server
+// (V3-1: `uninstallStrips`) and where an entry is turned off (`offIn`); a project directory doctor
+// cannot stat stays a session, and one that is no directory is said as such (V3-5: `dirState`); a
+// gone directory's removal is never run under a git work tree's record (V3-3: `gitWorkTreeAt`).
 import { lstatSync, realpathSync, statSync } from "node:fs";
 import path from "node:path";
 import { PathSecurityError, readSecureFile } from "../config/paths.js";
@@ -110,6 +117,8 @@ export interface ClientEntry {
    * still exists. Said once, its env still checked, never counted or judged as a launch.
    */
   readonly absent: boolean;
+  /** An `absent` local entry whose recorded path is there but is no directory (V3-5). */
+  readonly notDirectory?: true;
 }
 
 /** A setting that declines a server in a project (`ClientEntry.declinedBy`). */
@@ -133,6 +142,11 @@ export interface SessionView {
   readonly dir: string;
   readonly declined: readonly string[];
   readonly disabled: readonly string[];
+  /**
+   * Doctor could not stat the directory (the error code, e.g. `EACCES`; macOS privacy protection
+   * gives `EPERM`): it is kept as a session, since Claude Code may still open it (V3-5).
+   */
+  readonly unchecked?: string;
 }
 
 /** One entry's env block, where it lives (secrecy is checked over ALL entries — plan 03 §5 #3). */
@@ -580,13 +594,51 @@ function namesIn(list: unknown): string[] {
     : [];
 }
 
-/** Whether a directory exists (one stat, following a symbolic link only as a session's cwd would). */
-function isDirectory(dir: string): boolean {
+/** An error's code when it is a plain `E…` word (never anything else read from it). */
+function errorCode(e: unknown): string | null {
+  const code = (e as { code?: unknown } | null)?.code;
+  return typeof code === "string" && /^E[A-Z]{2,15}$/u.test(code) ? code : null;
+}
+
+/**
+ * What a recorded project path is (one stat, following a symbolic link as a session's cwd would):
+ * `dir`; `missing` — nothing is there (ENOENT, or a path component that is a file: ENOTDIR), or no
+ * filesystem holds such a path (Node's own argument error, which has no `E…` code: a NUL byte);
+ * `file` — something that is no directory; or the code of any other stat failure (EACCES, EPERM),
+ * which says nothing about whether Claude Code reaches it (V3-5).
+ */
+function dirState(dir: string): "dir" | "missing" | "file" | { readonly code: string } {
   try {
-    return statSync(dir).isDirectory();
-  } catch {
-    return false;
+    return statSync(dir).isDirectory() ? "dir" : "file";
+  } catch (e) {
+    const code = errorCode(e);
+    return code === null || code === "ENOENT" || code === "ENOTDIR" ? "missing" : { code };
   }
+}
+
+/**
+ * The git work tree Claude Code 2.1.308 files a session in `dir` under (its `t6e`: the nearest of
+ * `dir` and its ancestors, the filesystem root included, holding a `.git` directory or file — read
+ * with lstat, never followed), or null when none does: then Claude Code files the session under
+ * `dir` itself. A `.git` doctor cannot lstat (a symbolic link Claude Code does not follow, a
+ * permission error) is taken as one: what `claude mcp remove --scope local` acts on is then not
+ * certainly `dir`'s record (V3-3).
+ */
+export function gitWorkTreeAt(dir: string): string | null {
+  let at = path.resolve(dir);
+  for (let hop = 0; hop <= MAX_ANCESTORS; hop++) {
+    try {
+      lstatSync(path.join(at, ".git"));
+      return at;
+    } catch (e) {
+      const code = errorCode(e);
+      if (code !== "ENOENT" && code !== "ENOTDIR") return at;
+    }
+    const up = path.dirname(at);
+    if (up === at) return null;
+    at = up;
+  }
+  return null;
 }
 
 /**
@@ -712,26 +764,40 @@ export function scanClientConfig(client: "desktop" | "code", file: string): Clie
   const userDeclined = declinedIn(path.join(path.dirname(file), ".claude", "settings.json"));
   const records = isObj(read.value) && isObj(read.value.projects) ? read.value.projects : {};
   const turnedOff = new Map<string, string[]>();
-  for (const key of known)
-    if (isDirectory(key)) {
-      const rec = records[key];
-      const dir = path.resolve(key);
-      turnedOff.set(dir, [
-        ...(turnedOff.get(dir) ?? []),
-        ...(isObj(rec) ? namesIn(rec.disabledMcpServers) : []),
-      ]);
+  /** A recorded path that is there but is no directory (no session either: V3-5). */
+  const files = new Set<string>();
+  /** A directory doctor cannot stat: a session all the same, said (V3-5). */
+  const unchecked = new Map<string, string>();
+  for (const key of known) {
+    const state = dirState(key);
+    const dir = path.resolve(key);
+    if (state === "missing") continue;
+    if (state === "file") {
+      files.add(dir);
+      continue;
     }
-  const sessions: SessionView[] = [...turnedOff].map(([dir, off]) => ({
-    dir,
-    declined: [
-      ...new Set([
-        ...userDeclined,
-        ...declinedIn(path.join(dir, ".claude", "settings.json")),
-        ...declinedIn(path.join(dir, ".claude", "settings.local.json")),
-      ]),
-    ],
-    disabled: [...new Set(off)],
-  }));
+    if (state !== "dir") unchecked.set(dir, state.code);
+    const rec = records[key];
+    turnedOff.set(dir, [
+      ...(turnedOff.get(dir) ?? []),
+      ...(isObj(rec) ? namesIn(rec.disabledMcpServers) : []),
+    ]);
+  }
+  const sessions: SessionView[] = [...turnedOff].map(([dir, off]) => {
+    const code = unchecked.get(dir);
+    return {
+      dir,
+      declined: [
+        ...new Set([
+          ...userDeclined,
+          ...declinedIn(path.join(dir, ".claude", "settings.json")),
+          ...declinedIn(path.join(dir, ".claude", "settings.local.json")),
+        ]),
+      ],
+      disabled: [...new Set(off)],
+      ...(code === undefined ? {} : { unchecked: code }),
+    };
+  });
   // an entry is declined when every session that would see it declines it or turns it off (a
   // local-scope one: its own project's session; a project-scope one: every session at or below
   // its directory), and absent when no such session exists (F1, F2)
@@ -741,7 +807,10 @@ export function scanClientConfig(client: "desktop" | "code", file: string): Clie
     const seeing = sessions.filter((v) =>
       e.scope === "local" ? v.dir === top : within(top, v.dir),
     );
-    if (seeing.length === 0) return { ...e, absent: true };
+    if (seeing.length === 0)
+      return e.scope === "local" && files.has(top)
+        ? { ...e, absent: true, notDirectory: true }
+        : { ...e, absent: true };
     const by = new Set<DeclineSetting>();
     for (const v of seeing) {
       if (e.scope === "project" && v.declined.includes(e.name)) by.add("disabledMcpjsonServers");
@@ -820,6 +889,14 @@ export interface UnresolvedView {
   readonly entries: readonly ClientEntry[];
 }
 
+/** A view where uninstalling the plugin (and the plan without it) leaves no server (V3-1). */
+export interface StrippedView {
+  /** The session directory, or null: the sessions outside every project Claude Code records. */
+  readonly dir: string | null;
+  /** The keys of entries that reach it but `/mcp disable` turned off there (`/mcp enable` restores). */
+  readonly off: readonly string[];
+}
+
 /** The plugin beside the registrations, as `duplicateRegistrations` counts it. */
 export interface PluginBeside {
   /** Its server's key (print-config.ts `PLUGIN_SERVER_KEY`): a session whose `disabledMcpServers` names it runs none. */
@@ -850,7 +927,11 @@ export interface PluginBeside {
  * turned off and no entry running its command line drops it (`worst`; `beside`: such a view holds an
  * entry too), and plans the fix that keeps it — each entry removed where the plugin stays, none whose
  * removal strips a view that turned the plugin off (F1), the plugin's views settled first; a removed
- * entry running its command line gives the plugin back. The greedy rule is accepted as such (D-3).
+ * entry running its command line gives the plugin back; and `uninstallStrips`: the views where the
+ * plugin is started and the plan without it leaves no entry — uninstalling the plugin would leave
+ * them with no server (V3-1), each with the keys turned off there that `/mcp enable` brings back.
+ * `offIn`: each entry that reaches a session where `/mcp disable` turned it off, and those sessions
+ * (V3-1: said, the way the plugin's off state is). The greedy rule is accepted as such (D-3).
  */
 export function duplicateRegistrations(
   entries: readonly ClientEntry[],
@@ -861,11 +942,13 @@ export function duplicateRegistrations(
   readonly extra: readonly ClientEntry[];
   readonly views: readonly (readonly ClientEntry[])[];
   readonly unresolved: readonly UnresolvedView[];
+  readonly offIn: readonly { readonly entry: ClientEntry; readonly dirs: readonly string[] }[];
   readonly withPlugin: {
     readonly worst: { readonly servers: number; readonly keys: number; readonly plugin: boolean };
     readonly beside: boolean;
     readonly extra: readonly ClientEntry[];
     readonly unresolved: readonly UnresolvedView[];
+    readonly uninstallStrips: readonly StrippedView[];
   } | null;
 } {
   const regs = entries.filter((e) => !e.pluginSource);
@@ -879,13 +962,18 @@ export function duplicateRegistrations(
   );
   const off = (d: string | null, key: string): boolean =>
     d !== null && byDir.get(d)?.disabled.has(key) === true;
-  const sees = (d: string | null, e: ClientEntry): boolean => {
+  /** Whether a session in `d` would start `e` but for `/mcp disable` there. */
+  const reaches = (d: string | null, e: ClientEntry): boolean => {
     if (d === null) return !narrow(e); // the user scope, or Claude Desktop's one map
-    if (off(d, e.name)) return false;
     if (!narrow(e)) return true;
     if (e.scope === "local") return at(e) === d;
     return within(at(e), d) && byDir.get(d)?.declined.has(e.name) !== true;
   };
+  const sees = (d: string | null, e: ClientEntry): boolean => reaches(d, e) && !off(d, e.name);
+  const offIn = regs.flatMap((entry) => {
+    const dirs = [...byDir.keys()].filter((d) => reaches(d, entry) && off(d, entry.name));
+    return dirs.length > 0 ? [{ entry, dirs }] : [];
+  });
   const views = [null, ...byDir.keys()].map((dir) => ({
     dir,
     entries: regs.filter((e) => sees(dir, e)),
@@ -987,6 +1075,12 @@ export function duplicateRegistrations(
       beside,
       extra: listed.filter((e) => settled.extra.includes(e)),
       unresolved: settled.unresolved,
+      uninstallStrips: views
+        .filter((v) => v.plugin && v.entries.every((e) => without.extra.includes(e)))
+        .map((v) => ({
+          dir: v.dir,
+          off: keysOf(regs.filter((e) => reaches(v.dir, e) && off(v.dir, e.name))),
+        })),
     };
   }
   return {
@@ -994,6 +1088,7 @@ export function duplicateRegistrations(
     extra: without.extra,
     views: views.filter((v) => v.entries.length > 0 || v.dir === null).map((v) => v.entries),
     unresolved: without.unresolved,
+    offIn,
     withPlugin,
   };
 }
@@ -1077,14 +1172,16 @@ export type PluginOrigin =
 
 /**
  * Whether Claude Code starts the plugin's server from this origin: `no` — `unresolved` or
- * `unloaded`; `unknown` — `refused` with `registry` (known_marketplaces.json doctor cannot judge:
- * Claude Code 2.1.308 loads no marketplace plugin from a file it refuses, another version may — D-1,
- * MK-1), so the plugin is never counted as a server beside an entry, nor its removal advised
- * unconditionally; `yes` — every other origin.
+ * `unloaded`; `unknown` — `refused`: known_marketplaces.json doctor cannot judge (`registry`: Claude
+ * Code 2.1.308 loads no marketplace plugin from a file it refuses, another version may — D-1, MK-1),
+ * or a folder marketplace whose plugin source doctor does not follow (V3-2: 2.1.308 refuses an
+ * absolute or bare-name source and loads nothing from it; a listing past doctor's bound or through
+ * a symbolic link it may load) — so the plugin is never counted as a server beside an entry, nor
+ * its removal advised unconditionally; `yes` — `folder` and `copied`.
  */
 export function pluginLoads(o: PluginOrigin): "yes" | "no" | "unknown" {
   if (o.kind === "unresolved" || o.kind === "unloaded") return "no";
-  return o.kind === "refused" && o.registry === true ? "unknown" : "yes";
+  return o.kind === "refused" ? "unknown" : "yes";
 }
 
 /** Whether Claude Code may start the plugin's server from this origin (`pluginLoads` is not `no`). */
