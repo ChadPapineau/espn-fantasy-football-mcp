@@ -556,8 +556,13 @@ function runsPluginLine(e: ClientEntry, root: string | null): boolean {
  * as in Claude Code 2.1.308's dC (VR6-1, F2), and an entry of a record no session reads overrides
  * nothing (F3); keeping entries only in the projects a choice strips adds in each the keys it starts,
  * only where doctor can tell the record (F1, VR6-2); every directory a fix step acts on is named
- * (VR6-4). Doctor models Claude Code 2.1.308's rules; its known limits are listed in
- * docs/evals/stage-c-backlog.md.
+ * (VR6-4). Refix round 8 (verifiers VR7): one entry per key starts in a session, so no step relies
+ * on one behind another of ours, and an entry running the plugin's line drops it only where that
+ * entry starts (VR7-1, VR7-4); a decline or removal is offered instead of `/mcp disable` only where
+ * nothing else then starts under that key (VR7-3); and where doctor cannot tell which record a
+ * session reads, no step there writes one — `/mcp enable` and `/mcp disable` included — and the
+ * line says that step is the user's, each withheld add saying why (VR1, VR2, VR3). Doctor models
+ * Claude Code 2.1.308's rules; its known limits are listed in docs/evals/stage-c-backlog.md.
  */
 export async function checkLaunchConfig(
   io: CliIo,
@@ -643,7 +648,7 @@ async function launchConfigRow(
         );
       else if (v.keyUnknown !== undefined)
         details.push(
-          `${s.client}: doctor cannot tell which record Claude Code 2.1.308 files a session in ${v.dir} under (${v.keyUnknown}): it is counted as a session, and its local-scope entries are removed by hand, never with \`claude mcp remove\``,
+          `${s.client}: doctor cannot tell which record Claude Code 2.1.308 files a session in ${v.dir} under (${v.keyUnknown}): it is counted as a session, its local-scope entries are removed by hand, never with \`claude mcp remove\`, and doctor prints no \`/mcp enable\` or \`/mcp disable\` for it (each writes the record that session is filed under)`,
         );
     // a recorded directory Claude Code 2.1.308 files under another key: its local entries never
     // start — said once per directory (D-7)
@@ -765,7 +770,6 @@ async function launchConfigRow(
   const pluginRuns = loads === "yes";
   const pluginMaybe = loads === "unknown";
   const pluginRoot = plugin?.copies.find((c) => c.root !== null)?.root ?? null;
-  const dropping = codeRegistrations.filter((e) => runsPluginLine(e, pluginRoot));
   // registrations that run beside each other in one client: each removal is its exact command
   const code = duplicateRegistrations(
     codeAll,
@@ -800,10 +804,12 @@ async function launchConfigRow(
           ? `${whereOf(o.entry.scope, o.entry.dir)}: in ${listedDirs(o.dirs)}, an entry that is not this server holds its key at a narrower scope — Claude Code starts that one there instead`
           : `${whereOf(o.entry.scope, o.entry.dir)}: in ${listedDirs(o.dirs)}, it is not approved there (\`enabledMcpjsonServers\`) and an entry that is not this server holds its key at user scope — Claude Code starts that one there instead`,
       );
+  // an entry running the plugin's command line drops the plugin only where Claude Code starts it:
+  // where another entry holds its key, the plugin starts there (VR7-4)
   if (pluginRuns)
-    for (const e of dropping)
+    for (const { entry: e, notIn } of code.withPlugin?.dropping ?? [])
       details.push(
-        `${whereOf(e.scope, e.dir)}: runs the plugin's own command line (/bin/sh ${path.join(pluginRoot ?? "", "scripts", "eff-launch.sh")} serve) — Claude Code drops the plugin's server as a duplicate of it, so they are one server`,
+        `${whereOf(e.scope, e.dir)}: runs the plugin's own command line (/bin/sh ${path.join(pluginRoot ?? "", "scripts", "eff-launch.sh")} serve) — Claude Code drops the plugin's server as a duplicate of it, so they are one server${notIn.length === 0 ? "" : ` — except in ${listedDirs(notIn)}, where it does not start, so the plugin starts there`}`,
       );
   const worst =
     pluginRuns && code.withPlugin !== null
@@ -826,32 +832,84 @@ async function launchConfigRow(
   // where every removal would strip another session, which entry to keep is the user's (V-B);
   // `/mcp disable` turns off a server of any scope in one project (F1); `u.beside`: what the plan
   // keeps there beside the entries, so each of them goes there (U5: never where the plugin is off)
+  /** Where doctor offers no step that writes a session's record (D-7 (d); VR1, VR2). */
+  const noStep = (dirs: readonly string[]): string =>
+    `doctor cannot tell which record a session in ${allDirs(dirs)} reads (row 2's detail says why), so it offers no step there: \`/mcp\` in a session there shows what it starts`;
+  /** Why no local add is offered in directories whose paths hold a terminal control (D-8; VR3). */
+  const controlWhy = (n: number): string =>
+    `${n === 1 ? "its path holds" : "their paths hold"} a control character, which no command shows as it runs`;
   const choiceOf = (u: UnresolvedView): string => {
     const names = named(u.entries);
     const it = new Set(u.entries.map((e) => e.name)).size === 1 ? "it" : "them";
     if (u.dir === null) {
-      if (u.beside !== "plugin")
-        return `outside the projects Claude Code records, ${names} all start, and removing any of them leaves a project with no server — keep one at user scope and the others only in the projects that need them (\`claude mcp add --scope local\` there, then their \`claude mcp remove --scope user\`)`;
+      if (u.beside !== "plugin") {
+        // no local add where doctor cannot tell which record it writes, or the path holds a control
+        const unknown = u.noAdd.filter((l) => l.blocked === "key").map((l) => l.dir);
+        const control = u.noAdd.filter((l) => l.blocked === "control").map((l) => l.dir);
+        const never = [
+          ...(unknown.length === 0
+            ? []
+            : [
+                `in ${allDirs(unknown)}, where doctor cannot tell which record that command writes`,
+              ]),
+          ...(control.length === 0
+            ? []
+            : [
+                `in ${allDirs(control)}, whose ${control.length === 1 ? "path holds" : "paths hold"} a control character, which no command shows as it runs`,
+              ]),
+        ];
+        return `outside the projects Claude Code records, ${names} all start, and removing any of them leaves a project with no server — keep one at user scope and the others only in the projects that need them (\`claude mcp add --scope local\` there, then their \`claude mcp remove --scope user\`${never.length === 0 ? "" : `; doctor offers no such add ${never.join(" or ")}`})`;
+      }
       // the projects it would strip, every one named: turning the plugin back on anywhere else
       // starts it beside an entry there (U3, VR6-4); keeping the entries there adds in each only
-      // the keys it starts (F1), and only where doctor can tell which record that writes (VR6-2)
-      const add = u.leaves.filter((l) => l.addable);
-      const unsure = u.leaves.filter((l) => !l.addable).map((l) => l.dir);
+      // the keys it starts (F1), and only where doctor can tell which record that writes (VR6-2);
+      // no step at all where it cannot tell the record a session there reads (VR1), and each
+      // withheld add says why (VR3)
+      const add = u.leaves.filter((l) => l.blocked === null);
+      const control = u.leaves.filter((l) => l.blocked === "control").map((l) => l.dir);
+      const unknown = u.leaves.filter((l) => l.blocked === "key").map((l) => l.dir);
+      const enableIn = u.leaves.filter((l) => l.blocked !== "key").map((l) => l.dir);
       const byKeys = new Map<string, string[]>();
       for (const l of add) {
         const ks = l.keys.map(quotedWord).join(", ");
         byKeys.set(ks, [...(byKeys.get(ks) ?? []), l.dir]);
       }
       const under = [...byKeys].map(([ks, ds]) => `${ks} in ${allDirs(ds)}`).join(" and ");
-      const enable = `turn the plugin back on there (\`/mcp enable ${PLUGIN_SERVER_KEY}\` in a session in each${add.length === 0 ? "; doctor cannot tell which record `claude mcp add --scope local` writes there, so it offers no local entry" : ""})`;
+      const enable =
+        enableIn.length === 0
+          ? ""
+          : `turn the plugin back on ${unknown.length === 0 ? "there" : `in ${allDirs(enableIn)}`} (\`/mcp enable ${PLUGIN_SERVER_KEY}\` in a session in each${add.length === 0 ? `; ${controlWhy(control.length)}, so doctor offers no local entry` : ""})`;
       const keep =
         add.length === 0
           ? ""
-          : `, or keep ${it} only there (\`claude mcp add --scope local\` in a terminal there, under ${under}${unsure.length === 0 ? "" : `, and the plugin turned back on in ${allDirs(unsure)}, where doctor cannot tell which record that command writes`}; then ${commands(u.entries)})`;
-      return `outside the projects Claude Code records, the plugin and ${names} start, and removing ${it} leaves ${allDirs(u.leaves.map((l) => l.dir))} (which turn${u.leaves.length === 1 ? "s" : ""} the plugin off) with no server — ${enable}${keep}`;
+          : `, or keep ${it} only there (\`claude mcp add --scope local\` in a terminal there, under ${under}${control.length === 0 ? "" : `, and the plugin turned back on in ${allDirs(control)}, whose ${control.length === 1 ? "path holds" : "paths hold"} a control character, which no command shows as it runs`}; then ${commands(u.entries)})`;
+      const yours =
+        unknown.length === 0 ? "" : `${enable === "" ? "" : ", and "}${noStep(unknown)}`;
+      return `outside the projects Claude Code records, the plugin and ${names} start, and removing ${it} leaves ${allDirs(u.leaves.map((l) => l.dir))} (which turn${u.leaves.length === 1 ? "s" : ""} the plugin off) with no server — ${enable}${keep}${yours}`;
     }
+    // turned off there: `/mcp disable`, which turns the key off whatever holds it; a decline or a
+    // removal instead only where nothing else then starts under that key there (VR7-3); and no step
+    // at all where doctor cannot tell which record a session there reads (VR1)
+    const projectServers = u.entries.filter((e) => e.scope === "project");
     const locals = u.entries.filter((e) => e.scope === "local");
-    const how = `\`/mcp disable <name>\` in a session there${u.entries.some((e) => e.scope === "project") ? `; a project server can be declined in ${path.join(u.dir, ".claude", "settings.local.json")} instead, \`disabledMcpjsonServers\`` : ""}${locals.length === 0 ? "" : locals.every((e) => "command" in removalOf(e)) ? "; a local-scope entry is removed instead, with its own `claude mcp remove --scope local`" : `; a local-scope entry is removed instead: ${commands(locals)}`}`;
+    const declinable = projectServers.filter((e) => u.alone.includes(e));
+    const removable = locals.filter((e) => u.alone.includes(e));
+    const how =
+      u.keyUnknown === true
+        ? noStep([u.dir])
+        : [
+            "`/mcp disable <name>` in a session there",
+            ...(declinable.length === 0
+              ? []
+              : [
+                  `${declinable.length === projectServers.length ? "a project server" : named(declinable)} can be declined in ${path.join(u.dir, ".claude", "settings.local.json")} instead, \`disabledMcpjsonServers\``,
+                ]),
+            ...(removable.length === 0
+              ? []
+              : [
+                  `${removable.length === locals.length ? "a local-scope entry is removed instead" : `${named(removable)} can be removed instead`}${removable.every((e) => "command" in removalOf(e)) ? ", with its own `claude mcp remove --scope local`" : `: ${commands(removable)}`}`,
+                ]),
+          ].join("; ");
     return u.beside !== null
       ? `in ${u.dir} (${names}, beside ${u.beside === "plugin" ? "the plugin" : "the entry the first step adds"}), removing ${it} leaves another directory with no server — turn ${it} off there (${how})`
       : `in ${u.dir} (${names}), removing any of them leaves another directory with no server — keep one there and turn the others off there (${how})`;
@@ -918,8 +976,12 @@ async function launchConfigRow(
     const local = grouped((v) => (v.addLocal === undefined ? [] : [v.addLocal]));
     const bare =
       add === null
-        ? projects.filter((v) => v.off.length === 0 && v.addLocal === undefined).map((v) => v.dir)
+        ? projects
+            .filter((v) => v.off.length === 0 && v.addLocal === undefined && v.keyUnknown !== true)
+            .map((v) => v.dir)
         : [];
+    // doctor cannot tell which record a session there reads: that step is the user's (VR2)
+    const yours = projects.filter((v) => v.keyUnknown === true).map((v) => v.dir);
     const first = [
       ...(add === null
         ? []
@@ -941,6 +1003,11 @@ async function launchConfigRow(
       ...(bare.length > 0
         ? [
             `${allDirs(bare)} ${bare.length === 1 ? "starts an entry of its own" : "each start an entry of their own"}`,
+          ]
+        : []),
+      ...(yours.length > 0
+        ? [
+            `a session in ${allDirs(yours)} starts this server (doctor cannot tell which record a session there reads — row 2's detail says why — so that step is yours: \`/mcp\` in a session there shows what it starts)`,
           ]
         : []),
     ];

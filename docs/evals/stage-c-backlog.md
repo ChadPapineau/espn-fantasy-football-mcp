@@ -849,14 +849,17 @@ the owner's delegation:
   starts there, and a project server of ours that is not approved, under a key another program's
   entry holds at user scope, does not. An entry that is not this server is what a session starts
   instead only where it wins that order, so doctor does not count ours there and no fix step relies
-  on it there. Known limits: a project server not approved whose key neither the user nor the local
+  on it there; nor is an entry of this server's behind another one's under its key (round-8 VR7-1):
+  a removal recomputes what each session starts, so it never relies on an entry that does not start.
+  An entry running the plugin's own command line drops the plugin only in the sessions that start
+  it (2.1.308's `B5r` dedupes against the started entries: VR7-4). Known limits: a project server not approved whose key neither the user nor the local
   scope holds is taken as the approval dialog's (counted, R-P5a); a session run non-interactively
   (`claude -p`) or in bypass-permissions mode approves every project server (2.1.308's `Hst`), which
   doctor does not model — it models an interactive session; approvals and declines are matched by
   exact key (2.1.308 also folds some spellings), and an untrusted workspace's gating of the
   project's own settings is not modelled. An entry of a `projects` record no session reads (a key
-  2.1.308 files under another one, such as a trailing-slash key) overrides nothing and counts for
-  no session.
+  2.1.308 files under another one, such as a trailing-slash key — whatever doctor can tell of the
+  git root above it: round-8 VR7-2) overrides nothing and counts for no session.
 - **D-4 — optional source fields are not checked.** The optional fields of each marketplace source
   type (github `ref`/`sparsePaths`/`skipLfs`, url `headers`, npm name syntax, a settings plugin's
   own source fields) are not checked; a file Claude Code wrote passes them.
@@ -881,7 +884,10 @@ the owner's delegation:
   and the file backed up first. Where doctor cannot tell the key (a `.git` that is a symbolic link or
   that it cannot lstat, a pointer file it cannot read or past its bound, a pointer naming an odd
   path or passing a symbolic link, a directory it cannot stat), the directory stays a session — a
-  broken entry there still fails — but its local entries are removed by hand, the detail saying why.
+  broken entry there still fails — but its local entries are removed by hand, the detail saying why,
+  and no step there is printed that writes the record a session there is filed under (`/mcp enable`,
+  `/mcp disable`, `claude mcp add --scope local`: round-8 VR1, VR2): the line says that step is the
+  user's.
   Project-scope removal (`cd <dir> && claude mcp remove --scope project …`) writes the working
   directory's `.mcp.json` and stays. The gone-directory route keeps its V3-3 behaviour, and offers
   `mkdir -p` only where the path, once made, would be its own real path and doctor can tell that no

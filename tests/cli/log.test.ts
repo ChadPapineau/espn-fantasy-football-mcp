@@ -352,6 +352,34 @@ describe("ESPN pattern redaction (plan 01 §8; plan 02 §2.3)", () => {
     // no sequence: one pass, the text as it was
     expect(redactString("plain text", r())).toBe("plain text");
   });
+  it("a terminal control or escape sequence between espn_s2, SWID or Cookie and its `=` or `:` never lets a short value through — CSI, C1 CSI, OSC and a bare C0 (verifier VR4)", () => {
+    // short values: neither the bare-espn_s2 entropy check nor a GUID pattern catches them, so only
+    // the named pattern's gap between the name and its `=`/`:` stands between them and the line
+    for (const sep of [
+      "\u001b[0m",
+      "\u009b0m",
+      "\u001b]0;x\u0007",
+      "\u001b]0;x\u001b\\",
+      "\u0001",
+    ]) {
+      const label = JSON.stringify(sep);
+      expect(redactString(`espn_s2${sep}=shortS2val`, r()), label).toBe(
+        `espn_s2${sep}=[redacted:espn_s2]`,
+      );
+      expect(redactString(`ESPN-S2${sep}: shortS2val`, r()), label).toBe(
+        `ESPN-S2${sep}: [redacted:espn_s2]`,
+      );
+      expect(redactString(`SWID${sep}=notaguidvalue`, r()), label).toBe(
+        `SWID${sep}=[redacted:swid]`,
+      );
+      expect(redactString(`Cookie${sep}: foo=bar; other=thing`, r()), label).toBe(
+        `Cookie${sep}: [redacted:cookie]`,
+      );
+      expect(redactString(`Set-Cookie${sep}=foo=bar`, r()), label).toBe(
+        `Set-Cookie${sep}=[redacted:cookie]`,
+      );
+    }
+  });
   it("leaves ordinary text alone, and every pattern is global", () => {
     expect(redactString("Team A beat Team B 112.4 to 98.1 in week 4", r())).toBe(
       "Team A beat Team B 112.4 to 98.1 in week 4",

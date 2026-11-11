@@ -85,6 +85,14 @@
 // only in the projects a choice strips adds in each the keys it starts, and only where doctor can
 // tell the record (`UnresolvedView.leaves`; F1, VR6-2); and a gone directory too deep to walk is
 // "cannot tell", never "no work tree" (`gitWorkTreeAt`; VR6-3).
+//
+// Refix round 8 (verifiers VR7): a session starts, per key, the one entry Claude Code 2.1.308's dC
+// picks there, so an entry of ours behind another under its key is never counted or relied on and
+// a removal recomputes what wins next (`startsOf`; VR7-1), and the plugin is dropped only beside an
+// entry that starts (VR7-4); a record that is not its directory's own real path is no session's,
+// whatever doctor can tell of the git root (`codeProjectKey`; VR7-2); a decline or removal turns a
+// key off only where nothing else then starts under it (`UnresolvedView.alone`; VR7-3); and no step
+// writes the record of a session whose key doctor cannot tell (`StepBlock`; VR1, VR2, VR3).
 import { lstatSync, realpathSync, statSync } from "node:fs";
 import path from "node:path";
 import { PathSecurityError, readSecureFile } from "../config/paths.js";
@@ -822,8 +830,14 @@ export function realPathOnceMade(dir: string): string | null {
 /** Largest `.git`, `commondir` or `gitdir` file read when mapping a project key (a few hundred bytes). */
 export const MAX_GIT_POINTER_BYTES = 4096;
 
-/** How a recorded project directory is filed under another key (`CodeProjectKey`). */
-export type FiledHow = "work tree" | "main repository" | "bare repository" | "real path";
+/**
+ * How a recorded project directory is filed under another key (`CodeProjectKey`): `real path or
+ * work tree` — the record is not its directory's own real path (a trailing slash, another
+ * spelling), and doctor cannot tell the git root above it, so the key is that real path or a git
+ * work tree above it (verifier VR7-2).
+ */
+export type FiledHow =
+  "work tree" | "main repository" | "bare repository" | "real path" | "real path or work tree";
 
 /**
  * The key Claude Code 2.1.308 files a session opened in a directory under, and so the
@@ -981,11 +995,17 @@ export function codeProjectKey(dir: string): CodeProjectKey {
   if (typeof real === "object")
     return unknown(`doctor cannot resolve its real path (${real.code})`);
   const cwd = real.normalize("NFC");
+  // Claude Code 2.1.308 keys a session by a path its real working directory gives, never by
+  // another spelling of it (a trailing slash, a symbolic link, another case or normalization): such
+  // a record is read by no session whatever doctor can tell of the git root above (verifier VR7-2:
+  // a walk doctor could not finish made "~/f/" the session ~/f's record)
+  const cannotTell = (why: string): CodeProjectKey =>
+    cwd === dir ? unknown(why) : { kind: "other", at: cwd, how: "real path or work tree" };
   const walk = gitRootWalk(cwd);
-  if (walk !== null && "why" in walk) return unknown(walk.why);
+  if (walk !== null && "why" in walk) return cannotTell(walk.why);
   const key =
     walk === null ? { at: cwd, how: "real path" as const } : canonicalRoot(walk.root, walk.file);
-  if ("why" in key) return unknown(key.why);
+  if ("why" in key) return cannotTell(key.why);
   const at = path.normalize(key.at.normalize("NFC"));
   return at === dir ? { kind: "self" } : { kind: "other", at, how: key.how };
 }
@@ -1312,7 +1332,14 @@ export function filedWhere(f: { readonly at: string; readonly how: FiledHow }): 
       return `the bare repository at ${f.at} of the linked worktree it is in`;
     case "real path":
       return `its real path ${f.at}`;
+    case "real path or work tree":
+      return `its real path ${f.at} or a git work tree above it (doctor cannot tell which)`;
   }
+}
+
+/** The record a command run in a directory filed under another key acts on, as a line names it. */
+function recordOf(f: { readonly at: string; readonly how: FiledHow }): string {
+  return f.how === "real path or work tree" ? `${f.at} or of a git work tree above it` : f.at;
 }
 
 /** Why a registration's `claude mcp remove` is not printed (`removalOf`), or null when it is. */
@@ -1325,7 +1352,7 @@ function byHandWhy(
     return `its ${key && dir ? "key and directory hold" : key ? "key holds" : "directory holds"} a control character, which no command shows as it runs`;
   if (e.scope !== "local") return null;
   if (e.filedUnder !== undefined)
-    return `\`claude mcp remove\` there, or \`claude purge\` of it while it exists, acts on the record of ${e.filedUnder.at}`;
+    return `\`claude mcp remove\` there, or \`claude purge\` of it while it exists, acts on the record of ${recordOf(e.filedUnder)}`;
   if (e.byHand !== undefined)
     return `doctor cannot tell which record \`claude mcp remove\` there acts on: ${e.byHand}`;
   return null;
@@ -1362,11 +1389,23 @@ export function removalOf(
   }
 }
 
+/**
+ * Why doctor offers no step that writes a session directory's record there (`UnresolvedView.leaves`,
+ * `StrippedView`): `key` — it cannot tell which record Claude Code 2.1.308 files a session there
+ * under, and `claude mcp add|remove --scope local`, `/mcp enable` and `/mcp disable` all write that
+ * one (D-7 (d); verifiers VR1, VR2); `control` — the path holds a terminal control, which no command
+ * shows as it runs (D-8: `/mcp enable` there is still offered, a command naming no path).
+ */
+export type StepBlock = "key" | "control";
+
 /** A view the keep rule cannot settle: which entry to keep there is the user's. */
 export interface UnresolvedView {
   /** The session directory, or null: a session outside every project Claude Code records. */
   readonly dir: string | null;
-  /** The `claude mcp add` entries still there (never the plugin, nor an entry a step adds). */
+  /**
+   * The `claude mcp add` entries still started there, one per key (never the plugin, nor an entry a
+   * step adds, nor one behind another of this server's under its key: verifier VR7-1).
+   */
   readonly entries: readonly ClientEntry[];
   /**
    * What the plan keeps there beside them, so that every one of them goes there (turned off): the
@@ -1379,15 +1418,31 @@ export interface UnresolvedView {
    * this server's entries but these, which removing them would leave with no server (verifier U3) —
    * each with the keys of these it starts, the only ones keeping them there adds at local scope (F1:
    * every key added in every project overrode another program's entry where it held one, and started
-   * two of this server's), and whether that local add is offered: only where doctor can tell which
-   * record `claude mcp add --scope local` writes there and the path holds no terminal control
-   * (VR6-2, D-7 (d), D-8 — the same gate as `StrippedView.addLocal`).
+   * two of this server's), and why a step there is withheld (`blocked`: no local add where doctor
+   * cannot tell which record `claude mcp add --scope local` writes or the path holds a terminal
+   * control — VR6-2, D-7 (d), D-8 — and no `/mcp enable` either where it cannot tell the record:
+   * VR1; null: both are offered).
    */
   readonly leaves: readonly {
     readonly dir: string;
     readonly keys: readonly string[];
-    readonly addable: boolean;
+    readonly blocked: StepBlock | null;
   }[];
+  /**
+   * Outside the projects, beside no plugin: the projects that start one of these where doctor offers
+   * no `claude mcp add --scope local` (`blocked`, as for `leaves`).
+   */
+  readonly noAdd: readonly { readonly dir: string; readonly blocked: StepBlock }[];
+  /**
+   * In a project: the entries of `entries` that, declined there (a project server:
+   * `disabledMcpjsonServers` in its settings.local.json) or removed (a local-scope one), leave
+   * nothing started under their key there — only those may be turned off that way instead of `/mcp
+   * disable`, which turns the key off whatever scope holds it (verifier VR7-3: another entry of this
+   * server's under that key then started there, beside the one kept).
+   */
+  readonly alone: readonly ClientEntry[];
+  /** In a project whose key doctor cannot tell: no step there writes a record (D-7 (d), VR1). */
+  readonly keyUnknown?: true;
 }
 
 /** A view where uninstalling the plugin (and the plan without it) leaves no server (V3-1). */
@@ -1404,6 +1459,12 @@ export interface StrippedView {
    * local scope there (this server's own where no entry there holds it, else one no entry uses).
    */
   readonly addLocal?: string;
+  /**
+   * Doctor cannot tell which record a session there reads, and it would have to turn a key back on
+   * or add an entry there: that step is the user's, never a printed `/mcp enable` or `claude mcp
+   * add --scope local`, which write that record (D-7 (d); verifier VR2).
+   */
+  readonly keyUnknown?: true;
 }
 
 /** The entry an uninstall step adds at user scope (`duplicateRegistrations`), and why its key. */
@@ -1429,6 +1490,12 @@ export interface PluginBeside {
 /** An entry as the keep rule places it: its key and where it lives. */
 type Placed = Pick<ClientEntry, "name" | "scope" | "dir">;
 
+/** A view as the keep rule plans it: where, and whether the plugin is kept there (pinned). */
+interface PlanView {
+  readonly dir: string | null;
+  readonly plugin: boolean;
+}
+
 /** The keys tried, in order, for an entry a step adds where this server's own key is taken. */
 function* spareKeys(): Generator<string> {
   yield PACKAGE_NAME;
@@ -1439,42 +1506,49 @@ function* spareKeys(): Generator<string> {
  * Registrations of this server that run beside each other in one client (README "One registration
  * per client"; verifier A-F3: two `claude mcp add` entries under different keys, without the
  * plugin, were never called a duplicate). Claude Code: a session in one of the `sessions`
- * directories (the projects it records that still exist) sees the user scope, that directory's local
- * scope, and the project scope of its `.mcp.json` and every ancestor's (R-P5b), less the project
- * servers its settings decline (R-P5a) and every server `/mcp disable` turned off there, whatever its
- * scope (F1); a session outside them sees the user scope alone. Under one key it starts the narrowest
- * scope's entry (its dC: local over project over user, the nearer `.mcp.json` over the farther), so
- * an entry that is not this server (`held`: another program's, one doctor cannot tell, the plugin's
- * own declaration) at a narrower scope under a key of ours is what starts there, never ours (V5-2,
- * V5-3: `overriddenIn` says where). A parent directory's `.mcp.json` counts only in the views of the
- * sessions below it — never as a view of its own (verifier V-B). Each view starts one server per
- * DISTINCT key. Claude Desktop: one map, one server per key. `views`: each view's entries; `most`:
- * the most servers one view starts; `extra`: the entries whose removal leaves one key in each view it
- * can — never leaving a view that starts a server with none (V-B: a session declining the entry kept
- * lost its only server). In each view the key kept is the first that strips no view, ranked by how
- * many views its entry reaches, then by how wide it is (the user scope's, then the farthest
+ * directories (the projects it records that still exist) reads the user scope, that directory's
+ * local scope, and the project scope of its `.mcp.json` and every ancestor's (R-P5b), less the
+ * project servers its settings decline (R-P5a); under each key it starts ONE entry, the one its dC
+ * picks (`winnerOf`: local over project over user, the nearer `.mcp.json` over the farther, a
+ * project server over the user scope only where it is approved — VR6-1, F2), less every key `/mcp
+ * disable` turned off there, whatever scope holds it (F1); a session outside them reads the user
+ * scope alone. So an entry that is not this server (`held`: another program's, one doctor cannot
+ * tell, the plugin's own declaration) winning a key of ours is what starts there, never ours (V5-2,
+ * V5-3: `overriddenIn` says where), and an entry of ours behind another under its key does not start
+ * there either — no step may rely on it, and removing the one that does start exposes whatever wins
+ * next, another program's entry included (verifier VR7-1: `startsOf`). A parent directory's
+ * `.mcp.json` counts only in the views of the sessions below it — never as a view of its own
+ * (verifier V-B). Claude Desktop: one map, one server per key. `views`: what each view starts;
+ * `most`: the most servers one view starts; `extra`: the entries whose removal leaves one key in each
+ * view it can — never leaving a view that starts a server with none (V-B), each view's starts
+ * recomputed over what is left (VR7-1). In each view the key kept is the first whose keeping strips
+ * no view — removing a key there removes every entry of ours under it that the view reads — ranked by
+ * how many views its entry starts in, then by how wide it is (the user scope's, then the farthest
  * ancestor's `.mcp.json`), then `espn-fantasy-football`, then the first; `unresolved`: the views
  * where every choice would strip another view, with the entries still there — which to keep there is
- * the user's. The plugin's own `.mcp.json` declaration is never a registration (`pluginSource`).
- * With `plugin` (one Claude Code may load): `withPlugin` counts it in each view where it is not
- * turned off and no entry running its command line drops it (`worst`; `beside`: such a view holds an
- * entry too), and plans the fix that keeps it — each entry removed where the plugin stays, none whose
- * removal strips a view that turned the plugin off (F1), the plugin's views settled first, each
- * unresolved view saying whether the plugin stays there (U5) and, outside the projects, which projects
- * the choice would strip (U3); a removed entry running its command line gives the plugin back; and
- * `uninstallStrips`: the views where the plugin is started and the plan without it leaves no entry —
- * uninstalling the plugin would leave them with no server (V3-1), each with what gives it one first:
- * where the sessions outside the projects are stripped, this server added at user scope
- * (`uninstallAdd`: under `espn-fantasy-football` where Claude Code would start it in every stripped
- * project, turned back on where a project turned that key off — VR4-2 — else under a key no entry
- * uses, as another program's entry holds that one: U2, V5-2, V5-3); else, in each stripped project,
- * the best-ranked entry `/mcp disable` turned off there that Claude Code would start there, or this
- * server added at local scope there where nothing is (and doctor can tell which record that command
- * writes: D-7 (d)); and `uninstallExtra`/`uninstallUnresolved`: the keep rule over the views as those
- * first steps leave them, what the steps add kept (VR4-3: the entry a step adds never starts beside
- * another entry of this server). `offIn`: each entry that reaches a session where `/mcp disable`
- * turned it off, and those sessions (V3-1: said, the way the plugin's off state is). The ranking's
- * reach is counted over the views each plan settles. The greedy rule is accepted as such (D-3).
+ * the user's, and `alone` the ones a decline or removal turns off there (VR7-3). The plugin's own
+ * `.mcp.json` declaration is never a registration (`pluginSource`). With `plugin` (one Claude Code
+ * may load): `withPlugin` counts it in each view where it is not turned off and no entry that view
+ * starts runs its command line (`worst`; `beside`: such a view holds an entry too — Claude Code's
+ * B5r dedupes the plugin against the started entries only, VR7-4: `dropping` says where an entry
+ * running that line drops it and where it does not start), and plans the fix that keeps it — each
+ * entry removed where the plugin stays, none whose removal strips a view that turned the plugin off
+ * (F1), the plugin's views settled first, each unresolved view saying whether the plugin stays there
+ * (U5) and, outside the projects, which projects the choice would strip (U3); a removed entry running
+ * its command line gives the plugin back; and `uninstallStrips`: the views where the plugin is
+ * started and the plan without it leaves no entry — uninstalling the plugin would leave them with no
+ * server (V3-1), each with what gives it one first: where the sessions outside the projects are
+ * stripped, this server added at user scope (`uninstallAdd`: under `espn-fantasy-football` where
+ * Claude Code would start it in every stripped project, turned back on where a project turned that
+ * key off — VR4-2 — else under a key no entry uses, as another program's entry holds that one: U2,
+ * V5-2, V5-3); else, in each stripped project, the best-ranked entry `/mcp disable` turned off there
+ * that Claude Code would start there, or this server added at local scope there where nothing is (and
+ * doctor can tell which record that command writes: D-7 (d)); where doctor cannot tell which record a
+ * session there reads, no step at all (VR2); and `uninstallExtra`/`uninstallUnresolved`: the keep
+ * rule over the views as those first steps leave them, what the steps add kept (VR4-3: the entry a
+ * step adds never starts beside another entry of this server). `offIn`: each entry that a session
+ * where `/mcp disable` turned it off would start, and those sessions (V3-1: said, the way the
+ * plugin's off state is). The greedy rule is accepted as such (D-3).
  */
 export function duplicateRegistrations(
   entries: readonly ClientEntry[],
@@ -1503,6 +1577,16 @@ export function duplicateRegistrations(
     readonly uninstallAdd: UninstallAdd | null;
     readonly uninstallExtra: readonly ClientEntry[];
     readonly uninstallUnresolved: readonly UnresolvedView[];
+    /**
+     * Each entry running the plugin's own command line that a view where the plugin is on starts —
+     * Claude Code drops the plugin's server there — and the session directories where the plugin
+     * is on but the entry does not start (another entry holds its key there), so the plugin starts
+     * there (VR7-4).
+     */
+    readonly dropping: readonly {
+      readonly entry: ClientEntry;
+      readonly notIn: readonly string[];
+    }[];
   } | null;
 } {
   const regs = entries.filter((e) => !e.pluginSource);
@@ -1531,6 +1615,9 @@ export function duplicateRegistrations(
   );
   const off = (d: string | null, key: string): boolean =>
     d !== null && byDir.get(d)?.disabled.has(key) === true;
+  /** Why a step that writes `d`'s record is withheld there, or null (`StepBlock`). */
+  const blockedIn = (d: string): StepBlock | null =>
+    byDir.get(d)?.keyUnknown === true ? "key" : holdsControl(d) ? "control" : null;
   /**
    * Whether a session in `d` reads `e` at all: its scope, less a project server declined there —
    * never an entry of a record no session reads (F3: a held one `unread`, one of this server's
@@ -1554,19 +1641,16 @@ export function duplicateRegistrations(
   };
   const otherEntries = new Set([...others.values()].flat());
   /**
-   * The entry a session in `d` starts under the key of `e` (one of this server's, or one a step
-   * adds), of every entry under that key it reads — Claude Code 2.1.308's dC: a local-scope entry
-   * over all; else the nearest `.mcp.json`'s (the files merged before any approval) where that key
-   * is approved there or the user scope does not hold it (then it is offered: doctor's reading,
-   * R-P5a); else the user scope's — a project server not approved is skipped while the user or local
-   * scope holds its key, and never offered (verifiers VR6-1, F2).
+   * The entry a session in `d` starts under `key`, of `pool` (this server's entries, and those a
+   * step adds) and every entry under that key that is not this server's, of those it reads —
+   * Claude Code 2.1.308's dC: a local-scope entry over all; else the nearest `.mcp.json`'s (the
+   * files merged before any approval) where that key is approved there or the user scope does not
+   * hold it (then it is offered: doctor's reading, R-P5a); else the user scope's — a project server
+   * not approved is skipped while the user or local scope holds its key, and never offered
+   * (verifiers VR6-1, F2). Outside the projects: the user scope's, or Claude Desktop's one map.
    */
-  const winner = (d: string, e: Placed): Placed | undefined => {
-    const cs = [
-      e,
-      ...regs.filter((x) => x !== e && x.name === e.name),
-      ...(others.get(e.name) ?? []),
-    ].filter((x) => reads(d, x));
+  const pick = (d: string | null, key: string, cs: readonly Placed[]): Placed | undefined => {
+    if (d === null) return cs[0];
     const local = cs.find((x) => x.scope === "local");
     if (local !== undefined) return local;
     const user = cs.find((x) => x.scope === "user");
@@ -1574,7 +1658,32 @@ export function duplicateRegistrations(
     for (const x of cs)
       if (x.scope === "project" && (near === undefined || segments(x) > segments(near))) near = x;
     if (near === undefined) return user;
-    return user === undefined || approved(d, e.name) ? near : user;
+    return user === undefined || approved(d, key) ? near : user;
+  };
+  const othersRead = (d: string | null, key: string): Placed[] =>
+    (others.get(key) ?? []).filter((x) => reads(d, x));
+  const winnerOf = (d: string | null, key: string, pool: readonly Placed[]): Placed | undefined =>
+    pick(d, key, [...pool.filter((x) => x.name === key && reads(d, x)), ...othersRead(d, key)]);
+  /**
+   * What a session in `d` starts of `pool`, in its order: each entry that wins its key there
+   * (`winnerOf`), less a key `/mcp disable` turned off there unless `on` turns it back on (an
+   * uninstall step) — one entry per key (verifier VR7-1: an entry of ours behind another under its
+   * key was counted there, and a removal relied on it where another program's entry wins next).
+   */
+  const startsOf = (
+    d: string | null,
+    pool: readonly ClientEntry[],
+    on?: ReadonlySet<string>,
+  ): ClientEntry[] => {
+    const byKey = new Map<string, ClientEntry[]>();
+    for (const e of pool) if (reads(d, e)) byKey.set(e.name, [...(byKey.get(e.name) ?? []), e]);
+    const won = new Set<Placed>();
+    for (const [k, es] of byKey)
+      if (!off(d, k) || on?.has(k) === true) {
+        const w = pick(d, k, [...es, ...othersRead(d, k)]);
+        if (w !== undefined) won.add(w);
+      }
+    return pool.filter((e) => won.has(e));
   };
   /**
    * Why an entry that is not this server is what a session in `d` starts under `e`'s key instead,
@@ -1584,17 +1693,15 @@ export function duplicateRegistrations(
    */
   const overrider = (d: string | null, e: Placed): "narrower" | "unapproved" | null => {
     if (d === null) return null;
-    const w = winner(d, e);
+    const w = winnerOf(d, e.name, regs);
     if (w === undefined || !otherEntries.has(w)) return null;
     return w.scope === "user" ? "unapproved" : "narrower";
   };
-  const shadowed = (d: string | null, e: Placed): boolean => overrider(d, e) !== null;
-  /** Whether a session in `d` would start `e` but for `/mcp disable` there. */
-  const reaches = (d: string | null, e: Placed): boolean => reads(d, e) && !shadowed(d, e);
-  const sees = (d: string | null, e: ClientEntry): boolean => reaches(d, e) && !off(d, e.name);
   const sessionDirs = [...byDir.keys()];
   const offIn = regs.flatMap((entry) => {
-    const dirs = sessionDirs.filter((d) => reaches(d, entry) && off(d, entry.name));
+    const dirs = sessionDirs.filter(
+      (d) => reads(d, entry) && off(d, entry.name) && winnerOf(d, entry.name, regs) === entry,
+    );
     return dirs.length > 0 ? [{ entry, dirs }] : [];
   });
   const overriddenIn = regs.flatMap((entry) =>
@@ -1605,39 +1712,90 @@ export function duplicateRegistrations(
   );
   const views = [null, ...sessionDirs].map((dir) => ({
     dir,
-    entries: regs.filter((e) => sees(dir, e)),
+    entries: startsOf(dir, regs),
     plugin: plugin !== null && !off(dir, plugin.key),
   }));
   /** How far up an entry reaches: the user scope above all, then the shallower directory. */
   const depth = (e: ClientEntry): number => (narrow(e) ? segments(e) : -1);
   const keysOf = (es: readonly ClientEntry[]): string[] => [...new Set(es.map((e) => e.name))];
   const most = Math.max(0, ...views.map((v) => keysOf(v.entries).length));
+  /** The plugin's server, as the keep rule pins it in each view where it is on. */
+  const pseudo: ClientEntry = {
+    name: plugin?.key ?? "",
+    spec: {},
+    scope: "user",
+    file: "",
+    dir: null,
+    pluginSource: false,
+    declined: false,
+    declinedBy: [],
+    absent: false,
+  };
   /**
-   * The keep rule over `vs`; `pinned`: the plugin, or what an uninstall step adds — kept in every
-   * view it is in (never removed), each other key removed there where that strips no view.
+   * The keep rule over `vs`, whose sessions start `pool`'s entries (`startsOf`, with `on` turned
+   * back on where an uninstall step does) and the plugin where a view keeps it; `pinned`: the
+   * plugin, or what an uninstall step adds — kept in every view it is in (never removed), each other
+   * key removed there where that strips no view. Every check recomputes what each view starts over
+   * what is left (VR7-1): a removal exposes whatever wins its key next.
    */
   const plan = (
-    vs: readonly { dir: string | null; entries: readonly ClientEntry[] }[],
+    vs: readonly PlanView[],
+    pool: readonly ClientEntry[],
     pinned: ReadonlyMap<ClientEntry, "plugin" | "added">,
+    on: ReadonlyMap<string, ReadonlySet<string>> = new Map(),
   ): { extra: ClientEntry[]; unresolved: UnresolvedView[] } => {
-    // how many of these views each entry reaches (the ranking's first key)
+    const served = (v: PlanView, gone: ReadonlySet<ClientEntry>): ClientEntry[] => [
+      ...startsOf(
+        v.dir,
+        pool.filter((e) => !gone.has(e)),
+        v.dir === null ? undefined : on.get(v.dir),
+      ),
+      ...(v.plugin ? [pseudo] : []),
+    ];
+    const before = vs.map((v) => served(v, new Set()));
+    /** Every entry of `pool` a view reads: each may start there once those before it go. */
+    const readBy = vs.map((v) => pool.filter((e) => reads(v.dir, e)));
+    // how many of these views each entry reaches — reads, under a key an entry of ours starts
+    // there (itself, or one before it under that key): the ranking's first key
     const reach = new Map<ClientEntry, number>();
-    for (const v of vs) for (const e of v.entries) reach.set(e, (reach.get(e) ?? 0) + 1);
+    for (const [i, s] of before.entries()) {
+      const keys = new Set(s.map((e) => e.name));
+      for (const e of readBy[i] ?? []) if (keys.has(e.name)) reach.set(e, (reach.get(e) ?? 0) + 1);
+    }
     const extra: ClientEntry[] = [];
-    const left = (es: readonly ClientEntry[]): ClientEntry[] =>
-      es.filter((e) => !extra.includes(e));
-    /** Removing `drop` beside `extra` leaves every view that starts a server with one. */
-    const strips = (drop: readonly ClientEntry[]): boolean =>
-      vs.some(
-        (v) =>
-          v.entries.length > 0 && v.entries.every((e) => extra.includes(e) || drop.includes(e)),
+    const gone = (more: readonly ClientEntry[] = []): Set<ClientEntry> =>
+      new Set([...extra, ...more]);
+    /** Removing `drop` beside `extra` leaves a view that starts a server with none. */
+    const strips = (drop: readonly ClientEntry[]): boolean => {
+      const g = gone(drop);
+      return vs.some(
+        (w, i) =>
+          (before[i]?.length ?? 0) > 0 &&
+          (readBy[i] ?? []).some((e) => drop.includes(e)) &&
+          served(w, g).length === 0,
       );
-    for (const v of vs) {
-      const rest = left(v.entries);
+    };
+    /** The keys of `rest` (what view `i` starts) that what is pinned holds there. */
+    const pinnedKeysOf = (i: number, rest: readonly ClientEntry[]): Set<string> =>
+      new Set(
+        rest
+          .filter(
+            (e) =>
+              pinned.has(e) ||
+              (readBy[i] ?? []).some(
+                (x) => x.name === e.name && pinned.has(x) && !extra.includes(x),
+              ),
+          )
+          .map((e) => e.name),
+      );
+    for (const [i, v] of vs.entries()) {
+      const rest = served(v, gone());
       const keys = keysOf(rest);
       if (keys.length < 2) continue;
-      const of = (k: string): ClientEntry[] => rest.filter((e) => e.name === k);
-      const reachOf = (k: string): number => Math.max(...of(k).map((e) => reach.get(e) ?? 0));
+      // removing a key there removes every entry of ours under it the view reads, never a pinned one
+      const of = (k: string): ClientEntry[] =>
+        (readBy[i] ?? []).filter((e) => e.name === k && !extra.includes(e) && !pinned.has(e));
+      const reachOf = (k: string): number => Math.max(0, ...of(k).map((e) => reach.get(e) ?? 0));
       const depthOf = (k: string): number => Math.min(...of(k).map(depth));
       const ranked = [...keys].sort(
         (a, b) =>
@@ -1645,90 +1803,116 @@ export function duplicateRegistrations(
           depthOf(a) - depthOf(b) ||
           Number(b === SERVER_NAME) - Number(a === SERVER_NAME),
       );
-      const kept = new Set(rest.filter((e) => pinned.has(e)).map((e) => e.name));
+      const kept = pinnedKeysOf(i, rest);
       if (kept.size > 0) {
         // what is pinned stays: each other key goes where that strips no view, the lowest ranked first
-        for (const k of ranked.filter((x) => !kept.has(x)).reverse())
-          if (!strips(of(k))) extra.push(...of(k));
+        for (const k of ranked.filter((x) => !kept.has(x)).reverse()) {
+          const drop = of(k);
+          if (!strips(drop)) extra.push(...drop);
+        }
         continue;
       }
-      const keep = ranked.find((k) => !strips(rest.filter((e) => e.name !== k)));
-      if (keep !== undefined) extra.push(...rest.filter((e) => e.name !== keep));
+      const dropFor = (k: string): ClientEntry[] => keys.filter((x) => x !== k).flatMap(of);
+      const keep = ranked.find((k) => !strips(dropFor(k)));
+      if (keep !== undefined) extra.push(...dropFor(keep));
     }
-    const unresolved = vs.flatMap((v): UnresolvedView[] => {
-      const rest = left(v.entries);
+    const left = pool.filter((e) => !extra.includes(e));
+    const unresolved = vs.flatMap((v, i): UnresolvedView[] => {
+      const rest = served(v, gone());
       if (keysOf(rest).length < 2) return [];
-      const pin = rest.find((e) => pinned.has(e));
-      const beside = pin === undefined ? null : (pinned.get(pin) ?? null);
       // never one under a key of what is pinned: `/mcp disable` of that key there turns off both
-      const pinnedKeys = new Set(rest.filter((e) => pinned.has(e)).map((e) => e.name));
+      const pinnedKeys = pinnedKeysOf(i, rest);
+      const pin =
+        rest.find((e) => pinned.has(e)) ??
+        (readBy[i] ?? []).find((x) => pinned.has(x) && pinnedKeys.has(x.name));
+      const beside = pin === undefined ? null : (pinned.get(pin) ?? null);
       const choice = rest.filter((e) => !pinnedKeys.has(e.name));
-      // outside the projects, beside the plugin: the projects that start nothing else of ours once
-      // these go (U3) — what a project that turns the plugin off would be left without (a view
-      // holding what is pinned never is: that is in neither list)
-      const leaves =
-        v.dir === null && beside !== null
-          ? vs.flatMap((w) => {
-              const d = w.dir;
-              if (d === null || !w.entries.every((e) => extra.includes(e) || choice.includes(e)))
-                return [];
-              const keys = keysOf(w.entries.filter((e) => choice.includes(e)));
-              return keys.length === 0
-                ? []
-                : [
-                    {
-                      dir: d,
-                      keys,
-                      addable: byDir.get(d)?.keyUnknown !== true && !holdsControl(d),
-                    },
-                  ];
-            })
-          : [];
-      return [{ dir: v.dir, entries: choice, beside, leaves }];
+      const d = v.dir;
+      if (d === null) {
+        // outside the projects, beside the plugin: the projects that start nothing else of ours
+        // once these go (U3) — what a project that turns the plugin off would be left without (a
+        // view holding what is pinned never is: what is pinned still starts there)
+        const leaves =
+          beside === null
+            ? []
+            : vs.flatMap((w) => {
+                const wd = w.dir;
+                if (wd === null) return [];
+                const now = served(w, gone()).filter((e) => choice.includes(e));
+                if (now.length === 0 || served(w, gone(choice)).length > 0) return [];
+                return [{ dir: wd, keys: keysOf(now), blocked: blockedIn(wd) }];
+              });
+        // beside no plugin: the projects starting one of these where no local add is offered
+        const noAdd = vs.flatMap((w) => {
+          const wd = w.dir;
+          if (wd === null || !served(w, gone()).some((e) => choice.includes(e))) return [];
+          const blocked = blockedIn(wd);
+          return blocked === null ? [] : [{ dir: wd, blocked }];
+        });
+        return [{ dir: d, entries: choice, beside, leaves, noAdd, alone: [] }];
+      }
+      // turned off by a decline (a project server, by its key, in this directory's settings) or a
+      // removal (a local-scope entry), an entry leaves nothing started under its key here only where
+      // no other entry — this server's or another program's — wins that key next (VR7-3)
+      const next = (e: ClientEntry): boolean =>
+        e.scope === "project"
+          ? [...left, ...(others.get(e.name) ?? [])].some(
+              (x) => x.name === e.name && x.scope !== "project" && reads(d, x),
+            )
+          : winnerOf(
+              d,
+              e.name,
+              left.filter((x) => x !== e),
+            ) !== undefined;
+      const alone = choice.filter(
+        (e) => (e.scope === "project" || e.scope === "local") && !next(e),
+      );
+      return [
+        {
+          dir: d,
+          entries: choice,
+          beside,
+          leaves: [],
+          noAdd: [],
+          alone,
+          ...(byDir.get(d)?.keyUnknown === true ? { keyUnknown: true as const } : {}),
+        },
+      ];
     });
     return { extra, unresolved };
   };
-  const without = plan(views, new Map());
+  const without = plan(
+    views.map((v) => ({ dir: v.dir, plugin: false })),
+    regs,
+    new Map(),
+  );
   let withPlugin: ReturnType<typeof duplicateRegistrations>["withPlugin"] = null;
   if (plugin !== null) {
-    const pseudo: ClientEntry = {
-      name: plugin.key,
-      spec: {},
-      scope: "user",
-      file: "",
-      dir: null,
-      pluginSource: false,
-      declined: false,
-      declinedBy: [],
-      absent: false,
-    };
     let worst = { servers: 0, keys: 0, plugin: false };
     let beside = false;
     for (const v of views) {
       const keys = keysOf(v.entries).length;
+      // Claude Code's B5r dedupes the plugin's server against the entries a session starts only
       const runs = v.plugin && !v.entries.some((e) => plugin.drops(e));
       if (runs && keys > 0) beside = true;
       const servers = keys + (runs ? 1 : 0);
       if (servers > worst.servers) worst = { servers, keys, plugin: runs };
     }
-    const kept = views.map((v) => ({
-      dir: v.dir,
-      entries: v.plugin ? [...v.entries, pseudo] : v.entries,
-    }));
     const settled = plan(
-      [
-        ...kept.filter((v) => v.entries.includes(pseudo)),
-        ...kept.filter((v) => !v.entries.includes(pseudo)),
-      ],
+      [...views.filter((v) => v.plugin), ...views.filter((v) => !v.plugin)].map((v) => ({
+        dir: v.dir,
+        plugin: v.plugin,
+      })),
+      regs,
       new Map([[pseudo, "plugin"]]),
     );
-    // its removals in the order the views list them (one command line per entry)
-    const listed = [...new Set(views.flatMap((v) => v.entries))];
+    // its removals in the order the views list them, then the order of the entries (one command
+    // line per entry; an entry behind another one's under its key is removed with it: VR7-1)
+    const listed = [...new Set([...views.flatMap((v) => v.entries), ...regs])];
     // uninstalling the plugin: the views it strips, and what gives each a server first (V3-1); then
     // the keep rule over the views as those steps leave them, what they add kept (VR4-3)
-    const stripped = views.filter(
-      (v) => v.plugin && v.entries.every((e) => without.extra.includes(e)),
-    );
+    const leftWithout = regs.filter((e) => !without.extra.includes(e));
+    const stripped = views.filter((v) => v.plugin && startsOf(v.dir, leftWithout).length === 0);
     const projects = stripped.flatMap((v) => (v.dir === null ? [] : [v.dir]));
     // a key no entry uses and no session names: never off, never another program's anywhere
     const used = new Set([
@@ -1752,7 +1936,10 @@ export function duplicateRegistrations(
     // Claude Code would start that in every stripped project, else under the spare key (U2, V5-3)
     const own = added(SERVER_NAME, "user", null);
     const heldAtUser = (others.get(SERVER_NAME) ?? []).some((h) => h.scope === "user");
-    const heldBelow = projects.filter((d) => shadowed(d, own));
+    const heldBelow = projects.filter((d) => {
+      const w = winnerOf(d, SERVER_NAME, [own, ...regs]);
+      return w !== undefined && otherEntries.has(w);
+    });
     const addKey = !stripped.some((v) => v.dir === null)
       ? null
       : heldAtUser || heldBelow.length > 0
@@ -1761,7 +1948,8 @@ export function duplicateRegistrations(
     const userAdd = addKey === null ? null : added(addKey, "user", null);
     // the one key a stripped project turns back on (more would only be removed again): the added
     // entry's, where the project turned it off; else the best ranked of the entries turned off
-    // there that Claude Code would start there; else this server added at local scope there
+    // there that Claude Code would start there; else this server added at local scope there — and
+    // none where doctor cannot tell which record those steps write there (VR2)
     const seen = new Map<ClientEntry, number>();
     for (const v of views) for (const e of v.entries) seen.set(e, (seen.get(e) ?? 0) + 1);
     const best = (es: readonly ClientEntry[]): string[] => {
@@ -1775,14 +1963,19 @@ export function duplicateRegistrations(
     };
     const uninstallStrips = stripped.map((v): StrippedView => {
       if (v.dir === null) return { dir: null, off: [] };
-      if (userAdd !== null)
-        return { dir: v.dir, off: off(v.dir, userAdd.name) ? [userAdd.name] : [] };
-      const on = best(regs.filter((e) => reaches(v.dir, e) && off(v.dir, e.name)));
-      // added there only where doctor can tell which record that command writes (D-7 (d)) and the
-      // directory holds no control a printed command would show otherwise than it runs (D-8)
-      if (on.length > 0 || byDir.get(v.dir)?.keyUnknown === true || holdsControl(v.dir))
-        return { dir: v.dir, off: on };
       const d = v.dir;
+      const unknownKey = byDir.get(d)?.keyUnknown === true;
+      if (userAdd !== null) {
+        if (!off(d, userAdd.name)) return { dir: d, off: [] };
+        return unknownKey ? { dir: d, off: [], keyUnknown: true } : { dir: d, off: [userAdd.name] };
+      }
+      if (unknownKey) return { dir: d, off: [], keyUnknown: true };
+      const on = best(
+        regs.filter((e) => reads(d, e) && off(d, e.name) && winnerOf(d, e.name, regs) === e),
+      );
+      // added there only where the directory holds no control a printed command would show
+      // otherwise than it runs (D-8)
+      if (on.length > 0 || holdsControl(d)) return { dir: d, off: on };
       const free =
         !off(d, SERVER_NAME) &&
         ![...regs, ...(others.get(SERVER_NAME) ?? [])].some(
@@ -1799,18 +1992,26 @@ export function duplicateRegistrations(
         v.addLocal === undefined ? [] : [added(v.addLocal, "local", v.dir)],
       ),
     ];
-    const after = [...regs, ...adds];
     const afterSteps = plan(
-      [null, ...sessionDirs].map((dir) => ({
-        dir,
-        entries: after.filter(
-          (e) =>
-            reaches(dir, e) &&
-            (!off(dir, e.name) || (dir !== null && turnedOn.get(dir)?.has(e.name) === true)),
-        ),
-      })),
+      [null, ...sessionDirs].map((dir) => ({ dir, plugin: false })),
+      [...regs, ...adds],
       new Map(adds.map((e) => [e, "added" as const])),
+      turnedOn,
     );
+    const dropping = regs.flatMap((entry) => {
+      if (!plugin.drops(entry)) return [];
+      const on = views.filter((v) => v.plugin);
+      if (!on.some((v) => v.entries.includes(entry))) return [];
+      const notIn = on.flatMap((v) =>
+        v.dir !== null &&
+        !v.entries.includes(entry) &&
+        reads(v.dir, entry) &&
+        !off(v.dir, entry.name)
+          ? [v.dir]
+          : [],
+      );
+      return [{ entry, notIn }];
+    });
     withPlugin = {
       worst,
       beside,
@@ -1827,6 +2028,7 @@ export function duplicateRegistrations(
             },
       uninstallExtra: regs.filter((e) => afterSteps.extra.includes(e)),
       uninstallUnresolved: afterSteps.unresolved,
+      dropping,
     };
   }
   return {

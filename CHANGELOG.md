@@ -366,14 +366,16 @@ minor version (plan 04 §4.4; plan 09 K6). One version covers the server, the Sk
   scope over the approved project servers over the user scope, the nearer `.mcp.json` over the
   farther), so an entry that is not this server holding one of this server's keys at a narrower
   scope is what a session there starts: ours is not counted there, which is said, and no fix relies
-  on it there. A project server counts over the user scope only where it is approved
+  on it there — nor on an entry of this server's behind another one's under its key, which does not
+  start there either (removing the one that does start exposes whatever wins its key next). A project server counts over the user scope only where it is approved
   (`enabledMcpjsonServers` or `enableAllProjectMcpServers` in the user, project or local settings,
   or the project's legacy record): Claude Code 2.1.308 skips one that is not, and never offers it,
   while the user or local scope holds its key — so another program's unapproved project server under
   one of this server's keys no longer hides a duplicate, and a project server of this server's that
   is not approved, under a key another program's entry holds at user scope, is said not to start
   there. An entry of a `projects` record no session reads (a key with a trailing slash, filed under
-  its real path) is no server of any session, nor what one starts instead. A recorded directory that no longer exists, or a recorded path that is no directory, is
+  its real path — even where doctor cannot tell the git root above it) is no server of any session,
+  nor what one starts instead. A recorded directory that no longer exists, or a recorded path that is no directory, is
   no session: an entry recorded there is said once, never counted or judged, and `eff uninstall`
   gives it a removal that acts on that path's own record — `mkdir -p` first, then `claude mcp
   remove` there, or `claude purge`; where a git work tree lies above it (Claude Code would file a
@@ -394,8 +396,11 @@ minor version (plan 04 §4.4; plan 09 K6). One version covers the server, the Sk
   counted; Claude Desktop's config is one view. Two keys in a view are the duplicate, the plugin or
   not, and the fix lists the exact `claude mcp remove` of all but one, keeping the entry that
   reaches the most sessions — never removing one that leaves a session with no server: where every
-  removal would, it says to keep one there and turn the others off there (`/mcp disable`, or
-  `disabledMcpjsonServers` for a project server). Beside the plugin, the fix that keeps the plugin
+  removal would, it says to keep one there and turn the others off there (`/mcp disable`; a
+  project server's `disabledMcpjsonServers`, or a local entry's removal, only where nothing else then
+  starts under that key there). In a project whose key doctor cannot tell, it prints no step that
+  writes that project's record (`/mcp enable`, `/mcp disable`, `claude mcp add --scope local`): it
+  says so, and that step is the user's. Beside the plugin, the fix that keeps the plugin
   never removes an entry a project that turned the plugin off still needs: where that choice is the
   user's, it keeps one entry in such a project, and outside the projects it names every project
   that turns the plugin off and would be left with none, and keeping the entries there adds in each
@@ -410,7 +415,8 @@ minor version (plan 04 §4.4; plan 09 K6). One version covers the server, the Sk
   plans the removals that follow with what those steps add, so they never make a new duplicate. An entry
   `/mcp disable` turned off in some projects is said. A `claude mcp add` entry
   that runs the plugin's own command line is one server with it (Claude Code drops the plugin's
-  copy), not two. The plugin is judged where Claude Code reads it: in place from
+  copy), not two — where Claude Code starts that entry; where another entry holds its key, the
+  plugin starts beside that one, which is the duplicate. The plugin is judged where Claude Code reads it: in place from
   a folder marketplace (recorded in `known_marketplaces.json`, or declared under
   `extraKnownMarketplaces` in the user settings), with or without an install record, or the cache
   copy for a marketplace Claude Code fetches. A cache copy left from a folder marketplace is never
