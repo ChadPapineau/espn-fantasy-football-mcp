@@ -808,3 +808,39 @@ entry. Everything else they raised is fixed, or ruled in `docs/plan/changelog.md
     placeholder package (2.0.4) and ran it once: it only prints a message. Nothing reached the
     repository; the verifier read it statically and found no scripts or dependencies. It may still
     sit in npm's `npx` cache on the development Mac.
+
+## Known limitations of eff doctor's client-config model (Claude Code 2.1.308)
+
+`eff doctor` rows 2 and 24, `eff print-config --client code` and `eff uninstall` model the config
+rules of Claude Code 2.1.308, read from that client's binary (2026-11-11). The owner updates Claude
+Code often, and a later client may read these files differently: after an update, a row-2 warning
+about `known_marketplaces.json` may be doctor's model rather than the install — `claude plugin
+list` shows what loads (README "One registration per client"). The orchestrator's rulings, under
+the owner's delegation:
+
+- **D-1 — the version premise of the `known_marketplaces.json` tiers.** Row 2 fails only for what
+  no client version reads: the file is not JSON, not a JSON object or unreadable, or a record is not
+  an object or has no `source` object with a string type. A record only 2.1.308's field-level
+  schema refuses (`installLocation` or `lastUpdated` not a string, `autoUpdate` not a boolean, the
+  source type's required field missing, a `url` source's url that is no URL, a `settings` source
+  with no `plugins` list or listing a plugin with no name or no remote source) warns that doctor
+  cannot judge the file, as does a source type 2.1.308 does not have; row 24 then judges no copy.
+  Such a plugin is no certain server: beside a `claude mcp add` entry, the fix asks `claude plugin
+  list` first.
+- **D-2 — sessions doctor does not see.** Claude Code files a session under its git root (or its
+  working directory). A session opened in a subdirectory of a recorded project also reads that
+  subdirectory's `.mcp.json`; one opened in a linked worktree outside its main repository is filed
+  under the main repository but reads the worktree's own `.mcp.json` chain (round-3 verifier F5,
+  filed here as the same limit; the orchestrator's confirmation is pending). Doctor reads each
+  recorded project directory and its ancestors only: it never scans subdirectories (a recorded
+  project may be the home directory) or worktrees.
+- **D-3 — the keep rule is greedy** (accepted). It never strips a session's only server, and where
+  it cannot settle a view it names the choice as the user's; no global search.
+- **D-4 — optional source fields are not checked.** The optional fields of each marketplace source
+  type (github `ref`/`sparsePaths`/`skipLfs`, url `headers`, npm name syntax, a settings plugin's
+  own source fields) are not checked; a file Claude Code wrote passes them.
+- **D-5 — the user settings only.** `extraKnownMarketplaces` and `enabledPlugins` are read from
+  `~/.claude/settings.json`, not from project, local or `--settings` files.
+- **D-6 — credential-shaped keys are pseudonymized** (accepted trade-off). A key or path holding a
+  GUID or other credential-shaped text is pseudonymized by the output redaction, so a printed
+  `claude mcp remove` for such a key may need the real key typed; classification is unchanged.

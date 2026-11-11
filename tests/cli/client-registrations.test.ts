@@ -315,6 +315,7 @@ describe("uninstall names every registration it can see (the local scope, `claud
   it("local and project scope entries get their `claude mcp remove` from their directory; a key of another name is named; an env cookie is said", async () => {
     sb = sandbox({ create: true });
     const local = path.join(sb.home, "some-project");
+    mkdirSync(local, { recursive: true });
     const proj = path.join(sb.home, "repo");
     // under another key, an entry is this server by what it launches: this package's dist/cli.js
     const release = fakePackage(sb);
@@ -584,6 +585,7 @@ describe("row 2: an entry no client can start is never ok (final gate, round 2)"
     write(desk, { mcpServers: { "espn-fantasy-football": PLUGIN_ENTRY } });
     const code = path.join(sb.home, ".claude.json");
     const proj = path.join(sb.home, "p");
+    mkdirSync(proj, { recursive: true });
     write(code, {
       mcpServers: { "espn-fantasy-football": PLUGIN_ENTRY },
       projects: { [proj]: { mcpServers: { "espn-fantasy-football": PLUGIN_ENTRY } } },

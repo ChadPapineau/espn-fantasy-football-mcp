@@ -64,6 +64,7 @@ import { privatizeNewFile, resolveBackupDestination } from "./maintenance.js";
 import {
   cookieFindings,
   removeCommand,
+  shellWord,
   samePath,
   scanClientConfig,
   scanPlugin,
@@ -428,10 +429,16 @@ function stepLines(
         : e.scope === "local"
           ? `local scope, project ${e.dir ?? "?"}`
           : `user scope, ${e.file}`;
+    const who = `Claude Code (${where})${e.name === SERVER_NAME ? "" : ` registers this server under the key "${e.name}"`}`;
+    // a local-scope entry of a projects key whose directory is gone: `claude mcp remove` needs a
+    // session there, so the directory is made first (F2)
+    const gone = e.absent && e.scope === "local" ? e.dir : null;
     out.push(
-      e.declined
-        ? `Claude Code (${where})${e.name === SERVER_NAME ? "" : ` registers this server under the key "${e.name}"`}, declined in Claude Code's settings (disabledMcpjsonServers), so never started — removing it is optional: ${removeCommand(e)}`
-        : `Claude Code (${where})${e.name === SERVER_NAME ? "" : ` registers this server under the key "${e.name}"`}: ${removeCommand(e)}`,
+      gone !== null
+        ? `${who}: recorded for ${gone}, which does not exist, so never started — to remove it: mkdir -p ${shellWord(gone)} && ${removeCommand(e)} (or claude purge ${shellWord(gone)}, which deletes all of Claude Code's state for that directory)`
+        : e.declined
+          ? `${who}, declined in Claude Code's settings (${e.declinedBy.join(" or ")}), so never started — removing it is optional: ${removeCommand(e)}`
+          : `${who}: ${removeCommand(e)}`,
     );
     if (cookieIn(e)) out.push(`  ${COOKIE_NOTE}`);
   }

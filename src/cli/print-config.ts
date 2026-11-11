@@ -10,7 +10,7 @@ import { existsSync } from "node:fs";
 import path from "node:path";
 import { assertNotSynced, fileProviderMarks, PathSecurityError } from "../config/paths.js";
 import type { ConfigKey, LenientConfig } from "../config/schema.js";
-import { pluginMayLoad, scanPlugin } from "./client-config.js";
+import { pluginLoads, scanPlugin } from "./client-config.js";
 import { EXIT, UsageError } from "./exit.js";
 import { distEntry, write, writeLine, type CliIo } from "./io.js";
 
@@ -30,6 +30,11 @@ export const PLUGIN_NAME = "espn-fantasy-football";
 export const MARKETPLACE_NAME = "espn-fantasy-football-mcp";
 /** The id `claude plugin install|uninstall` takes. */
 export const PLUGIN_ID = `${PLUGIN_NAME}@${MARKETPLACE_NAME}`;
+/**
+ * The plugin's server as Claude Code 2.1.308 names it (`plugin:<plugin>:<server>`), the key
+ * `/mcp disable` writes to a project's `disabledMcpServers` (client-config.ts `SessionView`).
+ */
+export const PLUGIN_SERVER_KEY = `plugin:${PLUGIN_NAME}:${SERVER_NAME}`;
 /** The clients `print-config` knows. */
 export const CLIENTS = ["desktop", "code"] as const;
 export type Client = (typeof CLIENTS)[number];
@@ -248,14 +253,19 @@ export async function printConfig(
   );
   // the plugin registers the server in Claude Code itself: this entry beside it is the duplicate
   // the README forbids (Stage C finding doctor-plugin-install-invisible) — when Claude Code can load
-  // the plugin; one it cannot load is said as that (verifier F3)
+  // the plugin; one it cannot load is said as that (verifier F3), and one from a registry doctor
+  // cannot judge as a question `claude plugin list` answers (MK-1)
   const plugin = client === "code" ? scanPlugin(io.home) : null;
-  if (plugin?.enabled === true)
+  if (plugin?.enabled === true) {
+    const loads = pluginLoads(plugin.origin);
     await writeLine(
       io.stderr,
-      pluginMayLoad(plugin.origin)
+      loads === "yes"
         ? `eff print-config: warning: the ${PLUGIN_ID} plugin is installed and enabled — it registers this server in Claude Code already. Adding the entry above beside it starts two servers and lists every tool twice: use it only instead of the plugin (\`claude plugin uninstall ${PLUGIN_ID}\` first).`
-        : `eff print-config: warning: the ${PLUGIN_ID} plugin is enabled, but Claude Code cannot load it (\`eff doctor\` row 2 says why): re-add its marketplace, or \`claude plugin uninstall ${PLUGIN_ID}\` before using the entry above — never both.`,
+        : loads === "unknown"
+          ? `eff print-config: warning: the ${PLUGIN_ID} plugin is enabled, but doctor cannot tell whether Claude Code loads it (\`eff doctor\` row 2 says why): \`claude plugin list\` shows it — if it is loaded, adding the entry above beside it starts two servers: use it only instead of the plugin (\`claude plugin uninstall ${PLUGIN_ID}\` first).`
+          : `eff print-config: warning: the ${PLUGIN_ID} plugin is enabled, but Claude Code cannot load it (\`eff doctor\` row 2 says why): re-add its marketplace, or \`claude plugin uninstall ${PLUGIN_ID}\` before using the entry above — never both.`,
     );
+  }
   return EXIT.ok;
 }
