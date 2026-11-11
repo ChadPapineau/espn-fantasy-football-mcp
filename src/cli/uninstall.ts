@@ -64,8 +64,10 @@ import { privatizeNewFile, resolveBackupDestination } from "./maintenance.js";
 import {
   cookieFindings,
   removeCommand,
+  samePath,
   scanClientConfig,
   scanPlugin,
+  whereOf,
   type ClientConfigScan,
   type PluginInstall,
 } from "./client-config.js";
@@ -287,6 +289,18 @@ export function findRegistrations(home: string): FoundRegistrations {
   };
 }
 
+/** Where the plugin Claude Code runs is (client-config.ts `PluginCopy.root`), for the first step. */
+function pluginWhere(plugin: PluginInstall): string {
+  const roots = [...new Set(plugin.copies.map((c) => c.root))].join(", ");
+  if (plugin.origin.kind !== "folder") return roots;
+  const leftovers = [
+    ...new Set(
+      plugin.copies.filter((c) => !samePath(c.installPath, c.root)).map((c) => c.installPath),
+    ),
+  ];
+  return `${roots}, read in place from its folder marketplace${leftovers.length === 0 ? "" : `; ${leftovers.join(", ")} is a leftover cache copy`}`;
+}
+
 const COOKIE_NOTE =
   "its env block holds an ESPN cookie (a key named ESPN_S2/SWID or a cookie-shaped value): removing the entry takes it out of that file — the file's backups and history may keep it, and logging out at espn.com is the only way to try to end the session";
 /** The same, for the plugin's own file (its entry stays: only the env key holding the cookie goes). */
@@ -301,8 +315,13 @@ const PLUGIN_FILE_COOKIE_NOTE =
  * default, removed from its project directory; project — `.mcp.json`, a file meant to be committed),
  * entries under another key included, and Claude Desktop's entry; an env block holding a cookie is
  * said. With nothing found, the generic user-scope and Desktop steps stand (Stage C findings
- * uninstall-steps-omit-plugin, uninstall-local-scope-registration-unnamed). Then the copy-installed
- * Skills, the ESPN session, the backups and the global package.
+ * uninstall-steps-omit-plugin, uninstall-local-scope-registration-unnamed) — unless this server's
+ * key there launches another package (client-config.ts `classifyEntry`): that one is left, and an
+ * entry whose package cannot be read is said without a remove command, so uninstall never steers
+ * the user to remove another project's server (found on the owner's Mac, 2026-11-11: the sibling's
+ * Yahoo server was counted as a registration of this one). The plugin is named where Claude Code
+ * reads it (in place from a folder marketplace). Then the copy-installed Skills, the ESPN session,
+ * the backups and the global package.
  */
 export function manualSteps(
   home: string,
@@ -310,7 +329,7 @@ export function manualSteps(
   found: FoundRegistrations = { scans: [], plugin: null },
 ): string[] {
   const out: string[] = [
-    `Claude Code with the plugin: claude plugin uninstall ${PLUGIN_ID}, then claude plugin marketplace remove ${MARKETPLACE_NAME} — until then every Claude Code session starts the server, which creates the cache again.${found.plugin === null ? "" : ` It is installed here (${found.plugin.copies.map((c) => c.installPath).join(", ")}${found.plugin.enabled ? "" : "; disabled"}).`} The plugin's league id and season settings live in Claude Code's settings: remove them there if the uninstall leaves them.`,
+    `Claude Code with the plugin: claude plugin uninstall ${PLUGIN_ID}, then claude plugin marketplace remove ${MARKETPLACE_NAME} — until then every Claude Code session starts the server, which creates the cache again.${found.plugin === null ? "" : ` It is installed here (${pluginWhere(found.plugin)}${found.plugin.enabled ? "" : "; disabled"}).`} The plugin's league id and season settings live in Claude Code's settings: remove them there if the uninstall leaves them.`,
   ];
   const codeAll = found.scans.filter((x) => x.client === "code").flatMap((x) => x.entries);
   // the plugin's own .mcp.json in a copy of the plugin is no registration: removing its entry
@@ -329,9 +348,16 @@ export function manualSteps(
           cookieFindings(b.env).length > 0,
       ),
     );
+  const notOurs = (client: "desktop" | "code", kind: "foreign" | "undetermined") =>
+    found.scans
+      .filter((x) => x.client === client)
+      .flatMap((x) => x.notOurs.filter((n) => n.kind === kind));
+  const foreignCode = notOurs("code", "foreign");
   if (code.length === 0)
     out.push(
-      `Claude Code without the plugin: claude mcp remove --scope user ${SERVER_NAME} (entries live in ${codeConfigPath(home)}; a local-scope entry is removed from its project directory with --scope local)`,
+      foreignCode.length === 0
+        ? `Claude Code without the plugin: claude mcp remove --scope user ${SERVER_NAME} (entries live in ${codeConfigPath(home)}; a local-scope entry is removed from its project directory with --scope local)`
+        : `Claude Code without the plugin: no \`claude mcp add\` entry of this server was found. The "${SERVER_NAME}" key in ${foreignCode.map((n) => whereOf(n.scope, n.dir)).join(", ")} launches another package, not this server: leave it (never run \`claude mcp remove ${SERVER_NAME}\` there).`,
     );
   for (const e of code) {
     const where =
@@ -351,9 +377,12 @@ export function manualSteps(
     );
     if (cookieIn(e)) out.push(`  ${PLUGIN_FILE_COOKIE_NOTE}`);
   }
+  const foreignDesktop = notOurs("desktop", "foreign");
   if (desktop.length === 0)
     out.push(
-      `Remove the "${SERVER_NAME}" entry from ${desktopConfigPath(home)} (Claude Desktop), then restart it; Skills you uploaded to Claude Desktop as zips are removed in its settings.`,
+      foreignDesktop.length === 0
+        ? `Remove the "${SERVER_NAME}" entry from ${desktopConfigPath(home)} (Claude Desktop), then restart it; Skills you uploaded to Claude Desktop as zips are removed in its settings.`
+        : `The "${SERVER_NAME}" entry in ${foreignDesktop.map((n) => n.file).join(", ")} (Claude Desktop) launches another package, not this server: leave it. Skills you uploaded to Claude Desktop as zips are removed in its settings.`,
     );
   for (const e of desktop) {
     out.push(
@@ -361,6 +390,11 @@ export function manualSteps(
     );
     if (cookieIn(e)) out.push(`  ${COOKIE_NOTE}`);
   }
+  // an entry whose package cannot be read: said, never given a remove command
+  for (const n of [...notOurs("code", "undetermined"), ...notOurs("desktop", "undetermined")])
+    out.push(
+      `An entry in ${n.scope === "desktop" ? `${n.file} (Claude Desktop)` : whereOf(n.scope, n.dir)} launches ${n.target ?? "?"}, and uninstall cannot tell what it launches (${n.why ?? "?"}): it is not removed here — check what it is before removing anything.`,
+    );
   // another server's env block holding an ESPN cookie: said (value-free), never edited
   for (const x of found.scans)
     for (const b of x.envBlocks)

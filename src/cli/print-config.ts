@@ -18,6 +18,13 @@ import { distEntry, write, writeLine, type CliIo } from "./io.js";
 export const SERVER_NAME = "espn-fantasy-football";
 /** The sibling's key: doctor #2 says both are installed when it is present (plan 03 §5 #2). */
 export const SIBLING_SERVER_NAME = "fantasy-football";
+/**
+ * This package's `package.json` `name`: a client entry whose `dist/cli.js` sits under a root of
+ * this name launches this server, whatever its key (client-config.ts `launchOf`).
+ */
+export const PACKAGE_NAME = "espn-fantasy-football-mcp";
+/** The sibling's (the Yahoo server's) `package.json` `name`: its entries, under any key, are not ours. */
+export const SIBLING_PACKAGE_NAME = "fantasy-football-mcp";
 /** The Claude Code plugin (`.claude-plugin/plugin.json` `name`) and its marketplace (this repo). */
 export const PLUGIN_NAME = "espn-fantasy-football";
 export const MARKETPLACE_NAME = "espn-fantasy-football-mcp";

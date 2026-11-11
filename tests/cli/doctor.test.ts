@@ -175,7 +175,16 @@ describe("rows #1–#3, #12, #13, #24, #25 (pure)", () => {
       (await checkLaunchConfig(io, [scanClientConfig("desktop", path.join(sb.dir, "bad.json"))]))
         .status,
     ).toBe("warn");
-    expect(isOurs("x", { args: ["/a/scripts/eff-launch.sh", "serve"] })).toBe(true);
+    // ours by what it launches (a shim under a copy of this plugin), never by the args' shape alone
+    const copy = path.join(sb.dir, "copy");
+    mkdirSync(path.join(copy, ".claude-plugin"), { recursive: true });
+    writeFileSync(
+      path.join(copy, ".claude-plugin", "plugin.json"),
+      JSON.stringify({ name: "espn-fantasy-football" }),
+    );
+    const shim = path.join(copy, "scripts", "eff-launch.sh");
+    expect(isOurs("x", { command: "/bin/sh", args: [shim, "serve"] })).toBe(true);
+    expect(isOurs("x", { args: ["/a/scripts/eff-launch.sh", "serve"] })).toBe(false);
     expect(isOurs("fantasy-football", { args: ["/a/dist/cli.js", "serve"] })).toBe(false);
     expect(isDataless(path.join(sb.dir, "none"))).toBe(false);
   });

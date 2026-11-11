@@ -55,10 +55,13 @@ import { VERSION } from "../version.js";
 import {
   cookieFindings,
   pluginVariables,
+  removeCommand,
+  samePath,
   scanClientConfig,
   scanPlugin,
   whereOf,
   type ClientConfigScan,
+  type ClientEntry,
   type PluginInstall,
 } from "./client-config.js";
 import { onlineRows } from "./doctor-online.js";
@@ -86,6 +89,7 @@ import { redactString, SecretRegistry, truncate, type Logger } from "./log.js";
 import {
   codeConfigPath,
   desktopConfigPath,
+  PLUGIN_ID,
   RUNTIME_LOCATION_FIX,
   SERVER_NAME,
   SIBLING_SERVER_NAME,
@@ -339,26 +343,45 @@ export async function shimResolution(io: CliIo, root: string = io.packageRoot): 
 }
 
 /**
- * Problems of an installed plugin copy (what Claude Code runs: `<installPath>/scripts/eff-launch.sh
- * serve` → `<installPath>/dist/cli.js`): its build and its shim must be there. A copy added from
- * GitHub carries no `dist/` (README step 5: the plugin comes from the built clone).
+ * Problems of the plugin Claude Code runs (`<root>/scripts/eff-launch.sh serve` →
+ * `<root>/dist/cli.js`: client-config.ts `PluginCopy.root`): its build and its shim must be there.
+ * A cache copy added from GitHub carries no `dist/` (README step 5: the plugin comes from the built
+ * clone); a plugin read in place from its folder marketplace (`inFolder`) is built there.
  */
-export function pluginCopyProblems(installPath: string): string[] {
+export function pluginCopyProblems(root: string, inFolder = false): string[] {
   const out: string[] = [];
   const has = (rel: string): boolean => {
     try {
-      return lstatSync(path.join(installPath, rel)).isFile();
+      return lstatSync(path.join(root, rel)).isFile();
     } catch {
       return false;
     }
   };
+  const what = inFolder ? `the plugin's folder ${root}` : `the plugin copy at ${root}`;
   if (!has(path.join("dist", "cli.js")))
     out.push(
-      `the plugin copy at ${installPath} has no dist/cli.js — install the plugin from the built clone (README step 5), not from GitHub`,
+      inFolder
+        ? `${what} has no dist/cli.js — Claude Code reads the plugin there: \`npm run build\` in it`
+        : `${what} has no dist/cli.js — install the plugin from the built clone (README step 5), not from GitHub`,
     );
-  if (!has(path.join("scripts", "eff-launch.sh")))
-    out.push(`the plugin copy at ${installPath} has no scripts/eff-launch.sh`);
+  if (!has(path.join("scripts", "eff-launch.sh"))) out.push(`${what} has no scripts/eff-launch.sh`);
   return out;
+}
+
+/**
+ * Where the plugin's root comes from, as one detail line (rows #2, #24): a folder read in place
+ * and its leftover cache copy, or a source doctor could not read (the cache copy is judged).
+ */
+function pluginOriginNote(
+  plugin: PluginInstall,
+  c: PluginInstall["copies"][number],
+): string | null {
+  const o = plugin.origin;
+  if (o.kind === "unknown")
+    return `the plugin's source is unknown — ${o.why} — so the cache copy ${c.installPath} is judged as what Claude Code runs`;
+  if (o.kind === "folder" && !samePath(c.installPath, c.root))
+    return `the cache copy ${c.installPath} is a leftover of an earlier install: Claude Code reads the plugin in place from its folder marketplace (${c.root}) and never runs that copy — nothing to do`;
+  return null;
 }
 
 /**
@@ -366,7 +389,12 @@ export function pluginCopyProblems(installPath: string): string[] {
  * README's recommended registration (Stage C finding doctor-plugin-install-invisible: a plugin user
  * was told no client launches the server and pointed at `--client code`, the duplicate registration
  * the README forbids). An enabled plugin beside a `claude mcp add` entry of ours is a warning: two
- * servers, every tool listed twice.
+ * servers, every tool listed twice — and its fix is that entry's own `claude mcp remove`. An entry is
+ * ours by what it launches (client-config.ts `classifyEntry`): the sibling's server under any key is
+ * "also installed (fine)", an entry under this server's key that launches another package is said
+ * and left alone, and one whose package cannot be read is said once — none is counted, called
+ * "entry ok" or offered for removal (found on the owner's Mac, 2026-11-11). The plugin is judged
+ * where Claude Code reads it (`PluginCopy.root`: in place from a folder marketplace).
  */
 export async function checkLaunchConfig(
   io: CliIo,
@@ -377,8 +405,10 @@ export async function checkLaunchConfig(
   const details: string[] = [];
   let hard = false;
   let soft = false;
+  let pluginHard = false;
+  let desktopHard = false;
   let found = 0;
-  let codeEntries = 0;
+  const codeRegistrations: ClientEntry[] = [];
   for (const s of scans) {
     if (s.state === "missing") {
       details.push(`${s.client}: no config at ${s.file}`);
@@ -394,6 +424,15 @@ export async function checkLaunchConfig(
       details.push(
         `${s.client}: the sibling's \`${SIBLING_SERVER_NAME}\` server is also installed (fine)`,
       );
+    // entries that are not this server: said, never counted, never offered for removal
+    for (const n of s.notOurs) {
+      const where = whereOf(n.scope, n.dir);
+      details.push(
+        n.kind === "foreign"
+          ? `${where}: the \`${SERVER_NAME}\` key launches another package, not this server — leave it`
+          : `${where}: an entry launches ${n.target ?? "?"}, and doctor cannot tell what it launches (${n.why ?? "?"}) — not counted as this server`,
+      );
+    }
     // the plugin's own .mcp.json in a copy of the plugin: said, never counted as a registration
     for (const e of s.entries)
       if (e.pluginSource)
@@ -407,7 +446,7 @@ export async function checkLaunchConfig(
     }
     for (const e of registrations) {
       found++;
-      if (s.client === "code") codeEntries++;
+      if (s.client === "code") codeRegistrations.push(e);
       const where = whereOf(e.scope, e.dir);
       if (e.name !== SERVER_NAME)
         details.push(
@@ -417,29 +456,38 @@ export async function checkLaunchConfig(
       if (p.hard.length === 0 && p.soft.length === 0) details.push(`${where}: entry ok`);
       for (const x of p.hard) details.push(`${where}: ${x}`);
       for (const x of p.soft) details.push(`${where}: warning: ${x}`);
-      if (p.hard.length > 0) hard = true;
+      if (p.hard.length > 0) {
+        hard = true;
+        if (s.client === "desktop") desktopHard = true;
+      }
       if (p.soft.length > 0) soft = true;
     }
   }
   const pluginOn = plugin?.enabled === true;
+  const inFolder = plugin?.origin.kind === "folder";
   if (plugin !== null) {
     for (const c of plugin.copies) {
       if (!plugin.enabled) {
-        details.push(`code: the plugin is installed (${c.installPath}) but disabled`);
+        details.push(`code: the plugin is installed (${c.root}) but disabled`);
         continue;
       }
       found++;
-      const problems = pluginCopyProblems(c.installPath);
+      const problems = pluginCopyProblems(c.root, inFolder);
       if (problems.length === 0)
         details.push(
-          `code: the plugin registers the server (${c.scope} scope${c.version === null ? "" : `, version ${c.version}`}, ${c.installPath})`,
+          `code: the plugin registers the server (${c.scope} scope${c.version === null ? "" : `, version ${c.version}`}, ${c.root}${inFolder ? ", read in place from its folder marketplace" : ""})`,
         );
+      const note = pluginOriginNote(plugin, c);
+      if (note !== null) details.push(`code: ${note}`);
       for (const x of problems) details.push(`code: ${x}`);
-      if (problems.length > 0) hard = true;
-      details.push(await shimResolution(io, c.installPath));
+      if (problems.length > 0) pluginHard = hard = true;
+      details.push(await shimResolution(io, c.root));
     }
   }
   if (!pluginOn) details.push(await shimResolution(io));
+  // the exact command that removes each `claude mcp add` entry beside the plugin
+  const removals = codeRegistrations.map((e) => `\`${removeCommand(e)}\``).join(", ");
+  const duplicateFix = `keep one: remove the \`claude mcp add\` entr${codeRegistrations.length === 1 ? "y" : "ies"} (${removals}), or uninstall the plugin (\`claude plugin uninstall ${PLUGIN_ID}\`); then restart the client`;
   if (hard)
     return row(
       2,
@@ -448,7 +496,20 @@ export async function checkLaunchConfig(
       "fail",
       "a client launches the server with a bad path, Node or location",
       pluginOn
-        ? "install the plugin again from the built clone (README step 5); replace any other entry with `eff print-config`'s output"
+        ? [
+            pluginHard
+              ? inFolder
+                ? "build the plugin's folder (`npm run build` there: Claude Code reads the plugin in place) and restart the client"
+                : "install the plugin again from the built clone (README step 5)"
+              : null,
+            // beside the plugin a `claude mcp add` entry is the duplicate: removed, never repaired
+            codeRegistrations.length > 0 ? duplicateFix : null,
+            desktopHard
+              ? "replace the Claude Desktop entry with the output of `eff print-config --client desktop`"
+              : null,
+          ]
+            .filter((x) => x !== null)
+            .join("; ")
         : "replace the entry with the output of `eff print-config --client desktop` (or --client code)",
       details,
     );
@@ -462,14 +523,14 @@ export async function checkLaunchConfig(
       "Claude Code: the plugin (README step 5); Claude Desktop: `eff print-config --client desktop`",
       details,
     );
-  if (pluginOn && codeEntries > 0)
+  if (pluginOn && codeRegistrations.length > 0)
     return row(
       2,
       "launch_config",
       title,
       "warn",
       "Claude Code registers this server twice: the plugin AND a `claude mcp add` entry — two servers, every tool listed twice",
-      "keep one: remove the entry (`eff uninstall --dry-run` prints its `claude mcp remove` command) or uninstall the plugin",
+      duplicateFix,
       details,
     );
   if (soft)
@@ -1736,36 +1797,78 @@ function mtimeOf(file: string): number | null {
   }
 }
 
+/** The newest mtime of a checkout's sources (`src/` and package.json). */
+function newestSourceOf(root: string): number {
+  return Math.max(
+    newestMtime(path.join(root, "src")),
+    mtimeOf(path.join(root, "package.json")) ?? 0,
+  );
+}
+
 /**
- * Row 24: in a checkout, dist/cli.js newer than every file under src/ and package.json — and every
- * enabled plugin copy (what Claude Code actually runs) built no earlier than this clone: README says
- * `claude plugin update` at an unchanged version keeps the old copy, which the clone's own check never
- * saw (Stage C finding doctor-plugin-install-invisible).
+ * Row 24: in a checkout, dist/cli.js newer than every file under src/ and package.json — and the
+ * plugin Claude Code actually runs (client-config.ts `PluginCopy.root`) not built before it. A cache
+ * copy (a plugin fetched from GitHub, a git URL…, or one whose source could not be read) must be
+ * built no earlier than this clone: README says `claude plugin update` at an unchanged version keeps
+ * the old copy, which the clone's own check never saw (Stage C finding
+ * doctor-plugin-install-invisible). A plugin a folder marketplace lists is read IN PLACE from that
+ * folder: it is this clone (the clone's own check is its check) or a folder judged against its own
+ * sources, and installed_plugins.json's cache copy is a leftover said once, never failed on (found
+ * on the owner's Mac, 2026-11-11: row 24 failed on the leftover while Claude Code ran the folder).
  */
 export function checkStaleBuild(root: string, plugin: PluginInstall | null = null): DoctorRow {
   const title = "Stale dist/";
   const copies = plugin?.enabled === true ? plugin.copies : [];
+  const inFolder = plugin?.origin.kind === "folder";
   const checkout = isCheckout(root);
   const clone = checkout ? mtimeOf(distEntry(root)) : null;
-  const newestSource = checkout
-    ? Math.max(newestMtime(path.join(root, "src")), mtimeOf(path.join(root, "package.json")) ?? 0)
-    : 0;
+  const newestSource = checkout ? newestSourceOf(root) : 0;
   const details: string[] = [];
-  let stale = 0;
+  let staleCopies = 0;
+  const staleFolders: string[] = [];
   for (const c of copies) {
-    const copy = mtimeOf(distEntry(c.installPath));
+    const note = plugin === null ? null : pluginOriginNote(plugin, c);
+    if (note !== null) details.push(note);
+    if (inFolder) {
+      if (samePath(c.root, root)) {
+        details.push(
+          `plugin folder ${c.root}: this clone (the package doctor runs from), read in place by Claude Code — its build is the one checked here`,
+        );
+        continue;
+      }
+      const built = mtimeOf(distEntry(c.root));
+      if (built === null) {
+        staleFolders.push(c.root);
+        details.push(`plugin folder ${c.root}: no dist/cli.js`);
+      } else if (isCheckout(c.root) && built < newestSourceOf(c.root)) {
+        staleFolders.push(c.root);
+        details.push(
+          `plugin folder ${c.root}: built before its own sources — Claude Code runs the old server`,
+        );
+      } else details.push(`plugin folder ${c.root}: current`);
+      continue;
+    }
+    const copy = mtimeOf(distEntry(c.root));
     if (copy === null) {
-      stale++;
-      details.push(`plugin copy ${c.installPath}: no dist/cli.js`);
+      staleCopies++;
+      details.push(`plugin copy ${c.root}: no dist/cli.js`);
     } else if (checkout && copy < Math.max(clone ?? 0, newestSource)) {
-      stale++;
+      staleCopies++;
       details.push(
-        `plugin copy ${c.installPath}: built before this clone's current build or sources — Claude Code runs the old server`,
+        `plugin copy ${c.root}: built before this clone's current build or sources — Claude Code runs the old server`,
       );
-    } else details.push(`plugin copy ${c.installPath}: current`);
+    } else details.push(`plugin copy ${c.root}: current`);
   }
-  const pluginFix =
-    "refresh the plugin's copy: `claude plugin uninstall espn-fantasy-football@espn-fantasy-football-mcp`, then install it again from the built clone (README Upgrade), and restart the client";
+  const unique = [...new Set(details)];
+  const copyFix = `refresh the plugin's copy: \`claude plugin uninstall ${PLUGIN_ID}\`, then install it again from the built clone (README Upgrade), and restart the client`;
+  const folderFix = (dirs: readonly string[]): string =>
+    `\`npm run build\` in ${[...new Set(dirs)].join(", ")} — Claude Code reads the plugin there, in place — then restart the client`;
+  // after this clone's own build: what makes Claude Code run it
+  const pluginFix = inFolder
+    ? copies.every((c) => samePath(c.root, root))
+      ? "restart the client (Claude Code reads the plugin in place from this clone)"
+      : null
+    : copyFix;
   if (!checkout && copies.length === 0)
     return row(24, "stale_build", title, "na", "not a checkout (installed package)");
   if (checkout && clone === null)
@@ -1776,7 +1879,7 @@ export function checkStaleBuild(root: string, plugin: PluginInstall | null = nul
       "warn",
       "dist/cli.js does not exist — the package is not built",
       "`npm run build`",
-      details,
+      unique,
     );
   if (checkout && (clone ?? 0) < newestSource)
     return row(
@@ -1785,27 +1888,41 @@ export function checkStaleBuild(root: string, plugin: PluginInstall | null = nul
       title,
       "fail",
       "dist/ is older than the sources — the client is launching an old server",
-      `\`npm run build\`${copies.length > 0 ? `, then ${pluginFix}` : ""}`,
-      details,
+      `\`npm run build\`${copies.length > 0 && pluginFix !== null ? `, then ${pluginFix}` : ""}${staleFolders.length > 0 ? `; ${folderFix(staleFolders)}` : ""}`,
+      unique,
     );
-  if (stale > 0)
+  if (staleFolders.length > 0)
     return row(
       24,
       "stale_build",
       title,
       "fail",
-      `${String(stale)} plugin cop${stale === 1 ? "y is" : "ies are"} older than this clone — Claude Code launches an old server`,
-      pluginFix,
-      details,
+      "the plugin folder Claude Code reads is not built from its current sources — Claude Code launches an old server",
+      folderFix(staleFolders),
+      unique,
+    );
+  if (staleCopies > 0)
+    return row(
+      24,
+      "stale_build",
+      title,
+      "fail",
+      `${String(staleCopies)} plugin cop${staleCopies === 1 ? "y is" : "ies are"} older than this clone — Claude Code launches an old server`,
+      copyFix,
+      unique,
     );
   return row(
     24,
     "stale_build",
     title,
     "ok",
-    checkout ? "dist/ is newer than every source file" : "the plugin copy is built",
+    checkout
+      ? "dist/ is newer than every source file"
+      : inFolder
+        ? "the plugin folder is built"
+        : "the plugin copy is built",
     null,
-    details,
+    unique,
   );
 }
 

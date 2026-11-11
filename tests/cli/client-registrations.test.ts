@@ -54,7 +54,7 @@ const write = (file: string, v: unknown): void => {
   writeFileSync(file, typeof v === "string" ? v : JSON.stringify(v));
 };
 
-/** A plugin copy as Claude Code's cache holds it: built (dist/cli.js) and with its shim. */
+/** A plugin copy as Claude Code's cache holds it: its manifests, built (dist/cli.js), its shim. */
 function pluginCopy(home: string, built = true): string {
   const copy = path.join(
     home,
@@ -67,6 +67,8 @@ function pluginCopy(home: string, built = true): string {
   );
   mkdirSync(path.join(copy, "scripts"), { recursive: true });
   writeFileSync(path.join(copy, "scripts", "eff-launch.sh"), "#!/bin/sh\n");
+  write(path.join(copy, ".claude-plugin", "plugin.json"), { name: "espn-fantasy-football" });
+  write(path.join(copy, "package.json"), { name: "espn-fantasy-football-mcp" });
   if (built) {
     mkdirSync(path.join(copy, "dist"), { recursive: true });
     writeFileSync(path.join(copy, "dist", "cli.js"), "x");
@@ -99,9 +101,14 @@ describe("the Claude Code plugin is a registration (doctor #2, #24; print-config
     expect(scanPlugin(sb.home)).toBeNull();
     const copy = pluginCopy(sb.home);
     installPlugin(sb.home, copy);
+    // no known_marketplaces.json: the source is unknown, and the cache copy is the root judged
     expect(scanPlugin(sb.home)).toEqual({
       enabled: true,
-      copies: [{ scope: "user", installPath: copy, version: "0.0.0" }],
+      origin: {
+        kind: "unknown",
+        why: `${path.join(sb.home, ".claude", "plugins", "known_marketplaces.json")} is missing`,
+      },
+      copies: [{ scope: "user", root: copy, installPath: copy, version: "0.0.0" }],
     });
     installPlugin(sb.home, copy, false);
     expect(scanPlugin(sb.home)?.enabled).toBe(false);
@@ -301,8 +308,13 @@ describe("uninstall names every registration it can see (the local scope, `claud
     sb = sandbox({ create: true });
     const local = path.join(sb.home, "some-project");
     const proj = path.join(sb.home, "repo");
+    // under another key, an entry is this server by what it launches: this package's dist/cli.js
+    const release = fakePackage(sb);
+    write(path.join(release, "package.json"), { name: "espn-fantasy-football-mcp" });
     write(path.join(sb.home, ".claude.json"), {
-      mcpServers: { "espn-ff": { command: "/n", args: ["/c/dist/cli.js", "serve"] } },
+      mcpServers: {
+        "espn-ff": { command: "/n", args: [path.join(release, "dist", "cli.js"), "serve"] },
+      },
       projects: {
         [local]: {
           mcpServers: {
