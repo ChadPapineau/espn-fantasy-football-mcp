@@ -56,12 +56,13 @@ import {
   codeSettingsPath,
   cookieFindings,
   duplicateRegistrations,
-  escapeControls,
   filedWhere,
   launchOf,
+  outputLine,
   pluginLoads,
   pluginMayLoad,
   pluginVariables,
+  quotedWord,
   removalOf,
   samePath,
   scanClientConfig,
@@ -69,6 +70,7 @@ import {
   whereOf,
   type ClientConfigScan,
   type ClientEntry,
+  type HeldEntry,
   type PluginInstall,
   type SessionView,
   type StrippedView,
@@ -472,12 +474,13 @@ function listedDirs(dirs: readonly string[]): string {
 }
 
 /**
- * One row-2 or uninstall line as printed: its terminal controls escaped (D-8: a path, key or name
- * read from a client config, settings file or registry is shown, never acted on), then the log
- * redaction patterns over it (R-P1, defence).
+ * One doctor line as printed (client-config.ts `outputLine`): the log redaction patterns over it
+ * (R-P1, defence), then its terminal controls escaped (D-8: a path, key or name read from a client
+ * config, settings file or registry is shown, never acted on) — in that order, so a pattern that
+ * needs the whitespace beside a secret still sees it (verifier V5-1).
  */
 export function redactedLine(line: string): string {
-  return redactString(escapeControls(line), new SecretRegistry());
+  return outputLine(line);
 }
 
 /**
@@ -534,8 +537,15 @@ function runsPluginLine(e: ClientEntry, root: string | null): boolean {
  * one is never printed (D-8); the plugin doctor cannot judge is followed, once repaired, by the
  * keep-one fix of a plugin Claude Code loads (VR4-1); and uninstalling the plugin turns this
  * server's key back on where the user-scope entry it adds would be off, with the removals planned
- * after those first steps (VR4-2, VR4-3). Doctor models Claude Code 2.1.308's rules; its known
- * limits are listed in docs/evals/stage-c-backlog.md.
+ * after those first steps (VR4-2, VR4-3). Refix round 6 (verifiers V5, VR5): each line is redacted
+ * before its controls are escaped (V5-1); an entry that is not this server under a key of ours at a
+ * narrower scope is what a session there starts, so ours is not counted there and no step relies
+ * on it — uninstalling the plugin then adds this server under a key no entry uses, or at local
+ * scope there (V5-2, V5-3, U2); a choice the keep rule leaves to the user says what stays beside
+ * the entries there (U5) and, outside the projects, which projects it strips (U3); one key is turned
+ * back on per project, said per key (U1); and beside a plugin Claude Code cannot load, its re-add is
+ * followed by the keep-one fix of a plugin it loads, never "never both" (F1). Doctor models Claude
+ * Code 2.1.308's rules; its known limits are listed in docs/evals/stage-c-backlog.md.
  */
 export async function checkLaunchConfig(
   io: CliIo,
@@ -570,6 +580,9 @@ async function launchConfigRow(
    * those in a view, but `/mcp enable` brings back one turned off: V3-1). */
   const codeAll: ClientEntry[] = [];
   const codeSessions: SessionView[] = [];
+  /** Every Claude Code entry that is not a registration of ours: under a key of ours at a narrower
+   * scope, it is what a session there starts (V5-2, V5-3). */
+  const codeHeld: HeldEntry[] = [];
   const desktopDuplicates: {
     file: string;
     most: number;
@@ -605,7 +618,10 @@ async function launchConfigRow(
         details.push(
           `${whereOf(e.scope, e.dir)}: the plugin's own .mcp.json in a copy of this plugin, not a registration — Claude Code opened in that directory reads it as a project server, which cannot start there (\${CLAUDE_PLUGIN_ROOT} and \${user_config.…} expand only in a plugin install): leave the file, and leave that project server unapproved there (\`disabledMcpjsonServers: ["${SERVER_NAME}"]\` in its .claude/settings.local.json declines it)`,
         );
-    if (s.client === "code") codeSessions.push(...s.sessions);
+    if (s.client === "code") {
+      codeSessions.push(...s.sessions);
+      codeHeld.push(...s.held);
+    }
     // a project directory doctor cannot stat is still a session: said (V3-5); so is one whose key
     // doctor cannot tell, whose local entries are then removed by hand (D-7 (d))
     for (const v of s.sessions)
@@ -745,8 +761,11 @@ async function launchConfigRow(
     pluginRuns || pluginMaybe
       ? { key: PLUGIN_SERVER_KEY, drops: (e) => runsPluginLine(e, pluginRoot) }
       : null,
+    codeHeld,
   );
-  if (pluginRuns || pluginMaybe) {
+  // the plugin turned off in a project: said wherever the fix weighs it — one Claude Code loads or
+  // may load, and one it cannot load yet whose re-add the fix offers (verifier F1)
+  if (pluginRuns || pluginMaybe || pluginUnresolved) {
     const offIn = codeSessions.filter((v) => v.disabled.includes(PLUGIN_SERVER_KEY));
     if (offIn.length > 0)
       details.push(
@@ -759,6 +778,13 @@ async function launchConfigRow(
     if (codeRegistrations.includes(o.entry))
       details.push(
         `${whereOf(o.entry.scope, o.entry.dir)}: turned off in ${listedDirs(o.dirs)} (\`/mcp disable\`: \`disabledMcpServers\` in ~/.claude.json) — Claude Code does not start it there`,
+      );
+  // a counted entry whose key another program's entry holds at a narrower scope in some projects:
+  // Claude Code starts that one there instead (V5-2, V5-3)
+  for (const o of code.overriddenIn)
+    if (codeRegistrations.includes(o.entry))
+      details.push(
+        `${whereOf(o.entry.scope, o.entry.dir)}: in ${listedDirs(o.dirs)}, an entry that is not this server holds its key at a narrower scope — Claude Code starts that one there instead`,
       );
   if (pluginRuns)
     for (const e of dropping)
@@ -780,22 +806,25 @@ async function launchConfigRow(
       })
       .join(", ");
   const entriesWord = (n: number): string => `entr${n === 1 ? "y" : "ies"}`;
-  // a key as the choices line names it: through the output redaction first, then quoted (F4)
+  // a key as the choices line names it: through the output redaction first, then quoted (F4, V5-1)
   const named = (es: readonly ClientEntry[]): string =>
-    [...new Set(es.map((e) => JSON.stringify(redactedLine(e.name))))].join(", ");
+    [...new Set(es.map((e) => quotedWord(e.name)))].join(", ");
   // where every removal would strip another session, which entry to keep is the user's (V-B);
-  // `/mcp disable` turns off a server of any scope in one project (F1); `beside`: the plugin kept
-  const choiceOf = (u: UnresolvedView, beside: boolean): string => {
+  // `/mcp disable` turns off a server of any scope in one project (F1); `u.beside`: what the plan
+  // keeps there beside the entries, so each of them goes there (U5: never where the plugin is off)
+  const choiceOf = (u: UnresolvedView): string => {
     const names = named(u.entries);
     const it = new Set(u.entries.map((e) => e.name)).size === 1 ? "it" : "them";
     if (u.dir === null)
-      return beside
-        ? `outside the projects Claude Code records, the plugin and ${names} start, and removing ${it} leaves a project that turns the plugin off with no server — turn the plugin back on there (\`/mcp enable ${PLUGIN_SERVER_KEY}\` in a session there), or keep ${it} only there (\`claude mcp add --scope local\` in that project, then ${commands(u.entries)})`
+      return u.beside === "plugin"
+        ? // the projects it would strip, named: turning the plugin back on anywhere else starts it
+          // beside an entry there (U3)
+          `outside the projects Claude Code records, the plugin and ${names} start, and removing ${it} leaves ${listedDirs(u.leaves)} (which turn${u.leaves.length === 1 ? "s" : ""} the plugin off) with no server — turn the plugin back on there (\`/mcp enable ${PLUGIN_SERVER_KEY}\` in a session in each), or keep ${it} only there (\`claude mcp add --scope local\` in each, then ${commands(u.entries)})`
         : `outside the projects Claude Code records, ${names} all start, and removing any of them leaves a project with no server — keep one at user scope and the others only in the projects that need them (\`claude mcp add --scope local\` there, then their \`claude mcp remove --scope user\`)`;
     const locals = u.entries.filter((e) => e.scope === "local");
     const how = `\`/mcp disable <name>\` in a session there${u.entries.some((e) => e.scope === "project") ? `; a project server can be declined in ${path.join(u.dir, ".claude", "settings.local.json")} instead, \`disabledMcpjsonServers\`` : ""}${locals.length === 0 ? "" : locals.every((e) => "command" in removalOf(e)) ? "; a local-scope entry is removed instead, with its own `claude mcp remove --scope local`" : `; a local-scope entry is removed instead: ${commands(locals)}`}`;
-    return beside
-      ? `in ${u.dir} (${names}, beside the plugin), removing ${it} leaves another directory with no server — turn ${it} off there (${how})`
+    return u.beside !== null
+      ? `in ${u.dir} (${names}, beside ${u.beside === "plugin" ? "the plugin" : "the entry the first step adds"}), removing ${it} leaves another directory with no server — turn ${it} off there (${how})`
       : `in ${u.dir} (${names}), removing any of them leaves another directory with no server — keep one there and turn the others off there (${how})`;
   };
   /** A plan's removals and the user's choices, as one clause (empty: nothing to do). */
@@ -803,62 +832,96 @@ async function launchConfigRow(
     extra: readonly ClientEntry[],
     unresolved: readonly UnresolvedView[],
     lead: string,
-    beside: boolean,
   ): string =>
     [
       ...(extra.length > 0 ? [`${lead} ${entriesWord(extra.length)} (${commands(extra)})`] : []),
-      ...unresolved.map((u) => choiceOf(u, beside)),
+      ...unresolved.map(choiceOf),
     ].join("; ");
   /** Without the plugin: the keep rule over the `claude mcp add` entries alone. */
-  const planB = clause(code.extra, code.unresolved, "remove the other", false);
-  /** With the plugin kept: the entries it makes extra (removing one running its line gives it back). */
-  const planA =
-    code.withPlugin === null
-      ? ""
-      : clause(
-          code.withPlugin.extra,
-          code.withPlugin.unresolved,
-          "remove the `claude mcp add`",
-          true,
-        );
-  /**
-   * Uninstalling the plugin (and the plan without it), offered as is only where that leaves every
-   * session a server; else with the sessions it would strip and what gives them one first (V3-1).
-   */
-  const uninstallPlugin = ((strips: readonly StrippedView[]): string => {
-    const plain = `uninstall the plugin (\`claude plugin uninstall ${PLUGIN_ID}\`)${planB === "" ? "" : ` and ${planB}`}`;
-    if (strips.length === 0) return plain;
-    // the plan once the first steps are done: the user-scope entry they add never starts beside
-    // another entry of this server (VR4-3)
-    const planU = clause(
-      code.withPlugin?.uninstallExtra ?? [],
-      code.withPlugin?.uninstallUnresolved ?? [],
-      "remove the other",
-      false,
-    );
-    const firstly = `uninstall the plugin (\`claude plugin uninstall ${PLUGIN_ID}\`)${planU === "" ? "" : ` and ${planU}`}`;
-    const outside = strips.some((v) => v.dir === null);
-    const dirs = strips.flatMap((v) => (v.dir === null ? [] : [v.dir]));
-    const offDirs = strips.filter((v) => v.dir !== null && v.off.length > 0);
-    const offKeys = [...new Set(offDirs.flatMap((v) => v.off))];
-    const where = [
-      ...(dirs.length > 0 ? [listedDirs(dirs)] : []),
-      ...(outside ? ["every session outside the projects Claude Code records"] : []),
-    ].join(" and ");
-    const first = [
-      ...(outside
+  const planB = clause(code.extra, code.unresolved, "remove the other");
+  /** Where `espn-fantasy-football` is another program's, so the entry a step adds takes a spare key. */
+  const heldWhy = (heldIn: readonly (string | null)[]): string =>
+    [
+      ...(heldIn.includes(null)
         ? [
-            "this server is added at user scope (`eff print-config --client code` prints the command)",
+            `\`${SERVER_NAME}\` at user scope is another program's entry, so \`claude mcp add\` refuses it`,
           ]
         : []),
-      ...(offKeys.length > 0
+      ...(heldIn.some((d) => d !== null)
         ? [
-            `${[...new Set(offKeys.map((k) => JSON.stringify(redactedLine(k))))].join(", ")} ${offKeys.length === 1 ? "is" : "are"} turned back on in ${listedDirs(offDirs.flatMap((v) => (v.dir === null ? [] : [v.dir])))} (\`/mcp enable <name>\` in a session there)`,
+            `in ${listedDirs(heldIn.flatMap((d) => (d === null ? [] : [d])))} an entry that is not this server holds \`${SERVER_NAME}\` at a narrower scope, which Claude Code starts there instead`,
+          ]
+        : []),
+    ].join("; ");
+  /**
+   * The two ways to keep one beside a plugin Claude Code loads, from a plan made with it: keep the
+   * plugin (the entries it makes extra; removing one running its line gives it back), or uninstall
+   * it — offered as is only where that leaves every session a server, else with the sessions it
+   * would strip and what gives each one first (V3-1, VR4-2, U1, U2, V5-2, V5-3).
+   */
+  const keepOne = (
+    w: NonNullable<typeof code.withPlugin>,
+  ): { planA: string; uninstallPlugin: string } => {
+    const planA = clause(w.extra, w.unresolved, "remove the `claude mcp add`");
+    const strips = w.uninstallStrips;
+    const plain = `uninstall the plugin (\`claude plugin uninstall ${PLUGIN_ID}\`)${planB === "" ? "" : ` and ${planB}`}`;
+    if (strips.length === 0) return { planA, uninstallPlugin: plain };
+    // the plan once the first steps are done: what they add never starts beside another entry of
+    // this server (VR4-3)
+    const planU = clause(w.uninstallExtra, w.uninstallUnresolved, "remove the other");
+    const firstly = `uninstall the plugin (\`claude plugin uninstall ${PLUGIN_ID}\`)${planU === "" ? "" : ` and ${planU}`}`;
+    const projects = strips.flatMap((v) => (v.dir === null ? [] : [{ ...v, dir: v.dir }]));
+    const where = [
+      ...(projects.length > 0 ? [listedDirs(projects.map((v) => v.dir))] : []),
+      ...(strips.some((v) => v.dir === null)
+        ? ["every session outside the projects Claude Code records"]
+        : []),
+    ].join(" and ");
+    const add = w.uninstallAdd;
+    const grouped = (pick: (v: StrippedView) => readonly string[]): [string, string[]][] => {
+      const by = new Map<string, string[]>();
+      for (const v of projects) for (const k of pick(v)) by.set(k, [...(by.get(k) ?? []), v.dir]);
+      return [...by];
+    };
+    // one key turned back on per project, said per key (U1: the union of keys over the union of
+    // projects turned a second one on where one was enough)
+    const on = grouped((v) => v.off);
+    const local = grouped((v) => (v.addLocal === undefined ? [] : [v.addLocal]));
+    const bare =
+      add === null
+        ? projects.filter((v) => v.off.length === 0 && v.addLocal === undefined).map((v) => v.dir)
+        : [];
+    const first = [
+      ...(add === null
+        ? []
+        : [
+            add.key === SERVER_NAME
+              ? "this server is added at user scope (`eff print-config --client code` prints the command)"
+              : `this server is added at user scope under the key \`${add.key}\` (\`eff print-config --client code\` prints the command: give it that key — ${heldWhy(add.heldIn)})`,
+          ]),
+      ...(on.length > 0
+        ? [
+            `${on.map(([k, ds], i) => `${quotedWord(k)} ${i === 0 ? "is turned back on in" : "in"} ${listedDirs(ds)}`).join(" and ")} (\`/mcp enable <name>\` in a session there)`,
+          ]
+        : []),
+      ...(local.length > 0
+        ? [
+            `this server is added at local scope ${local.map(([k, ds]) => `under the key \`${k}\` in ${listedDirs(ds)}`).join(" and ")} (in a terminal there, the command \`eff print-config --client code\` prints, with \`--scope local\` and that key)`,
+          ]
+        : []),
+      ...(bare.length > 0
+        ? [
+            `${listedDirs(bare)} ${bare.length === 1 ? "starts an entry of its own" : "each start an entry of their own"}`,
           ]
         : []),
     ];
-    return `${firstly} — only once ${first.length > 0 ? first.join(" and ") : "they start an entry of their own"}: uninstalling it now leaves ${where} with no server`;
-  })(code.withPlugin?.uninstallStrips ?? []);
+    return {
+      planA,
+      uninstallPlugin: `${firstly} — only once ${first.join(" and ")}: uninstalling it now leaves ${where} with no server`,
+    };
+  };
+  const { planA, uninstallPlugin } =
+    code.withPlugin === null ? { planA: "", uninstallPlugin: "" } : keepOne(code.withPlugin);
   const duplicateMessages: string[] = [];
   const duplicateFixes: string[] = [];
   if (worst.servers > 1) {
@@ -894,19 +957,24 @@ async function launchConfigRow(
       `${PLUGIN_LIST}: if it does, keep one: ${[planA, uninstallPlugin].filter((x) => x !== "").join(", or ")}; if it does not, ${planB === "" ? `keep the ${entriesWord(live.length)}` : `keep one: ${planB}`} — or ${registryUnjudged ? "repair ~/.claude/plugins/known_marketplaces.json as row 2's detail says" : "repair the plugin's source in its marketplace listing as row 2's detail says (the runtime clone's committed listing names it `./`, README step 5)"} so that it loads the plugin, then keep one as for a plugin it loads (above); then restart the client`,
     );
   else if (worst.servers > 1) duplicateFixes.push(`keep one: ${planB}; then restart the client`);
+  /** Claude Desktop's duplicates: their own fix, whatever the plugin's state. */
+  const desktopFixes: string[] = [];
   for (const d of desktopDuplicates) {
     duplicateMessages.push(
       `Claude Desktop registers this server ${timesWord(d.most)}: ${countWord(d.most)} entries under different keys — ${countWord(d.most)} servers, every tool listed ${timesWord(d.most)}`,
     );
-    duplicateFixes.push(
+    desktopFixes.push(
       `keep one: remove the ${d.extra.map((e) => `"${e.name}"`).join(", ")} ${entriesWord(d.extra.length)} from ${d.file} (Claude Desktop); then restart it`,
     );
   }
-  // where the fix offers uninstalling the plugin once this server is added at user scope, that
-  // entry is off in a stripped project that turned its key off: said (VR4-2), the fix turning it
-  // back on there
+  // where the fix offers uninstalling the plugin once this server is added at user scope under its
+  // own key, that entry is off in a stripped project that turned the key off: said (VR4-2), the fix
+  // turning it back on there — never where the fix adds no such entry (M1)
   const strips = code.withPlugin?.uninstallStrips ?? [];
-  if (((pluginRuns && worst.servers > 1) || maybeBeside) && strips.some((v) => v.dir === null)) {
+  if (
+    ((pluginRuns && worst.servers > 1) || maybeBeside) &&
+    code.withPlugin?.uninstallAdd?.key === SERVER_NAME
+  ) {
     const keyOff = strips.flatMap((v) =>
       v.dir !== null && v.off.includes(SERVER_NAME) ? [v.dir] : [],
     );
@@ -915,7 +983,34 @@ async function launchConfigRow(
         `code: \`${SERVER_NAME}\` is turned off in ${listedDirs(keyOff)} (\`/mcp disable\`: \`disabledMcpServers\` in ~/.claude.json) — the user-scope entry the fix adds does not start there until it is turned back on`,
       );
   }
-  const duplicateFix = duplicateFixes.length > 0 ? duplicateFixes.join("; ") : null;
+  const duplicateFix =
+    duplicateFixes.length + desktopFixes.length > 0
+      ? [...duplicateFixes, ...desktopFixes].join("; ")
+      : null;
+  // a plugin Claude Code cannot load beside `claude mcp add` entries: re-adding it is followed by
+  // the keep-one fix of a plugin it loads, planned now — never "never both", which kept only the
+  // plugin and stripped a project that turns it off (verifier F1) — or the plugin goes and the
+  // entries stay (it starts nothing now, so no session loses a server)
+  const reAdd =
+    origin?.kind === "unloaded"
+      ? origin.registry === "unreadable"
+        ? UNREADABLE_REGISTRY_FIX
+        : UNRECORDED_PLUGIN_FIX
+      : UNRESOLVED_PLUGIN_FIX;
+  const asIf =
+    pluginUnresolved && live.length > 0
+      ? duplicateRegistrations(
+          codeAll,
+          codeSessions,
+          { key: PLUGIN_SERVER_KEY, drops: () => false },
+          codeHeld,
+        ).withPlugin
+      : null;
+  const once = asIf !== null && asIf.worst.servers > 1 ? keepOne(asIf).planA : "";
+  const unloadableFix =
+    live.length === 0
+      ? reAdd
+      : `${reAdd}${once === "" ? "" : `, and once it loads keep one: ${once}`} — or \`claude plugin uninstall ${PLUGIN_ID}\` and keep the \`claude mcp add\` ${entriesWord(live.length)} instead${planB === "" ? "" : `: ${planB}`}`;
   if (hard)
     return row(
       2,
@@ -933,19 +1028,18 @@ async function launchConfigRow(
         ? [
             pluginHard
               ? pluginUnresolved
-                ? `${
-                    origin?.kind === "unloaded"
-                      ? origin.registry === "unreadable"
-                        ? UNREADABLE_REGISTRY_FIX
-                        : UNRECORDED_PLUGIN_FIX
-                      : UNRESOLVED_PLUGIN_FIX
-                  }${live.length > 0 ? ` — or keep the \`claude mcp add\` ${entriesWord(live.length)} instead and \`claude plugin uninstall ${PLUGIN_ID}\`: never both` : ""}`
+                ? unloadableFix
                 : inFolder
                   ? "build the plugin's folder (`npm run build` there: Claude Code reads the plugin in place) and restart the client"
                   : "install the plugin again from the built clone (README step 5)"
               : null,
             // beside the plugin a `claude mcp add` entry is the duplicate: removed, never repaired
-            duplicateFix,
+            // (beside one it cannot load, the entries' own keep-one is part of its fix, above)
+            pluginUnresolved
+              ? desktopFixes.length > 0
+                ? desktopFixes.join("; ")
+                : null
+              : duplicateFix,
             desktopHard
               ? "replace the Claude Desktop entry with the output of `eff print-config --client desktop`"
               : null,
@@ -1051,7 +1145,8 @@ export function checkClientSecrecy(scans: readonly ClientConfigScan[]): DoctorRo
     "config",
     "a client config holds a cookie-shaped value — the client config is not a secret store",
     "remove it from the env block (cookies live only in the credential store; `eff setup` puts them there), then restart the client; a project .mcp.json is a file meant to be committed: check its history",
-    [...new Set(details)],
+    // a directory read from the client config, through the output redaction as row 2's (V5-4)
+    [...new Set(details)].map(redactedLine),
   );
 }
 
@@ -2173,7 +2268,8 @@ export async function checkSetupPort(io: CliIo, config: LenientConfig | null): P
         "setup_port",
         title,
         "ok",
-        `127.0.0.1:${String(p)} is free for \`eff setup --page\``,
+        // (no address in the line: the output redaction would print it as `[ip]`)
+        `port ${String(p)} on the loopback interface is free for \`eff setup --page\``,
       );
     if (explicit !== null) {
       const owner = await portOwner(io.exec, p);
@@ -2853,12 +2949,14 @@ export async function runDoctor(io: CliIo, opts: DoctorOptions): Promise<DoctorR
     generated_at: io.clock.nowIso(),
     online: opts.online,
     exit_code: exitCodeFor(rows),
-    // every row as printed, text and --json: terminal controls escaped (D-8)
+    // every row as printed, text and --json: the output redaction, then terminal controls escaped
+    // (D-8; verifier V5-4: a path read from a client config or registry is printed by rows 3 and 24
+    // too, so D-6's pseudonymizing holds for every row, not row 2 alone)
     rows: rows.map((r) => ({
       ...r,
-      message: escapeControls(r.message),
-      fix: r.fix === null ? null : escapeControls(r.fix),
-      details: r.details.map(escapeControls),
+      message: outputLine(r.message),
+      fix: r.fix === null ? null : outputLine(r.fix),
+      details: r.details.map(outputLine),
     })),
   };
 }

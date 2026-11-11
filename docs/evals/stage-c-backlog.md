@@ -838,6 +838,13 @@ the owner's delegation:
   worktrees.
 - **D-3 — the keep rule is greedy** (accepted). It never strips a session's only server, and where
   it cannot settle a view it names the choice as the user's; no global search.
+- **One entry per key (round-6 verifiers V5-2, V5-3, U2; Claude Code 2.1.308's `dC`).** A session
+  starts one server per key, the narrowest scope's: the local scope over the approved project
+  servers over the user scope, and of the `.mcp.json` files the nearer over the farther. An entry
+  that is not this server under one of this server's keys at a narrower scope is what a session
+  there starts, so doctor does not count ours there and no fix step relies on it there. Doctor
+  takes every project server not declined (`disabledMcpjsonServers`) as approved, as it does for
+  counting (R-P5a); one still awaiting approval does not override in Claude Code.
 - **D-4 — optional source fields are not checked.** The optional fields of each marketplace source
   type (github `ref`/`sparsePaths`/`skipLfs`, url `headers`, npm name syntax, a settings plugin's
   own source fields) are not checked; a file Claude Code wrote passes them.
@@ -873,7 +880,10 @@ the owner's delegation:
   control: the C0 controls, DEL, the C1 controls (U+0080–U+009F), the Unicode bidi controls (U+061C,
   U+200E, U+200F, U+202A–U+202E, U+2066–U+2069) and U+2028/U+2029 are printed escaped (ESC as
   `\u{1b}`) at each output's choke point (row 2's `redactedLine`, every doctor row, uninstall's
-  step lines, print-config's warnings). A command whose words hold one is never printed; the line
+  step lines, print-config's warnings). Doctor's and uninstall's lines pass the log redaction
+  first and are escaped after it (round-6 verifier V5-1: escaped first, a TAB before a fake league
+  id hid it from the pattern), every doctor row included (V5-4), and a word quoted in a line is
+  redacted before it is quoted. A command whose words hold one is never printed; the line
   says that the entry's key or directory holds a control character and gives the hand edit of its
   record instead. print-config's stdout snippet is built from this install's own paths and is
   printed as it runs.

@@ -59,13 +59,13 @@ import { EXIT } from "./exit.js";
 import { isTty, writeLine, type CliIo } from "./io.js";
 import { JOB_STATE_FILE, JOB_STATE_LOCK, NOTIFICATION_LOG_FILE } from "./job-state.js";
 import { JOB_NAMES, logDir, removeJobs } from "./launchd.js";
-import { redactString, SecretRegistry, type Logger } from "./log.js";
+import type { Logger } from "./log.js";
 import { privatizeNewFile, resolveBackupDestination } from "./maintenance.js";
 import {
   cookieFindings,
-  escapeControls,
   filedWhere,
   gitWorkTreeAt,
+  outputLine,
   realPathOnceMade,
   removalOf,
   shellWord,
@@ -411,12 +411,11 @@ export function manualSteps(
   copiedSkills: readonly string[] = [],
   found: FoundRegistrations = { scans: [], plugin: null },
 ): string[] {
-  // every line shows its terminal controls escaped (D-8: what a client config, settings file or
-  // registry holds is shown, never acted on) and passes the log redaction patterns (verifier R-P1:
-  // defence in depth — no word holding more than a path is printed in the first place)
-  return stepLines(home, copiedSkills, found).map((l) =>
-    redactString(escapeControls(l), new SecretRegistry()),
-  );
+  // every line passes the log redaction patterns (verifier R-P1: defence in depth — no word holding
+  // more than a path is printed in the first place), then shows its terminal controls escaped (D-8:
+  // what a client config, settings file or registry holds is shown, never acted on) — in that
+  // order, so a pattern that needs the whitespace beside a secret still sees it (V5-1)
+  return stepLines(home, copiedSkills, found).map(outputLine);
 }
 
 function stepLines(

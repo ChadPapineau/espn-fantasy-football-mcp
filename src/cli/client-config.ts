@@ -68,10 +68,19 @@
 // file or registry is printed with its terminal controls escaped, and a command whose words hold one
 // is never printed (`escapeControls`, `holdsControl`); and uninstalling the plugin's first steps are
 // planned with what they add (VR4-2, VR4-3).
+//
+// Refix round 6 (verifiers V5, VR5): a line is redacted before its controls are escaped, so a
+// pattern that needs the whitespace beside a secret still sees it (`outputLine`; V5-1); an entry that
+// is not this server but holds one of its keys at a narrower scope is what Claude Code 2.1.308 starts
+// there (its dC: local over project over user, the nearer `.mcp.json` over the farther), so ours is
+// not started there and no step relies on it (`ClientConfigScan.held`; V5-2, V5-3, U2); and each
+// choice the keep rule leaves to the user says what it keeps beside the entries and, outside the
+// projects, which projects it would strip (U1, U3, U5).
 import { lstatSync, realpathSync, statSync } from "node:fs";
 import path from "node:path";
 import { PathSecurityError, readSecureFile } from "../config/paths.js";
 import { looksLikeCredentialValue } from "../config/schema.js";
+import { redactString, SecretRegistry } from "./log.js";
 import {
   MARKETPLACE_NAME,
   PACKAGE_NAME,
@@ -220,6 +229,20 @@ export interface NotOursEntry {
   readonly why: string | null;
 }
 
+/**
+ * An entry that is not a registration of this server — another program's, one doctor cannot tell, or
+ * the plugin's own `.mcp.json` declaration in a copy of the plugin — by its key and where it lives.
+ * Claude Code 2.1.308 starts one server per key in a session, the narrowest scope's (its dC: the
+ * local scope over the approved project servers over the user scope; of the `.mcp.json` files, the
+ * nearer over the farther): such an entry under a key of this server's at a narrower scope is what a
+ * session there starts, never ours (verifiers V5-2, V5-3, U2).
+ */
+export interface HeldEntry {
+  readonly name: string;
+  readonly scope: RegistrationScope;
+  readonly dir: string | null;
+}
+
 /** A parsed client config and our entries in it. */
 export interface ClientConfigScan {
   readonly client: "desktop" | "code";
@@ -236,6 +259,11 @@ export interface ClientConfigScan {
   readonly siblingInstalled: boolean;
   /** The other entries that must be said (`NotOursEntry`). */
   readonly notOurs: readonly NotOursEntry[];
+  /**
+   * Every entry that is not a registration of this server (`HeldEntry`): its key, never printed but
+   * where it is one of this server's, decides which entry Claude Code starts under that key.
+   */
+  readonly held: readonly HeldEntry[];
   /** Claude Code: the project `.mcp.json` files read (project scope), and those that were not JSON. */
   readonly projectFiles: readonly { readonly file: string; readonly state: "ok" | "invalid" }[];
   /** Claude Code: the session directories and what each declines (`SessionView`). */
@@ -349,6 +377,25 @@ export function holdsControl(s: string): boolean {
  */
 export function escapeControls(s: string): string {
   return s.replace(TERMINAL_CONTROL_RE, (c) => `\\u{${(c.codePointAt(0) ?? 0).toString(16)}}`);
+}
+
+/**
+ * A line as doctor and uninstall print it: the log redaction patterns first (R-P1, defence: a
+ * credential-shaped word in a key or path is pseudonymized — ruling D-6), then every terminal control
+ * escaped (D-8). In that order (verifier V5-1): a pattern that needs the whitespace beside a secret
+ * (`leagueId=<TAB><id>`, `Bearer<TAB><token>`) no longer sees it once the TAB is `\u{9}`.
+ */
+export function outputLine(s: string): string {
+  return escapeControls(redactString(s, new SecretRegistry()));
+}
+
+/**
+ * A word read from a file, JSON-quoted for a line that names it (a key, a projects key): redacted
+ * before it is quoted (F4, V5-1 — quoting turns a TAB into `\t`, which no pattern reads as
+ * whitespace), its controls escaped by `outputLine` with the rest of the line.
+ */
+export function quotedWord(s: string): string {
+  return JSON.stringify(redactString(s, new SecretRegistry()));
 }
 
 /** A path or word read from a file, for a detail line: control characters dropped, bounded. */
@@ -960,6 +1007,7 @@ export function scanClientConfig(client: "desktop" | "code", file: string): Clie
     others: 0,
     siblingInstalled: false,
     notOurs: [],
+    held: [],
     projectFiles: [],
     sessions: [],
   } as const;
@@ -969,6 +1017,7 @@ export function scanClientConfig(client: "desktop" | "code", file: string): Clie
   const entries: ClientEntry[] = [];
   const envBlocks: EnvBlock[] = [];
   const notOurs: NotOursEntry[] = [];
+  const held: HeldEntry[] = [];
   let others = 0;
   let siblingInstalled = false;
   /** `pluginCopy`: the map is the `.mcp.json` of a copy of this plugin (`isPluginRoot`). */
@@ -997,7 +1046,10 @@ export function scanClientConfig(client: "desktop" | "code", file: string): Clie
           declinedBy: [],
           absent: false,
         });
-      } else others++;
+      } else {
+        others++;
+        held.push({ name, scope: m.scope, dir: m.dir });
+      }
     }
   };
   for (const m of scopedServerMaps(client, read.value)) take(m, file);
@@ -1012,6 +1064,7 @@ export function scanClientConfig(client: "desktop" | "code", file: string): Clie
       others,
       siblingInstalled,
       notOurs,
+      held,
     };
   const known = projectDirs(read.value);
   const seen = new Set<string>();
@@ -1134,6 +1187,7 @@ export function scanClientConfig(client: "desktop" | "code", file: string): Clie
     others,
     siblingInstalled,
     notOurs,
+    held,
     projectFiles,
     sessions,
   };
@@ -1226,7 +1280,7 @@ export function removalOf(
 ): { readonly command: string } | { readonly byHand: string } {
   const why = byHandWhy(e);
   if (why === null) return { command: removeCommand(e) };
-  const q = (s: string): string => JSON.stringify(s);
+  const q = quotedWord;
   const closed = "with every Claude Code session closed and the file backed up first";
   switch (e.scope) {
     case "user":
@@ -1248,16 +1302,47 @@ export function removalOf(
 export interface UnresolvedView {
   /** The session directory, or null: a session outside every project Claude Code records. */
   readonly dir: string | null;
-  /** The `claude mcp add` entries still there (never the plugin). */
+  /** The `claude mcp add` entries still there (never the plugin, nor an entry a step adds). */
   readonly entries: readonly ClientEntry[];
+  /**
+   * What the plan keeps there beside them, so that every one of them goes there (turned off): the
+   * plugin, or the entry an uninstall step adds — null: one of them is kept there (verifier U5: a
+   * project that turned the plugin off was told to turn every entry off).
+   */
+  readonly beside: "plugin" | "added" | null;
+  /**
+   * Outside the projects, beside the plugin: the projects that turn the plugin off and start none of
+   * this server's entries but these, which removing them would leave with no server (verifier U3).
+   */
+  readonly leaves: readonly string[];
 }
 
 /** A view where uninstalling the plugin (and the plan without it) leaves no server (V3-1). */
 export interface StrippedView {
   /** The session directory, or null: the sessions outside every project Claude Code records. */
   readonly dir: string | null;
-  /** The keys of entries that reach it but `/mcp disable` turned off there (`/mcp enable` restores). */
+  /**
+   * The key turned back on there (`/mcp enable`; at most one: more would only be removed again) —
+   * of an entry `/mcp disable` turned off there that Claude Code would start there (VR4-2, V5-2).
+   */
   readonly off: readonly string[];
+  /**
+   * Nothing of this server's reaches it to turn back on: the key this server is added under at
+   * local scope there (this server's own where no entry there holds it, else one no entry uses).
+   */
+  readonly addLocal?: string;
+}
+
+/** The entry an uninstall step adds at user scope (`duplicateRegistrations`), and why its key. */
+export interface UninstallAdd {
+  /** `espn-fantasy-football`, or — where that key is another program's — one no entry uses. */
+  readonly key: string;
+  /**
+   * Where another program's entry holds `espn-fantasy-football` so that this server cannot start
+   * under it (null: the user scope, where `claude mcp add` refuses a key it holds — U2; a project:
+   * a narrower scope there, which Claude Code starts instead — V5-2, V5-3). Empty for that key.
+   */
+  readonly heldIn: readonly (string | null)[];
 }
 
 /** The plugin beside the registrations, as `duplicateRegistrations` counts it. */
@@ -1268,6 +1353,15 @@ export interface PluginBeside {
   readonly drops: (e: ClientEntry) => boolean;
 }
 
+/** An entry as the keep rule places it: its key and where it lives. */
+type Placed = Pick<ClientEntry, "name" | "scope" | "dir">;
+
+/** The keys tried, in order, for an entry a step adds where this server's own key is taken. */
+function* spareKeys(): Generator<string> {
+  yield PACKAGE_NAME;
+  for (let i = 2; ; i++) yield `${SERVER_NAME}-${String(i)}`;
+}
+
 /**
  * Registrations of this server that run beside each other in one client (README "One registration
  * per client"; verifier A-F3: two `claude mcp add` entries under different keys, without the
@@ -1275,9 +1369,12 @@ export interface PluginBeside {
  * directories (the projects it records that still exist) sees the user scope, that directory's local
  * scope, and the project scope of its `.mcp.json` and every ancestor's (R-P5b), less the project
  * servers its settings decline (R-P5a) and every server `/mcp disable` turned off there, whatever its
- * scope (F1); a session outside them sees the user scope alone. A parent directory's `.mcp.json`
- * counts only in the views of the sessions below it — never as a view of its own (verifier V-B). A
- * key at a narrower scope overrides the same key at a wider one, so each view starts one server per
+ * scope (F1); a session outside them sees the user scope alone. Under one key it starts the narrowest
+ * scope's entry (its dC: local over project over user, the nearer `.mcp.json` over the farther), so
+ * an entry that is not this server (`held`: another program's, one doctor cannot tell, the plugin's
+ * own declaration) at a narrower scope under a key of ours is what starts there, never ours (V5-2,
+ * V5-3: `overriddenIn` says where). A parent directory's `.mcp.json` counts only in the views of the
+ * sessions below it — never as a view of its own (verifier V-B). Each view starts one server per
  * DISTINCT key. Claude Desktop: one map, one server per key. `views`: each view's entries; `most`:
  * the most servers one view starts; `extra`: the entries whose removal leaves one key in each view it
  * can — never leaving a view that starts a server with none (V-B: a session declining the entry kept
@@ -1289,80 +1386,114 @@ export interface PluginBeside {
  * With `plugin` (one Claude Code may load): `withPlugin` counts it in each view where it is not
  * turned off and no entry running its command line drops it (`worst`; `beside`: such a view holds an
  * entry too), and plans the fix that keeps it — each entry removed where the plugin stays, none whose
- * removal strips a view that turned the plugin off (F1), the plugin's views settled first; a removed
- * entry running its command line gives the plugin back; and `uninstallStrips`: the views where the
- * plugin is started and the plan without it leaves no entry — uninstalling the plugin would leave
- * them with no server (V3-1), each with the keys turned off there that `/mcp enable` brings back
- * (where the sessions outside the projects are stripped, the fix adds this server at user scope, so
- * a stripped project that turned `espn-fantasy-football` off turns it back on too: VR4-2); and
- * `uninstallExtra`/`uninstallUnresolved`: the keep rule over the views as those first steps leave
- * them, the plan that follows the uninstall then (VR4-3: the user-scope entry the step adds never
- * starts beside another entry of this server). `offIn`: each entry that reaches a session where
- * `/mcp disable` turned it off, and those sessions (V3-1: said, the way the plugin's off state is).
- * The ranking's reach is counted over the views each plan settles. The greedy rule is accepted as
- * such (D-3).
+ * removal strips a view that turned the plugin off (F1), the plugin's views settled first, each
+ * unresolved view saying whether the plugin stays there (U5) and, outside the projects, which projects
+ * the choice would strip (U3); a removed entry running its command line gives the plugin back; and
+ * `uninstallStrips`: the views where the plugin is started and the plan without it leaves no entry —
+ * uninstalling the plugin would leave them with no server (V3-1), each with what gives it one first:
+ * where the sessions outside the projects are stripped, this server added at user scope
+ * (`uninstallAdd`: under `espn-fantasy-football` where Claude Code would start it in every stripped
+ * project, turned back on where a project turned that key off — VR4-2 — else under a key no entry
+ * uses, as another program's entry holds that one: U2, V5-2, V5-3); else, in each stripped project,
+ * the best-ranked entry `/mcp disable` turned off there that Claude Code would start there, or this
+ * server added at local scope there where nothing is (and doctor can tell which record that command
+ * writes: D-7 (d)); and `uninstallExtra`/`uninstallUnresolved`: the keep rule over the views as those
+ * first steps leave them, what the steps add kept (VR4-3: the entry a step adds never starts beside
+ * another entry of this server). `offIn`: each entry that reaches a session where `/mcp disable`
+ * turned it off, and those sessions (V3-1: said, the way the plugin's off state is). The ranking's
+ * reach is counted over the views each plan settles. The greedy rule is accepted as such (D-3).
  */
 export function duplicateRegistrations(
   entries: readonly ClientEntry[],
   sessions: readonly SessionView[] = [],
   plugin: PluginBeside | null = null,
+  held: readonly HeldEntry[] = [],
 ): {
   readonly most: number;
   readonly extra: readonly ClientEntry[];
   readonly views: readonly (readonly ClientEntry[])[];
   readonly unresolved: readonly UnresolvedView[];
   readonly offIn: readonly { readonly entry: ClientEntry; readonly dirs: readonly string[] }[];
+  readonly overriddenIn: readonly {
+    readonly entry: ClientEntry;
+    readonly dirs: readonly string[];
+  }[];
   readonly withPlugin: {
     readonly worst: { readonly servers: number; readonly keys: number; readonly plugin: boolean };
     readonly beside: boolean;
     readonly extra: readonly ClientEntry[];
     readonly unresolved: readonly UnresolvedView[];
     readonly uninstallStrips: readonly StrippedView[];
+    readonly uninstallAdd: UninstallAdd | null;
     readonly uninstallExtra: readonly ClientEntry[];
     readonly uninstallUnresolved: readonly UnresolvedView[];
   } | null;
 } {
   const regs = entries.filter((e) => !e.pluginSource);
-  const narrow = (e: ClientEntry): boolean => e.scope === "local" || e.scope === "project";
-  const at = (e: ClientEntry): string => path.resolve(e.dir ?? ".");
+  // every entry that is not a registration of this server, by key: the plugin's own declaration in
+  // a copy of the plugin is one too (Claude Code reads it there as a project server)
+  const others = new Map<string, Placed[]>();
+  for (const h of [...held, ...entries.filter((e) => e.pluginSource)])
+    others.set(h.name, [...(others.get(h.name) ?? []), h]);
+  const narrow = (e: Placed): boolean => e.scope === "local" || e.scope === "project";
+  const at = (e: Placed): string => path.resolve(e.dir ?? ".");
+  const segments = (e: Placed): number =>
+    at(e)
+      .split(path.sep)
+      .filter((x) => x !== "").length;
   const byDir = new Map(
     sessions.map((v) => [
       path.resolve(v.dir),
-      { declined: new Set(v.declined), disabled: new Set(v.disabled) },
+      {
+        declined: new Set(v.declined),
+        disabled: new Set(v.disabled),
+        keyUnknown: v.keyUnknown !== undefined,
+      },
     ]),
   );
   const off = (d: string | null, key: string): boolean =>
     d !== null && byDir.get(d)?.disabled.has(key) === true;
-  /** Whether a session in `d` would start `e` but for `/mcp disable` there. */
-  const reaches = (d: string | null, e: ClientEntry): boolean => {
+  /** Whether a session in `d` reads `e` at all: its scope, less a project server declined there. */
+  const reads = (d: string | null, e: Placed): boolean => {
     if (d === null) return !narrow(e); // the user scope, or Claude Desktop's one map
     if (!narrow(e)) return true;
     if (e.scope === "local") return at(e) === d;
     return within(at(e), d) && byDir.get(d)?.declined.has(e.name) !== true;
   };
+  /** How narrow an entry's scope is in a session that reads it (the higher wins its key there). */
+  const rank = (e: Placed): number =>
+    e.scope === "local" ? Number.POSITIVE_INFINITY : e.scope === "project" ? segments(e) : -1;
+  /** Whether another program's entry under `e`'s key is the one a session in `d` starts instead. */
+  const shadowed = (d: string | null, e: Placed): boolean =>
+    d !== null && (others.get(e.name) ?? []).some((h) => reads(d, h) && rank(h) > rank(e));
+  /** Whether a session in `d` would start `e` but for `/mcp disable` there. */
+  const reaches = (d: string | null, e: Placed): boolean => reads(d, e) && !shadowed(d, e);
   const sees = (d: string | null, e: ClientEntry): boolean => reaches(d, e) && !off(d, e.name);
+  const sessionDirs = [...byDir.keys()];
   const offIn = regs.flatMap((entry) => {
-    const dirs = [...byDir.keys()].filter((d) => reaches(d, entry) && off(d, entry.name));
+    const dirs = sessionDirs.filter((d) => reaches(d, entry) && off(d, entry.name));
     return dirs.length > 0 ? [{ entry, dirs }] : [];
   });
-  const views = [null, ...byDir.keys()].map((dir) => ({
+  const overriddenIn = regs.flatMap((entry) => {
+    const dirs = sessionDirs.filter((d) => reads(d, entry) && shadowed(d, entry));
+    return dirs.length > 0 ? [{ entry, dirs }] : [];
+  });
+  const views = [null, ...sessionDirs].map((dir) => ({
     dir,
     entries: regs.filter((e) => sees(dir, e)),
     plugin: plugin !== null && !off(dir, plugin.key),
   }));
   /** How far up an entry reaches: the user scope above all, then the shallower directory. */
-  const depth = (e: ClientEntry): number =>
-    narrow(e)
-      ? at(e)
-          .split(path.sep)
-          .filter((x) => x !== "").length
-      : -1;
+  const depth = (e: ClientEntry): number => (narrow(e) ? segments(e) : -1);
   const keysOf = (es: readonly ClientEntry[]): string[] => [...new Set(es.map((e) => e.name))];
   const most = Math.max(0, ...views.map((v) => keysOf(v.entries).length));
-  /** The keep rule over `vs`; `pinned`: the plugin, kept in every view it is in (never removed). */
+  /**
+   * The keep rule over `vs`; `pinned`: the plugin, or what an uninstall step adds — kept in every
+   * view it is in (never removed), each other key removed there where that strips no view.
+   */
   const plan = (
     vs: readonly { dir: string | null; entries: readonly ClientEntry[] }[],
-    pinned: ClientEntry | null,
+    pinned: ReadonlyMap<ClientEntry, "plugin" | "added">,
   ): { extra: ClientEntry[]; unresolved: UnresolvedView[] } => {
     // how many of these views each entry reaches (the ranking's first key)
     const reach = new Map<ClientEntry, number>();
@@ -1389,24 +1520,42 @@ export function duplicateRegistrations(
           depthOf(a) - depthOf(b) ||
           Number(b === SERVER_NAME) - Number(a === SERVER_NAME),
       );
-      if (pinned !== null && rest.includes(pinned)) {
-        // the plugin stays: each other key goes where that strips no view, the lowest ranked first
-        for (const k of ranked.filter((x) => x !== pinned.name).reverse())
+      const kept = new Set(rest.filter((e) => pinned.has(e)).map((e) => e.name));
+      if (kept.size > 0) {
+        // what is pinned stays: each other key goes where that strips no view, the lowest ranked first
+        for (const k of ranked.filter((x) => !kept.has(x)).reverse())
           if (!strips(of(k))) extra.push(...of(k));
         continue;
       }
       const keep = ranked.find((k) => !strips(rest.filter((e) => e.name !== k)));
       if (keep !== undefined) extra.push(...rest.filter((e) => e.name !== keep));
     }
-    const unresolved = vs.flatMap((v) => {
+    const unresolved = vs.flatMap((v): UnresolvedView[] => {
       const rest = left(v.entries);
-      return keysOf(rest).length > 1
-        ? [{ dir: v.dir, entries: rest.filter((e) => e !== pinned) }]
-        : [];
+      if (keysOf(rest).length < 2) return [];
+      const pin = rest.find((e) => pinned.has(e));
+      const beside = pin === undefined ? null : (pinned.get(pin) ?? null);
+      // never one under a key of what is pinned: `/mcp disable` of that key there turns off both
+      const pinnedKeys = new Set(rest.filter((e) => pinned.has(e)).map((e) => e.name));
+      const choice = rest.filter((e) => !pinnedKeys.has(e.name));
+      // outside the projects, beside the plugin: the projects that start nothing else of ours once
+      // these go (U3) — what a project that turns the plugin off would be left without (a view
+      // holding what is pinned never is: that is in neither list)
+      const leaves =
+        v.dir === null && beside !== null
+          ? vs.flatMap((w) =>
+              w.dir !== null &&
+              w.entries.length > 0 &&
+              w.entries.every((e) => extra.includes(e) || choice.includes(e))
+                ? [w.dir]
+                : [],
+            )
+          : [];
+      return [{ dir: v.dir, entries: choice, beside, leaves }];
     });
     return { extra, unresolved };
   };
-  const without = plan(views, null);
+  const without = plan(views, new Map());
   let withPlugin: ReturnType<typeof duplicateRegistrations>["withPlugin"] = null;
   if (plugin !== null) {
     const pseudo: ClientEntry = {
@@ -1438,22 +1587,48 @@ export function duplicateRegistrations(
         ...kept.filter((v) => v.entries.includes(pseudo)),
         ...kept.filter((v) => !v.entries.includes(pseudo)),
       ],
-      pseudo,
+      new Map([[pseudo, "plugin"]]),
     );
     // its removals in the order the views list them (one command line per entry)
     const listed = [...new Set(views.flatMap((v) => v.entries))];
-    // uninstalling the plugin: the views it strips, and what gives them a server first (V3-1) — a
-    // user-scope entry under this server's key where the sessions outside the projects are
-    // stripped (turned back on in each stripped project that turned that key off: VR4-2), and the
-    // entries `/mcp disable` turned off there; then the keep rule over the views as those steps
-    // leave them, so the step never makes a duplicate of its own (VR4-3)
+    // uninstalling the plugin: the views it strips, and what gives each a server first (V3-1); then
+    // the keep rule over the views as those steps leave them, what they add kept (VR4-3)
     const stripped = views.filter(
       (v) => v.plugin && v.entries.every((e) => without.extra.includes(e)),
     );
-    const addUser = stripped.some((v) => v.dir === null);
-    // the one key a stripped project turns back on: this server's, where the step adds it at user
-    // scope and the project turned that key off; else the best ranked of the entries turned off
-    // there (more would only be removed again)
+    const projects = stripped.flatMap((v) => (v.dir === null ? [] : [v.dir]));
+    // a key no entry uses and no session names: never off, never another program's anywhere
+    const used = new Set([
+      ...regs.map((e) => e.name),
+      ...others.keys(),
+      ...sessions.flatMap((v) => [...v.disabled, ...v.declined]),
+    ]);
+    let spare = PACKAGE_NAME;
+    for (const k of spareKeys())
+      if (!used.has(k)) {
+        spare = k;
+        break;
+      }
+    const added = (name: string, scope: "user" | "local", dir: string | null): ClientEntry => ({
+      ...pseudo,
+      name,
+      scope,
+      dir,
+    });
+    // outside the projects stripped: this server added at user scope — under its own key where
+    // Claude Code would start that in every stripped project, else under the spare key (U2, V5-3)
+    const own = added(SERVER_NAME, "user", null);
+    const heldAtUser = (others.get(SERVER_NAME) ?? []).some((h) => h.scope === "user");
+    const heldBelow = projects.filter((d) => shadowed(d, own));
+    const addKey = !stripped.some((v) => v.dir === null)
+      ? null
+      : heldAtUser || heldBelow.length > 0
+        ? spare
+        : SERVER_NAME;
+    const userAdd = addKey === null ? null : added(addKey, "user", null);
+    // the one key a stripped project turns back on (more would only be removed again): the added
+    // entry's, where the project turned it off; else the best ranked of the entries turned off
+    // there that Claude Code would start there; else this server added at local scope there
     const seen = new Map<ClientEntry, number>();
     for (const v of views) for (const e of v.entries) seen.set(e, (seen.get(e) ?? 0) + 1);
     const best = (es: readonly ClientEntry[]): string[] => {
@@ -1465,21 +1640,35 @@ export function duplicateRegistrations(
       );
       return ranked.length === 0 ? [] : [ranked[0]?.name ?? SERVER_NAME];
     };
-    const uninstallStrips = stripped.map((v) => ({
-      dir: v.dir,
-      off: addUser
-        ? off(v.dir, SERVER_NAME)
-          ? [SERVER_NAME]
-          : []
-        : best(regs.filter((e) => reaches(v.dir, e) && off(v.dir, e.name))),
-    }));
+    const uninstallStrips = stripped.map((v): StrippedView => {
+      if (v.dir === null) return { dir: null, off: [] };
+      if (userAdd !== null)
+        return { dir: v.dir, off: off(v.dir, userAdd.name) ? [userAdd.name] : [] };
+      const on = best(regs.filter((e) => reaches(v.dir, e) && off(v.dir, e.name)));
+      // added there only where doctor can tell which record that command writes (D-7 (d)) and the
+      // directory holds no control a printed command would show otherwise than it runs (D-8)
+      if (on.length > 0 || byDir.get(v.dir)?.keyUnknown === true || holdsControl(v.dir))
+        return { dir: v.dir, off: on };
+      const d = v.dir;
+      const free =
+        !off(d, SERVER_NAME) &&
+        ![...regs, ...(others.get(SERVER_NAME) ?? [])].some(
+          (e) => e.name === SERVER_NAME && reads(d, e),
+        );
+      return { dir: d, off: [], addLocal: free ? SERVER_NAME : spare };
+    });
     const turnedOn = new Map(
       uninstallStrips.flatMap((v) => (v.dir === null ? [] : [[v.dir, new Set(v.off)] as const])),
     );
-    const user: ClientEntry = { ...pseudo, name: SERVER_NAME };
-    const after = [...regs, ...(addUser ? [user] : [])];
+    const adds = [
+      ...(userAdd === null ? [] : [userAdd]),
+      ...uninstallStrips.flatMap((v) =>
+        v.addLocal === undefined ? [] : [added(v.addLocal, "local", v.dir)],
+      ),
+    ];
+    const after = [...regs, ...adds];
     const afterSteps = plan(
-      [null, ...byDir.keys()].map((dir) => ({
+      [null, ...sessionDirs].map((dir) => ({
         dir,
         entries: after.filter(
           (e) =>
@@ -1487,7 +1676,7 @@ export function duplicateRegistrations(
             (!off(dir, e.name) || (dir !== null && turnedOn.get(dir)?.has(e.name) === true)),
         ),
       })),
-      null,
+      new Map(adds.map((e) => [e, "added" as const])),
     );
     withPlugin = {
       worst,
@@ -1495,6 +1684,14 @@ export function duplicateRegistrations(
       extra: listed.filter((e) => settled.extra.includes(e)),
       unresolved: settled.unresolved,
       uninstallStrips,
+      uninstallAdd:
+        userAdd === null
+          ? null
+          : {
+              key: userAdd.name,
+              heldIn:
+                userAdd.name === SERVER_NAME ? [] : [...(heldAtUser ? [null] : []), ...heldBelow],
+            },
       uninstallExtra: regs.filter((e) => afterSteps.extra.includes(e)),
       uninstallUnresolved: afterSteps.unresolved,
     };
@@ -1505,6 +1702,7 @@ export function duplicateRegistrations(
     views: views.filter((v) => v.entries.length > 0 || v.dir === null).map((v) => v.entries),
     unresolved: without.unresolved,
     offIn,
+    overriddenIn,
     withPlugin,
   };
 }

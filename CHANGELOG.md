@@ -347,17 +347,23 @@ minor version (plan 04 §4.4; plan 09 K6). One version covers the server, the Sk
   `eff uninstall` no longer prints a `claude mcp remove espn-fantasy-football` that would remove it.
   A registration by package name (npx, npm exec) is diagnosed without running npx. Doctor and `eff
   uninstall` never print a launch word that holds more than a path (an `sh -c` command line can
-  carry `ESPN_S2=…` and other values), and their lines pass the log redaction (a key named in the
-  fix is redacted before it is quoted); every path, key or name they read from a client config,
+  carry `ESPN_S2=…` and other values), and every line of every doctor row, and of `eff uninstall`,
+  passes the log redaction (a key named in the fix, or in a hand edit, is redacted before it is
+  quoted) before its terminal controls are escaped, so a credential-shaped word beside a TAB or a
+  line break is still pseudonymized; every path, key or name they read from a client config,
   settings file or registry, and print-config's warnings, show their terminal controls (ESC, CR, LF,
   the C1 and bidi controls) escaped as `\u{…}`, in text and `--json`, and a removal whose key or
-  directory holds one is given as the hand edit of its record, never as a command. Each project
+  directory holds one is given as the hand edit of its record, never as a command. The setup-port
+  row names the port and the loopback interface, never an address. Each project
   directory Claude Code records (`~/.claude.json` `projects`) that still exists, and that Claude
   Code 2.1.308 files its sessions under, is one session view that counts its registrations: the
   user scope, that directory's local scope, and the `.mcp.json` of that directory and of every
   directory above it, less the project servers its settings decline (`disabledMcpjsonServers`) and
   every server `/mcp disable` turned off in that project (`disabledMcpServers`: any scope, the
-  plugin's included). A recorded directory that no longer exists, or a recorded path that is no directory, is
+  plugin's included). Under one key a session starts one entry, the narrowest scope's (the local
+  scope over the project servers over the user scope, the nearer `.mcp.json` over the farther), so
+  an entry that is not this server holding one of this server's keys at a narrower scope is what a
+  session there starts: ours is not counted there, which is said, and no fix relies on it there. A recorded directory that no longer exists, or a recorded path that is no directory, is
   no session: an entry recorded there is said once, never counted or judged, and `eff uninstall`
   gives it a removal that acts on that path's own record — `mkdir -p` first, then `claude mcp
   remove` there, or `claude purge`; where a git work tree lies above it (Claude Code would file a
@@ -379,11 +385,15 @@ minor version (plan 04 §4.4; plan 09 K6). One version covers the server, the Sk
   reaches the most sessions — never removing one that leaves a session with no server: where every
   removal would, it says to keep one there and turn the others off there (`/mcp disable`, or
   `disabledMcpjsonServers` for a project server). Beside the plugin, the fix that keeps the plugin
-  never removes an entry a project that turned the plugin off still needs, and uninstalling the
-  plugin is offered as is only when every session keeps a server; otherwise the fix names the
-  sessions it would leave with none and what gives them one first (the entry at user scope, turned
-  back on where a project turned its key off, or `/mcp enable` where an entry is turned off) and
-  plans the removals that follow with that entry, so the step never makes a new duplicate. An entry
+  never removes an entry a project that turned the plugin off still needs: where that choice is the
+  user's, it keeps one entry in such a project, and outside the projects it names the projects that
+  turn the plugin off and would be left with none. Uninstalling the plugin is offered as is only
+  when every session keeps a server; otherwise the fix names the sessions it would leave with none
+  and what gives them one first — this server added at user scope (turned back on where a project
+  turned its key off; under a key no entry uses where `espn-fantasy-football` is another program's
+  at user scope, or holds that key at a narrower scope in such a session), else one key `/mcp
+  enable` turns back on per project, said per key, or this server added at local scope there — and
+  plans the removals that follow with what those steps add, so they never make a new duplicate. An entry
   `/mcp disable` turned off in some projects is said. A `claude mcp add` entry
   that runs the plugin's own command line is one server with it (Claude Code drops the plugin's
   copy), not two. The plugin is judged where Claude Code reads it: in place from
@@ -395,7 +405,10 @@ minor version (plan 04 §4.4; plan 09 K6). One version covers the server, the Sk
   missing, unreadable, or no longer lists the plugin (the fix adds the marketplace again), a
   marketplace it does not know, or a `known_marketplaces.json` no client version reads (not JSON,
   not a JSON object, or holding a record that is not an object or has no source type), under which
-  Claude Code loads no marketplace plugin at all. Row 2 warns that doctor cannot judge
+  Claude Code loads no marketplace plugin at all. Beside a `claude mcp add` entry, that fix is
+  followed by the keep-one fix of a plugin Claude Code loads, or the plugin is uninstalled and the
+  entries kept (never "never both", which kept only the plugin and stripped a project that turned
+  it off). Row 2 warns that doctor cannot judge
   `known_marketplaces.json` when a record is one only Claude Code 2.1.308's own schema refuses (no
   `installLocation` or `lastUpdated`, an `autoUpdate` that is not true or false, a source without
   the field its type needs) or has a source type 2.1.308 does not have — another client version may
