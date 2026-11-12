@@ -844,6 +844,16 @@ open.
   and timestamps, and the limiter keeps a keyless bit. While recording, a raw body is ESPN's
   response text, never the request's cookie, but it carries member GUIDs, and the SWID is the
   owner's member GUID. Revisit only if node:sqlite gains a way to clear a statement's bindings.
+- **The cache's third verification (`58d64f6`; closed).** Three minor findings, fixed by the
+  orchestrator: the 64 Ki count read a buffer's `byteLength` property, which an own or inherited
+  definition could answer small (it now calls the typed-array or DataView prototype's own
+  accessor on the view, and a view neither reads is never cached); a `null` first parameter had
+  no test that it is a value, not a named-parameter object (now tested; the mutant that drops the
+  check fails it); and the class comment overstated what a cached statement never holds (now: no
+  more than 64 Ki of a body or samples). Ruled: `retro-statements.test.ts`'s "no SQL text prepared
+  twice in one call" may repeat only the ESPN cache `INSERT` of a fetched body over 64 Ki, each
+  body distinct, never on a warm call — what the large-binding rule itself requires; its cold
+  (32) and warm (2) bounds are unchanged.
 
 ## Known limitations of eff doctor's client-config model (Claude Code 2.1.308)
 

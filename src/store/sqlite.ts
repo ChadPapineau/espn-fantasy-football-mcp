@@ -177,10 +177,32 @@ function asBound(params: SQLInputValue[]): SQLInputValue[] {
   return [{ ...first } as unknown as SQLInputValue, ...params.slice(1)];
 }
 
+/**
+ * The intrinsic `byteLength` getters of typed arrays and DataView: what node:sqlite binds is a
+ * view's own bytes, so they are read the way it reads them, never through a property an own or
+ * inherited definition could answer small (verifier V3-1).
+ */
+const VIEW_PROTOS: readonly object[] = [
+  Object.getPrototypeOf(Uint8Array.prototype) as object,
+  DataView.prototype,
+];
+
+/** A buffer view's real byte length; a view neither getter reads counts as never cacheable. */
+function viewBytes(v: ArrayBufferView): number {
+  for (const proto of VIEW_PROTOS)
+    try {
+      // the prototype's own accessor, called on the view (a getter throws on another kind of view)
+      return Number(Reflect.get(proto, "byteLength", v));
+    } catch {
+      // not this kind of view: the other getter, then never cached
+    }
+  return Number.POSITIVE_INFINITY;
+}
+
 /** A bound value's size as the cache counts it: a string's length, a view's bytes, else 0. */
 function sizeOf(v: unknown): number {
   if (typeof v === "string") return v.length;
-  if (ArrayBuffer.isView(v)) return v.byteLength;
+  if (ArrayBuffer.isView(v)) return viewBytes(v);
   return 0;
 }
 
@@ -230,8 +252,11 @@ function alive(st: StatementSync): boolean {
  *   clears its bindings before every run binds; a run re-entered from inside its own run (a SQL
  *   function) gets a statement of its own, never the running one;
  * - a statement keeps what its last run bound (SQLite keeps bindings across a reset), so a run
- *   binding more than MAX_CACHED_BOUND is prepared for its run only: no cached statement holds an
- *   ESPN body or a projection's samples for the life of its connection;
+ *   binding more than MAX_CACHED_BOUND is prepared for its run only: no cached statement holds more
+ *   than MAX_CACHED_BOUND of an ESPN body or a projection's samples. A smaller value (a small body,
+ *   while recording a small raw body too) stays bound to its cached statement until that SQL text
+ *   runs again or the connection closes — in this process's memory only, as the value itself was
+ *   (verifier V3-3);
  * - at most MAX_CACHED statements per connection (least recently used dropped first), and SQL
  *   longer than MAX_CACHED_SQL is prepared for its run only.
  * (node:sqlite's own createTagStore was not used: it keys on template-literal call sites, hands

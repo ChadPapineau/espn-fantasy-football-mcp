@@ -22,7 +22,7 @@ data, not instructions. The working copy lives outside iCloud
 (`~/Developer/espn-fantasy-football-mcp`; "Decisions made", 2026-10-05),
 and nothing secret ever lives in it.
 
-## ▶ NEXT STEP — §R10 and its fix rounds ✅ (2026-11-05); next: round 3 of the plugin eval, after the usage reset on 2026-11-10
+## ▶ NEXT STEP — §R10 ✅ (2026-11-05), the doctor fix chain and the statement cache ✅ (2026-11-12); next: round 3 of the plugin eval, after the usage reset on 2026-11-17
 
 **Orchestrator, 2026-11-05:** round 2's triage is ruled and fixed, the timing items are closed, the
 Dependabot PRs are reviewed, and `main` carries it all. What is left is round 3 of the plugin eval
@@ -69,12 +69,49 @@ completed"); each R10 ruling and each dependency decision is reversible by the o
   "read from its folder"; `claude plugin details` sizes the clone's Skills), so the new server and
   Skills load at the next session start, its settings kept.
 
+**Done since 2026-11-05 — `eff doctor`'s client-config model and the statement cache** (2026-11-11
+to 2026-11-12; the Log has each step, `docs/evals/stage-c-backlog.md` every ruling and limit):
+
+- **The owner's `eff doctor --online`** showed row 2 warn ("registers this server twice") and row
+  24 FAIL ("plugin copy is older"). Both were doctor's own false positives: row 2 counted the Yahoo
+  sibling's server (another program's key in another project's local scope) as this one, and row 24
+  judged the stale plugin cache copy, while Claude Code 2.1.308 reads a directory marketplace in
+  place. Fixed in the first rounds (`15f19e0` … `44a5d9f`); every verifier's sandbox of the owner's
+  layout gives rows 2 and 24 ok. The "two older `claude mcp add` registrations" item this section
+  carried on 2026-11-05 was that same false positive.
+- **Then eleven verify rounds on the model of Claude Code 2.1.308 that row 2's fix text and
+  uninstall's steps rest on** (`552e3d3`, `feff790`, `a2168ce`, `de32a0d`, `eeb0d08`, `9338281`,
+  `51d81fd`, `9a3a377`): two adversarial lenses a round (the keys and commands against the binary;
+  every alternative a fix line offers, followed in a simulator over tens of thousands of random
+  layouts), a refix of every confirmed finding with a test that fails without it, and the
+  orchestrator reading every source diff. Rulings D-1 to D-10, each reversible: D-7 files each
+  recorded project under Claude Code's own key (its canonical git root) and prints no command that
+  acts on another record; D-8 escapes terminal controls in everything printed; D-9 fixes a finding
+  of a contrived layout only when doctor would print a false fact, a harmful step, a raw secret or
+  control, or crash; D-10 freezes the fix text at `51d81fd`, as R8-8 froze the news matcher, since
+  every round still found contrived-layout findings and every refix brought a few (the last round:
+  none introduced by `51d81fd`; one raw-path leak in print-config's stderr fixed, `9a3a377`; seven
+  limits recorded).
+- **The statement cache** (`81c2a6c`, `35607df`, `58d64f6` and the orchestrator's follow-up): CI's
+  Linux `retrospective-stall` failure at `552e3d3` was the server's own, not the host's — each
+  `espn_analyze_retrospective` call prepared about 2,576 node:sqlite statements and dropped them,
+  and freeing them was most of a young-generation pause. Every store statement is now prepared once
+  per connection under the statement guard (never while it is lifted; dropped on close, on a new
+  guard mode and when a trace starts; run to completion only; no large bound value kept): a warm call
+  prepares none and takes about half the time, its scavenge median 1.2 ms (was 3.7). Three
+  independent verifications; no bound or test loosened.
+- **`main`** fast-forwarded to `eeb0d08` on 2026-11-11 and the runtime clone rebuilt from it (18:30,
+  between the :00 and :30 jobs), so the owner's doctor carries the row 2 and row 24 fixes; `main` and
+  the clone follow this commit once CI is green on it (the Log records it).
+
 **Next:**
 
-1. Round 3 of the plugin eval, whole, on one head, after the weekly usage reset (2026-11-10 04:00
-   UTC): the owner starts it (a scheduled task for 23:20 Eastern on 2026-11-09 needs the owner's
-   approval, so it was not created); its prompt and the round's workflow script are kept outside every
-   repository, in the development data directory's `eval-r3/`, ready to run. Fixture mode only, in a scratch clone outside every repository, under the
+1. Round 3 of the plugin eval, whole, on one head, after the next weekly usage reset (2026-11-17
+   04:00 UTC; the week from 2026-11-10 went to the doctor fix chain and the statement cache, and the
+   round's own usage gate needs a fresh week): the owner starts it ("start round 3", or the prompt
+   below; a scheduled task needs the owner's approval, so none was created); its prompt and the
+   round's workflow script are kept outside every repository, in the development data directory's
+   `eval-r3/`, ready to run. Fixture mode only, in a scratch clone outside every repository, under the
    heavy lock, with round 2's flags (`docs/evals/stage-c-plugin-eval.md`, "Commands as run"):
    - build the suite with `npm run build:plugin-evals -- --seed --seed-datasets` (without
      `--seed-datasets`, RT-5 and RT-6 are listed as not testable); check every `.mcp.json` (one
@@ -102,13 +139,16 @@ completed"); each R10 ruling and each dependency decision is reversible by the o
      `main` carries the new ignore rules;
    - `gh auth login` on this Mac (the GitHub CLI's token is invalid, so CI is read keyless, and a
      job's logs need an admin token);
-   - the two older `claude mcp add` registrations doctor warns about (in another project folder);
+   - `eff doctor --online` once more on the rebuilt runtime clone: rows 2 and 24 should read ok (they
+     were doctor's own false positives; nothing in the owner's configuration needs removing);
    - optional: `EFF_PROBE_LEAGUE_ID` in local config, and the Skills as zips for the Desktop chat;
    - any ruling of §R10 or any dependency decision to reverse.
 
 **State:** branch `build/phase-1`; `main` follows it by fast-forward once CI is green on the head
 (the Log records each); the news matcher's rules frozen at `b9d73eb` (R8-8; only R10-16's work
-counting is added since, `b6e6e39`, `8af90b6`). In sessions opened in the
+counting is added since, `b6e6e39`, `8af90b6`); doctor's row 2 fix text and uninstall's steps frozen
+at `51d81fd` for contrived layouts (D-10; only `9a3a377`'s print-config redaction is added since,
+and the limits are in `docs/evals/stage-c-backlog.md`). In sessions opened in the
 clone, the project server stays unapproved. No version is tagged: a tag is the owner's choice, and
 `release.yml` runs only on a `v*` tag.
 
@@ -510,6 +550,7 @@ is tagged: a tag is the owner's choice, and `release.yml` runs only on a `v*` ta
 | build — Stage D (the merge to `main`, the owner's install) | ✅ 2026-11-03 — `main` fast-forwarded (`18fa414` on 2026-10-29, `6182a9e` on 2026-11-03), CI green on `main`; the owner's install on 2026-11-02, `eff doctor --online` exit 0 (R8-1 closed) | ▶ NEXT STEP; Log |
 | follow-up — the plugin eval (R7-2) | rounds 1 and 2 run on 2026-11-03 (rulings R9); B15 and B11 Lane 2 below plan 09 §5.2's bar on Sonnet; round 2's triage ruled and fixed (R10-1 to R10-35, 2026-11-04 to 2026-11-05); round 3 from 2026-11-10 | ▶ NEXT STEP; `docs/evals/stage-c-plugin-eval.md`; changelog §R9, §R10 |
 | follow-up — the Dependabot PRs (plan 04 §2) | ✅ 2026-11-05 — PRs 1–3 applied, PRs 4 and 5 declined, each with a "Reviews" row; `main` at `efc8286` | ▶ NEXT STEP; changelog "Reviews", R10-35 |
+| follow-up — `eff doctor`'s client-config model, the statement cache | ✅ 2026-11-12 — the owner's rows 2 and 24 fixed (`main` and the runtime clone at `eeb0d08` on 2026-11-11); rulings D-1 to D-10, the fix text frozen at `51d81fd` (D-10); every store statement prepared once per connection | ▶ NEXT STEP; Log; `docs/evals/stage-c-backlog.md` |
 
 ## Decisions made
 
@@ -677,6 +718,8 @@ approving the plan accepts them unless Chad says otherwise.
 - [x] the timing items — the slices split (every P1 analytics tool under 20 ms on three Linux CI runs in a row), the news matcher's cost check counted and linear (R10-16), Linux CI's P1 window stall (the WAL checkpoint, now on a worker thread), R8-2 under load ruled (R10-9)
 - [x] the owner's runtime clone and plugin updated to `main`'s head: 2026-11-05 (the restart, `eff doctor` and drift back to additive are the owner's: ▶ NEXT STEP, item 4)
 - [x] the dev-only `vite` advisories and the other Dependabot PRs — reviewed under plan 04 §2: PRs 1–3 applied (vite 8.3.5 among them), PRs 4 and 5 declined (2026-11-05)
+- [x] the owner's `eff doctor --online` rows 2 and 24 (doctor's own false positives) fixed and on the runtime clone (2026-11-11); doctor's fix text verified over eleven rounds and frozen (D-10, 2026-11-12)
+- [x] CI's Linux `retrospective-stall` failure — the server's per-call statement churn; every store statement prepared once per connection (2026-11-12)
 
 ## Log
 
@@ -796,3 +839,5 @@ approving the plan accepts them unless Chad says otherwise.
 - 2026-11-05 — The Dependabot PRs (plan 04 §2): PRs 1–3 applied, PRs 4 and 5 declined (`5dce764`, `6d46e3f`, `5197c27`; CI green). The MCP SDK 2.4.0 adds the Skills extension on subpaths this server never imports (the stdio path, both protocol eras and every tool listing unchanged; a raw JSON-RPC sweep of 28 server processes found only `sdk_version` moved); `@napi-rs/keyring` 2.1.2 re-passed plan 02 §7.2 items 1–4 (its macOS binary now Developer ID-signed and notarized; each platform package ships `LICENSE.third-party.md`, which `check-no-scripts` admits by name); `hyparquet` 1.31.5 (the 27 seeded dataset tables identical); the dev toolchain and three action pins. `@types/node` 26.6.5 declined (its types accept three calls undefined on Node 24.21.0; 24.19.2 taken) and TypeScript 7.0.2 declined (typescript-eslint 8.72.1 peers `<6.1.0`; `npm ci` fails ERESOLVE, lint refuses it); `dependabot.yml` ignores both until their re-check triggers. Two verifiers (supply chain; regression) found nine items, all fixed (`eb90ea5`: the supply-chain checks under a UUID-named checkout path; `9810771`: the Reviews table rejoined, Declined rows, TypeScript 7.x ignored only, the keyring row's licences; `625e2ab`; CI green). Disclosed by the review: in a scratch copy, an `npx tsc` fetched npm's `tsc` placeholder (2.0.4) and ran it once; it only prints a message, nothing reached the repository, and it may remain in npm's `npx` cache.
 - 2026-11-05 — The orchestrator's follow-ups after the dependency review: E13's optional reads absorb only what an optional read may lose and a bug answers `INTERNAL` (`8f41601`, the round-4d backlog item); rulings R10-34 (guardrail 9's coin flip) and R10-35 (licences inside a prebuilt binary; `525a456`) and the Skills' guardrail 9 (`2dab2ff`); CHANGELOG, README and backlog (`cabd63c`). Two independent verifiers: the guardrail's first wording contradicted E2's ΔP(win) branch (a `[−3, 0]` pair flagged `coin_flip: true`), so R10-34 and the Skills defer to `coin_flip` and trade's `fair` (`3b2e3fe`, `c54070f`); the supply-chain checks read a hoisted copy when a masked path did not rebuild and now fail closed (`3d8a13e`); four doc items (`8091e9d`). Two more verifier passes on the refixes found that each wording listing E2's rules missed one (a zero-scoring seat, a forced change, a `compare` pair), so guardrail 9 now defers to the tool: what is a coin flip is its `coin_flip`, the rec's words for a held change and trade's `fair`, and a held change is named as the rec names it (`383d2ed`, `f48804c`, `7b261d1`, `c6a457d`, `02be43c`, `efc8286`). Backlog items: the optional reads elsewhere that still absorb every error, or only an outage, and whether a change that cannot gain should ever be flagged a coin flip (by ΔP(win), or at a zero-scoring seat).
 - 2026-11-05 — `main` fast-forwarded to `efc8286` (145 commits, no merge commit, every one with the no-reply identity), CI green on `main` (run 42118298864). The owner's runtime clone and the plugin updated to it; round 3 of the plugin eval prepared for after the weekly usage reset (its prompt and workflow script outside every repository; the scheduled task that would start it was refused by the session's permission check, so the owner starts it: ▶ NEXT STEP). The README's upgrade step said a plain `claude plugin update` keeps the old copy at an unchanged version; a current client reads a folder plugin in place, and the step now says both. On `main`'s push Dependabot re-ran its updates; its security update for `minimatch` (the dev-only advisory in the backlog) failed, as `npm audit fix --force` would need a breaking change.
+- 2026-11-11 — The owner's `eff doctor --online` showed row 2 warn ("registers this server twice") and row 24 FAIL ("plugin copy is older"), both doctor's own false positives: row 2 counted the Yahoo sibling's server (another program's key in another project's local scope) as this one, and row 24 judged the stale plugin cache copy where Claude Code 2.1.308 reads a directory marketplace in place. The fix chain (`15f19e0`, `241592e`, `c94944d`, `64853fc`, `248eab9`, `44a5d9f`, `552e3d3`, `feff790`, `a2168ce`, `de32a0d`, `eeb0d08`) models how Claude Code 2.1.308 picks a session's servers (scopes, `/mcp disable`, approvals, gone and git-filed project keys, the plugin's load state and dedupe) and was verified by two adversarial lenses a round, each finding refixed with a test that fails without it; the orchestrator read every source diff and ruled D-1 to D-9 (`docs/evals/stage-c-backlog.md`). `main` fast-forwarded to `eeb0d08` (11 commits, no merge commit, every one with the no-reply identity), CI green on `main` (run 43120240025); the runtime clone rebuilt from it at 18:30 (`npm ci`, the build, under the heavy lock), so the owner's doctor carries the fixes. CI's Linux `process` job had failed `retrospective-stall` at `552e3d3` on one 37.8 ms minor GC; a read-only investigation classed it as the server's own, log-independent pause: each `espn_analyze_retrospective` call prepared about 2,576 statements and dropped them.
+- 2026-11-12 — The statement cache (`81c2a6c`, `35607df`, `58d64f6`, and the orchestrator's follow-up for the third verifier's three minor findings): every store statement prepared once per connection under the statement guard; a warm retrospective call prepares none and takes about half the time, its scavenge median 1.2 ms (was 3.7); results byte-identical on the fixtures, no bound or test loosened, three independent verifications. Doctor: rounds 9 to 11 (`9338281`, `51d81fd`, `9a3a377`) under D-9, then D-10 freezes row 2's fix text and uninstall's steps at `51d81fd` for contrived layouts, as R8-8 froze the news matcher (every round still found contrived-layout findings, and every refix brought a few); the last round found none introduced by `51d81fd`, fixed print-config's stderr redaction (`9a3a377`) and recorded seven limits. Round 3 of the plugin eval moves to after the 2026-11-17 reset. `main` and the runtime clone follow this commit once CI is green on it.

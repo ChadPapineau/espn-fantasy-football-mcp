@@ -506,7 +506,9 @@ minor version (plan 04 §4.4; plan 09 K6). One version covers the server, the Sk
   well under that, so a warm `espn_analyze_retrospective` call still prepares none. And a
   `VACUUM INTO` bypass that a closed connection refuses no longer leaves the guard counted as
   lifted, which had made that connection's cache refuse every later run until it was installed
-  again.
+  again. The 64 Ki count reads a buffer's real bytes, as node:sqlite binds them, never a
+  `byteLength` an own or inherited property could answer small; a `null` first parameter is
+  tested as a value, never a named-parameter object.
 - **Answers that changed with the clock alone.** The result budget counts every input's `age_s` at a
   fixed width, so an answer near its cap is trimmed the same way a second or a minute later.
 - **The season simulation's clinched and eliminated flags** are exact when no game is left in a

@@ -877,6 +877,42 @@ describe("no cached statement keeps a large bound value (f)", () => {
     expect(cachedGet(db, "SELECT COUNT(*) AS n FROM ds_y")).toEqual({ n: 0 });
   });
 
+  it("a view's bytes are its own: an own or inherited byteLength cannot answer small (verifier V3-1)", () => {
+    const own = new Uint8Array(MAX + 1);
+    Object.defineProperty(own, "byteLength", { value: 1 });
+    class Sub extends Uint8Array {}
+    Object.defineProperty(Sub.prototype, "byteLength", { get: () => 1 });
+    const inherited = new Sub(MAX + 1);
+    const view = new DataView(new ArrayBuffer(MAX + 1));
+    Object.defineProperty(view, "byteLength", { value: 1 });
+    for (const [name, v] of [
+      ["own", own],
+      ["inherited", inherited],
+      ["DataView", view],
+    ] as const) {
+      expect(v.byteLength, name).toBe(1);
+      const { db, guard, statementsOf } = withU();
+      expect(cachedRun(db, PUT, 1, v, null).changes, name).toBe(1);
+      // what node:sqlite bound is the whole view, so the run is never the cached statement's
+      expect(cachedGet(db, "SELECT length(v) AS n FROM u WHERE k = 1"), name).toEqual({
+        n: MAX + 1,
+      });
+      expect(guard.cachedSql(db).includes(PUT), name).toBe(false);
+      expect(statementsOf(PUT).length, name).toBe(1);
+    }
+  });
+
+  it("a null first parameter is a value, not a named-parameter object (verifier V3-2)", () => {
+    const { db, guard } = withU();
+    const sql = "SELECT ? AS a, ? AS b";
+    expect(cachedGet(db, sql, null, 5)).toEqual({ a: null, b: 5 });
+    expect(guard.cachedSql(db)).toEqual([sql]);
+    // and again through the cached statement, a null first among the others
+    expect(cachedGet(db, sql, null, null)).toEqual({ a: null, b: null });
+    expect(cachedRun(db, PUT, null, "v", 1).changes).toBe(1);
+    expect(cachedGet(db, "SELECT v, w FROM u WHERE v = 'v'")).toEqual({ v: "v", w: 1 });
+  });
+
   it("an unguarded connection's large run prepares per run, as every run there does", () => {
     const db = new DatabaseSync(":memory:");
     const spy = vi.spyOn(db, "prepare");
