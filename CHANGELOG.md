@@ -355,7 +355,9 @@ minor version (plan 04 §4.4; plan 09 K6). One version covers the server, the Sk
   allows them as a gap and as a word boundary); every path, key or name they read from a client config,
   settings file or registry, and print-config's warnings, show their terminal controls (ESC, CR, LF,
   the C1 and bidi controls) escaped as `\u{…}`, in text and `--json`, and a removal whose key or
-  directory holds one is given as the hand edit of its record, never as a command. The setup-port
+  directory holds one is given as the hand edit of its record, never as a command; `eff
+  print-config` refuses (exit 1, nothing on stdout) a snippet one of whose words — the node binary,
+  `dist/cli.js`, a directory override — holds one, naming it escaped. The setup-port
   row names the port and the loopback interface, never an address. Each project
   directory Claude Code records (`~/.claude.json` `projects`) that still exists, and that Claude
   Code 2.1.308 files its sessions under, is one session view that counts its registrations: the
@@ -374,11 +376,13 @@ minor version (plan 04 §4.4; plan 09 K6). One version covers the server, the Sk
   one of this server's keys no longer hides a duplicate, and a project server of this server's that
   is not approved, under a key another program's entry holds at user scope, is said not to start
   there. An entry of a `projects` record no session reads (a key with a trailing slash, filed under
-  its real path — even where doctor cannot tell the git root above it) is no server of any session,
-  nor what one starts instead. A recorded directory that no longer exists, or a recorded path that is no directory, is
+  its real path — or, where doctor cannot tell the git root above it, under a key it says it cannot
+  tell, never that record) is no server of any session, nor what one starts instead. A recorded directory that no longer exists, or a recorded path that is no directory, is
   no session: an entry recorded there is said once, never counted or judged, and `eff uninstall`
   gives it a removal that acts on that path's own record — `mkdir -p` first, then `claude mcp
-  remove` there, or `claude purge`; where a git work tree lies above it (Claude Code would file a
+  remove` there, or `claude purge` — never a purge where a record it deletes whole (the path's own,
+  or its twin with or without a trailing slash) holds an entry that is not this server's (then the
+  hand edit of the entry's record), and naming every record it deletes; where a git work tree lies above it (Claude Code would file a
   session made there under the work tree, and the command would change the work tree's record),
   only `claude purge` while nothing is at the path (as where the path, once made, would not be its
   own real path, or where uninstall cannot tell whether a work tree is above it: a `.git` it cannot
@@ -406,17 +410,24 @@ minor version (plan 04 §4.4; plan 09 K6). One version covers the server, the Sk
   that turns the plugin off and would be left with none, and keeping the entries there adds in each
   only the keys that project starts — never a key another program's entry holds there — and only
   where doctor can tell which record `claude mcp add --scope local` writes (elsewhere the plugin is
-  turned back on instead). Every directory a fix step acts on is named, however many. Uninstalling the plugin is offered as is only
+  turned back on instead), one key per project; where a project whose key doctor cannot tell would
+  be left with none, that choice offers no alternative at all, and beside no plugin the key kept at
+  user scope is one every such project starts. That choice is settled first: the projects' own
+  choices are worked out without the entries it removes, so none names one, nor turns off with
+  `/mcp disable` a key another program's server then holds. Every directory a fix step acts on is named, however many. Uninstalling the plugin is offered as is only
   when every session keeps a server; otherwise the fix names the sessions it would leave with none
   and what gives them one first — this server added at user scope (turned back on where a project
   turned its key off; under a key no entry uses where `espn-fantasy-football` is another program's
-  at user scope, or holds that key at a narrower scope in such a session), else one key `/mcp
+  at user scope, holds that key at a narrower scope in such a session, or is another program's
+  project server, not approved, that a user-scope entry under that key would keep from ever being
+  offered in any session), else one key `/mcp
   enable` turns back on per project, said per key, or this server added at local scope there — and
   plans the removals that follow with what those steps add, so they never make a new duplicate. An entry
   `/mcp disable` turned off in some projects is said. A `claude mcp add` entry
   that runs the plugin's own command line is one server with it (Claude Code drops the plugin's
-  copy), not two — where Claude Code starts that entry; where another entry holds its key, the
-  plugin starts beside that one, which is the duplicate. The plugin is judged where Claude Code reads it: in place from
+  copy), not two — where Claude Code starts that entry; where another entry holds its key, or
+  `/mcp disable` turned it off, the plugin starts there instead (beside that other entry, the
+  duplicate), and the detail names those projects. The plugin is judged where Claude Code reads it: in place from
   a folder marketplace (recorded in `known_marketplaces.json`, or declared under
   `extraKnownMarketplaces` in the user settings), with or without an install record, or the cache
   copy for a marketplace Claude Code fetches. A cache copy left from a folder marketplace is never
@@ -444,8 +455,13 @@ minor version (plan 04 §4.4; plan 09 K6). One version covers the server, the Sk
   In none of these cases is the cache copy judged as what runs,
   and `eff print-config --client code` warns of a duplicate only for a plugin Claude Code loads (for
   one doctor cannot judge, it says `claude plugin list` shows whether it is loaded). `eff uninstall`
-  follows the same rules. Doctor models Claude Code 2.1.308's config rules; its known limits are
-  listed in `docs/evals/stage-c-backlog.md`.
+  follows the same rules. Past the first 1000 `projects` records, or past the registrations and the
+  work the keep rule plans for (it now plans the 1000-project cap in under a second, where it took
+  minutes and printed a multi-megabyte fix line), row 2 still counts the duplicate, says why, and
+  offers no step that removes an entry, turns one off or uninstalls the plugin. Doctor models Claude
+  Code 2.1.308's config rules; its known limits, and the bar (ruling D-9) that decides which of its
+  findings are fixed and which are recorded as limits, are listed in
+  `docs/evals/stage-c-backlog.md`.
 - **The Linux CI stall (plan 10 A16a).** SQLite's automatic WAL checkpoint ran inside a commit on
   the event loop: on the Linux CI runner one cache `INSERT` held the loop 36–89 ms, waiting on I/O.
   `eff serve` now runs PASSIVE checkpoints on a worker thread with its own connection, at SQLite's

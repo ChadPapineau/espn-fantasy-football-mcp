@@ -5,12 +5,13 @@
 // the non-secret settings the server cannot read from config.json (those that came from the
 // environment) and EFF_CONFIG_DIR/EFF_CACHE_DIR when overridden. Never a cookie, an API key,
 // EFF_CREDENTIAL_STORE/FILE (plan 03 §3) or a test key. Warns when the runtime install sits under a
-// file-provider (iCloud) or synced directory. Ported from sibling @5daa625, adapted.
+// file-provider (iCloud) or synced directory, and refuses — exit 1, nothing on stdout — a snippet one
+// of whose words holds a terminal control (ruling OQ-1, D-8). Ported from sibling @5daa625, adapted.
 import { existsSync } from "node:fs";
 import path from "node:path";
 import { assertNotSynced, fileProviderMarks, PathSecurityError } from "../config/paths.js";
 import type { ConfigKey, LenientConfig } from "../config/schema.js";
-import { escapeControls, pluginLoads, scanPlugin } from "./client-config.js";
+import { escapeControls, holdsControl, pluginLoads, scanPlugin } from "./client-config.js";
 import { EXIT, UsageError } from "./exit.js";
 import { distEntry, write, writeLine, type CliIo } from "./io.js";
 
@@ -218,9 +219,30 @@ export function runtimeLocationWarning(problems: readonly string[]): string[] {
   ];
 }
 
+/** The env keys whose value is a path of this install, named in print-config's refusal. */
+const PATH_ENV = new Set(["EFF_CONFIG_DIR", "EFF_CACHE_DIR"]);
+
+/**
+ * The words of a launch spec that hold a terminal control (`holdsControl`), as the refusal names
+ * them: the node binary and dist/cli.js by their path, a directory override by its key and path, any
+ * other env value by its key alone (a league id is never echoed).
+ */
+export function controlledWords(spec: LaunchSpec): string[] {
+  const out: string[] = [];
+  if (holdsControl(spec.command)) out.push(`the node binary (${spec.command})`);
+  for (const a of spec.args) if (holdsControl(a)) out.push(`the argument (${a})`);
+  for (const [k, v] of Object.entries(spec.env))
+    if (holdsControl(k) || holdsControl(v))
+      out.push(
+        PATH_ENV.has(k) ? `${k} (${v})` : `the value of ${holdsControl(k) ? "an env key" : k}`,
+      );
+  return out;
+}
+
 /**
  * `eff print-config`: the snippet on stdout; where to paste it and any warning on stderr — each
- * warning with its terminal controls escaped (ruling D-8: a path is shown, never acted on).
+ * warning with its terminal controls escaped (ruling D-8: a path is shown, never acted on). A
+ * snippet one of whose words holds a terminal control is never printed (ruling OQ-1).
  */
 export async function printConfig(
   io: CliIo,
@@ -239,6 +261,15 @@ export async function printConfig(
       return EXIT.error;
     }
     throw e;
+  }
+  // a word of the snippet holding a terminal control: refused, nothing on stdout — the snippet
+  // would run otherwise than it shows (ruling OQ-1, D-8); the path named escaped, a value never
+  const controlled = controlledWords(spec);
+  if (controlled.length > 0) {
+    await warn(
+      `eff print-config: ${controlled.join(", ")} ${controlled.length === 1 ? "holds" : "hold"} a terminal control character, which no command or config shows as it runs, so no snippet is printed: run eff from an install, node binary and directories whose paths hold none`,
+    );
+    return EXIT.error;
   }
   const text = client === "desktop" ? desktopSnippet(spec) : codeCommand(spec);
   await write(io.stdout, `${text}\n`);

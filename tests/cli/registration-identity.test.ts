@@ -52,13 +52,17 @@ import {
   gitWorkTreeAt,
   holdsControl,
   installedPluginsPath as installedPluginsPathOf,
+  MAX_CLIENT_PROJECTS,
   MAX_GIT_POINTER_BYTES,
+  MAX_PLAN_WORK,
+  MAX_PLANNED_REGISTRATIONS,
   pluginLoads,
   quotedWord,
   removalOf,
   removeCommand,
   scanClientConfig,
   scanPlugin,
+  type ClientEntry,
 } from "../../src/cli/client-config.js";
 import {
   checkClientSecrecy,
@@ -67,6 +71,7 @@ import {
   redactedLine,
 } from "../../src/cli/doctor.js";
 import { main } from "../../src/cli/main.js";
+import { controlledWords } from "../../src/cli/print-config.js";
 import { findRegistrations, manualSteps } from "../../src/cli/uninstall.js";
 import { fakeExec, fakePackage, makeIo, ROOT, sandbox, type Sandbox } from "./helpers.js";
 
@@ -4614,12 +4619,14 @@ describe("Refix round 6: redaction before escaping, an entry that is not this se
     const both =
       "`claude mcp remove --scope user espn-fantasy-football`, `claude mcp remove --scope user k2`";
     // it was: "…; in ~/r/a ("espn-fantasy-football", "k2", beside the plugin), removing them …
-    // — turn them off there": the plugin is off in r/a, so that left it with none
-    const inRa = `in ${ra} ("espn-fantasy-football", "k2"), removing any of them leaves another directory with no server — keep one there and turn the others off there (\`/mcp disable <name>\` in a session there)`;
+    // — turn them off there": the plugin is off in r/a, so that left it with none; and round 8's
+    // "keep one there and turn the others off there (`/mcp disable <name>` …)" beside an outside
+    // choice that removes both: round 9 settles that choice first (VR8-3), keeping one key in r/a
     expect(r.fix).toContain(
-      `keep one: ${outsideBeside('"espn-fantasy-football", "k2"', `${ra}, ${rb}, ${q}`, both, "them", `"espn-fantasy-football", "k2" in ${ra} and "espn-fantasy-football" in ${rb} and "k2" in ${q}`)}; ${inRa}, or ${UNINSTALL} and `,
+      `keep one: ${outsideBeside('"espn-fantasy-football", "k2"', `${ra}, ${rb}, ${q}`, both, "them", `"espn-fantasy-football" in ${ra}, ${rb} and "k2" in ${q}`)}, or ${UNINSTALL} and `,
     );
     expect(r.fix).not.toContain("beside the plugin");
+    expect(r.fix).not.toContain(`in ${ra} (`);
     // every combination of the choices, followed
     const removedAtUser = (x: Model): void => {
       x.user = {};
@@ -4643,7 +4650,7 @@ describe("Refix round 6: redaction before escaping, an entry that is not this se
         (x: Model) => {
           // the keys each project starts, at local scope there (round 7's F1)
           for (const [d, keys] of [
-            [ra, ["espn-fantasy-football", "k2"]],
+            [ra, ["espn-fantasy-football"]],
             [rb, ["espn-fantasy-football"]],
             [q, ["k2"]],
           ] as const) {
@@ -4655,16 +4662,7 @@ describe("Refix round 6: redaction before escaping, an entry that is not this se
         },
       ],
     ] as const)
-      for (const keep of ["espn-fantasy-football", "k2"]) {
-        const after = edit(model, (x) => {
-          outside(x);
-          const rec = x.projects[ra];
-          const other = keep === "k2" ? "espn-fantasy-football" : "k2";
-          if (rec !== undefined)
-            rec.disabledMcpServers = [...(rec.disabledMcpServers ?? []), other];
-        });
-        expectOneEach(model, after, c1, `U5: ${n}, ${keep} kept in r/a`);
-      }
+      expectOneEach(model, edit(model, outside), c1, `U5: ${n}`);
   });
 
   it("the uninstall step turns back on one key per stripped project, said per key, ranked by the sessions its entry reaches (U1, M1)", async () => {
@@ -5387,9 +5385,13 @@ describe("Refix round 7: what Claude Code 2.1.308 approves, records no session r
       [scanClientConfig("code", file)],
       scanPlugin(sb.home),
     );
+    // round 9 (F4): beside a project whose key doctor cannot tell, no alternative at all — "turn
+    // the plugin back on in ~/q, or keep it only there (…; then `claude mcp remove …`)" each ended
+    // in removing the entry ~/w still needs
     expect(mixed.fix).toContain(
-      `keep one: ${outside(`"${SN}"`, `${w}, ${q2}`, `"${SN}" in ${q2}`, remove, { unknown: w, enableIn: q2 })}; in ${m}`,
+      `keep one: ${outside(`"${SN}"`, `${w}, ${q2}`, `"${SN}" in ${q2}`, remove, { unknown: w })}; in ${m}`,
     );
+    expect(mixed.fix).not.toContain(remove);
     // a path holding a control: the plugin turned back on there, never a local add
     const ctl = dirAt(sb.home, "ctl\u001bdir");
     write(file, {
@@ -5401,8 +5403,10 @@ describe("Refix round 7: what Claude Code 2.1.308 approves, records no session r
       [scanClientConfig("code", file)],
       scanPlugin(sb.home),
     );
-    expect(rc.fix).toContain(
-      `keep one: ${outside(`"${SN}"`, escapeControls(ctl), null, remove)}; in ${m}`,
+    // round 9 (VR8-3): that choice removes the user-scope entry in every branch, so ~/real/m is
+    // planned without it — where it then starts the plugin alone, so no choice of its own
+    expect(rc.fix).toBe(
+      `keep one: ${outside(`"${SN}"`, escapeControls(ctl), null, remove)}, or ${UNINSTALL}; then restart the client`,
     );
   });
 
@@ -6108,9 +6112,11 @@ describe("Refix round 8: one entry per key, records no session reads, and steps 
       plugin: false,
     };
     const { r: ro } = await rowOf(outside);
-    // it was: "… (`claude mcp add --scope local` there, then their `claude mcp remove --scope user`)"
+    // it was: "… (`claude mcp add --scope local` there, then their `claude mcp remove --scope user`)";
+    // round 9 (F4): "keep one at user scope …; doctor offers no such add in ~/q … or in ~/c…d …" —
+    // keeping k1 there removed the only server of ~/q and ~/c…d: the key kept is one both start
     expect(ro.fix).toBe(
-      `keep one: outside the projects Claude Code records, "k1", "k2" all start, and removing any of them leaves a project with no server — keep one at user scope and the others only in the projects that need them (\`claude mcp add --scope local\` there, then their \`claude mcp remove --scope user\`; doctor offers no such add in ${q}, where doctor cannot tell which record that command writes or in ${escapeControls(ctl)}, whose path holds a control character, which no command shows as it runs); then restart the client`,
+      `keep one: outside the projects Claude Code records, "k1", "k2" all start, and removing any of them leaves a project with no server — keep "k2" at user scope and the others only in the projects that need them (\`claude mcp add --scope local\` there, then their \`claude mcp remove --scope user\`); then restart the client`,
     );
   });
 
@@ -6140,7 +6146,7 @@ describe("Refix round 8: one entry per key, records no session reads, and steps 
     const r = await checkLaunchConfig(makeIo(sb, { exec: shimOk }), [scan], scanPlugin(sb.home));
     expect(r.details).not.toContain(`code (local scope, ${f}/): entry ok`);
     expect(r.details.join("\n")).toContain(
-      `code (local scope, ${f}/): recorded for ${f}/, which Claude Code 2.1.308 files under its real path ${f} or a git work tree above it (doctor cannot tell which), so it never starts it — not counted`,
+      `code (local scope, ${f}/): recorded for ${f}/, which Claude Code 2.1.308 files under a key doctor cannot tell (its real path ${f}, a git work tree above it, or the repository a linked worktree's pointer there names) — never this record, which is not its own real path, so it never starts it — not counted`,
     );
     // it was: "keep one: remove the `claude mcp add` entries (…, delete projects["~/f/"]…), or
     // uninstall the plugin (…)" — in ~/f Claude Code starts the plugin alone, which that strips
@@ -6149,11 +6155,13 @@ describe("Refix round 8: one entry per key, records no session reads, and steps 
     const steps = manualSteps(sb.home, [], findRegistrations(sb.home)).join("\n");
     expect(steps).not.toContain(`cd ${f}/ && claude mcp remove`);
     expect(steps).toContain(
-      `recorded for ${f}/, which Claude Code 2.1.308 files under its real path ${f} or a git work tree above it (doctor cannot tell which), so never started — removing it is optional: delete projects[${JSON.stringify(`${f}/`)}].mcpServers["k1"]`,
+      `recorded for ${f}/, which Claude Code 2.1.308 files under a key doctor cannot tell (its real path ${f}, a git work tree above it, or the repository a linked worktree's pointer there names) — never this record, which is not its own real path, so never started — removing it is optional: delete projects[${JSON.stringify(`${f}/`)}].mcpServers["k1"]`,
     );
-    // the hand edit says which record a command there would change instead: ~/f's, or a work tree's
+    // the hand edit says which record a command there would change instead: the key a session
+    // there is filed under, which doctor cannot tell (round 9's F3: ~/f's, a work tree's, or a
+    // repository a linked worktree's pointer names)
     expect(steps).toContain(
-      `(\`claude mcp remove\` there, or \`claude purge\` of it while it exists, acts on the record of ${f} or of a git work tree above it)`,
+      "(`claude mcp remove` there, or `claude purge` of it while it exists, acts on the record of the key a session there is filed under, which doctor cannot tell)",
     );
   });
 
@@ -6544,4 +6552,667 @@ describe("Refix round 8: one entry per key, records no session reads, and steps 
         rmSync(d, { recursive: true, force: true });
       }
   });
+});
+
+describe("Refix round 9: the D-9 bar — print-config's words, the spare key, every alternative followed, and records a purge deletes (OQ-1, OQ-4, F1…F7, VR8-1…VR8-5)", () => {
+  const PK = "plugin:espn-fantasy-football:espn-fantasy-football";
+  const SN = "espn-fantasy-football";
+  const SPARE = "espn-fantasy-football-mcp";
+  const UNINSTALL = `uninstall the plugin (\`claude plugin uninstall ${PLUGIN_ID}\`)`;
+  const OTHER = { command: "uvx", args: ["other-server"] };
+  /** Every terminal-control class D-8 names. */
+  const ANY =
+    /[\u0000-\u001f\u007f-\u009f\u061c\u200e\u200f\u202a-\u202e\u2066-\u2069\u2028\u2029]/u;
+  type Spec = Record<string, unknown>;
+  /** ~/.claude.json's user scope and records, the `.mcp.json` files, and settings.local.json choices. */
+  interface Model {
+    user: Record<string, Spec>;
+    projects: Record<string, { mcpServers?: Record<string, Spec>; disabledMcpServers?: string[] }>;
+    mcpjson: Record<string, Record<string, Spec>>;
+    approves?: Record<string, string[]>;
+    plugin: boolean;
+  }
+  const edit = (m: Model, f: (x: Model) => void): Model => {
+    const x = structuredClone(m);
+    f(x);
+    return x;
+  };
+  const sig = (v: Spec): string => JSON.stringify([v.command, v.args]);
+  /**
+   * What a session in `d` starts — this test's own reading of Claude Code 2.1.308's dC and B5r,
+   * independent of client-config.ts (round 8's): the project servers merged from the root down, an
+   * approved one over the user scope, one not approved skipped where the user or local scope holds
+   * its key and else offered (the approval dialog's); the local scope over both; less what `/mcp
+   * disable` turned off; and the plugin's server unless it is turned off or a started entry runs
+   * its very command line (`line`).
+   */
+  const startedBy = (
+    m: Model,
+    d: string | null,
+    line: Spec | null = null,
+  ): Map<string, Spec | "plugin"> => {
+    const merged = new Map<string, Spec | "plugin">(Object.entries(m.user));
+    if (d !== null) {
+      const chain: string[] = [];
+      for (let at = d; at !== path.parse(at).root; at = path.dirname(at)) chain.unshift(at);
+      const approved = new Set(m.approves?.[d] ?? []);
+      const proj = new Map<string, Spec>();
+      for (const a of chain)
+        for (const [k, v] of Object.entries(m.mcpjson[a] ?? {})) proj.set(k, v);
+      const local = m.projects[d]?.mcpServers ?? {};
+      for (const [k, v] of proj) {
+        if (!approved.has(k) && (k in m.user || k in local)) continue;
+        merged.set(k, v);
+      }
+      for (const [k, v] of Object.entries(local)) merged.set(k, v);
+    }
+    const off = new Set(d === null ? [] : (m.projects[d]?.disabledMcpServers ?? []));
+    for (const k of off) merged.delete(k);
+    const dropped =
+      line !== null && [...merged.values()].some((v) => v !== "plugin" && sig(v) === sig(line));
+    if (m.plugin && !off.has(PK) && !dropped) merged.set(PK, "plugin");
+    return merged;
+  };
+  /** How many of this server's each session starts (`cli`: this package's build). */
+  const started = (m: Model, cli: string, line: Spec | null = null): Map<string | null, number> => {
+    const out = new Map<string | null, number>();
+    for (const d of [null, ...Object.keys(m.projects)])
+      out.set(
+        d,
+        [...startedBy(m, d, line).values()].filter(
+          (v) =>
+            v === "plugin" ||
+            (Array.isArray(v.args) &&
+              (v.args[0] === cli || (line !== null && sig(v) === sig(line)))),
+        ).length,
+      );
+    return out;
+  };
+  /** Every session that ran one of this server's still runs exactly one; none runs two. */
+  const expectOneEach = (before: Model, after: Model, cli: string, label: string): void => {
+    const was = started(before, cli);
+    for (const [dir, n] of started(after, cli))
+      if ((was.get(dir) ?? 0) > 0) expect(n, `${label}: ${String(dir)}`).toBe(1);
+      else expect(n, `${label}: ${String(dir)}`).toBeLessThanOrEqual(1);
+  };
+  /** Another program's entry is still what each session that started it starts under `key`. */
+  const expectOthersKept = (before: Model, after: Model, key: string, label: string): void => {
+    for (const d of [null, ...Object.keys(before.projects)]) {
+      const was = startedBy(before, d).get(key);
+      if (was !== undefined && was !== "plugin" && sig(was) === sig(OTHER))
+        expect(startedBy(after, d).get(key), `${label}: ${String(d)}`).toEqual(OTHER);
+    }
+  };
+  const rowOf = async (m: Model) => {
+    for (const d of Object.keys(m.projects)) mkdirSync(d, { recursive: true });
+    for (const [d, servers] of Object.entries(m.mcpjson))
+      write(path.join(d, ".mcp.json"), { mcpServers: servers });
+    for (const [d, names] of Object.entries(m.approves ?? {}))
+      write(path.join(d, ".claude", "settings.local.json"), { enabledMcpjsonServers: names });
+    const file = path.join(sb.home, ".claude.json");
+    write(file, { mcpServers: m.user, projects: m.projects });
+    const scan = scanClientConfig("code", file);
+    const r = await checkLaunchConfig(
+      makeIo(sb, { exec: shimOk }),
+      [scan],
+      m.plugin ? scanPlugin(sb.home) : null,
+    );
+    return { r, scan, file };
+  };
+  const NO_STEP = (dirs: string): string =>
+    `doctor cannot tell which record a session in ${dirs} reads (row 2's detail says why), so it offers no step there: \`/mcp\` in a session there shows what it starts`;
+
+  it("print-config refuses a snippet whose words hold a terminal control — the node binary, dist/cli.js or an env value — exit 1, nothing on stdout, the path named escaped (OQ-1, F2, VR8-4)", async () => {
+    sb = sandbox();
+    const built = (name: string): string => {
+      const root = path.join(sb.dir, name);
+      mkdirSync(path.join(root, "dist"), { recursive: true });
+      writeFileSync(path.join(root, "dist", "cli.js"), "#!/usr/bin/env node\n");
+      return root;
+    };
+    const clean = built("clean");
+    for (const c of ["\u001b[31m", "\u0007", "\u009b31m", "\u202e", "\u2028", "\u061c"])
+      for (const client of ["code", "desktop"] as const) {
+        const label = `${JSON.stringify(c)} ${client}`;
+        const pkg = built(`pkg${c}x`);
+        const cases: [string, Partial<Parameters<typeof makeIo>[1]>, string][] = [
+          ["packageRoot", { packageRoot: pkg }, path.join(pkg, "dist", "cli.js")],
+          [
+            "execPath",
+            { packageRoot: clean, execPath: `/usr/local/bin/node${c}` },
+            `/usr/local/bin/node${c}`,
+          ],
+        ];
+        for (const [what, over, word] of cases) {
+          const io = makeIo(sb, { ...over, env: { ESPN_LEAGUE_ID: "0" } });
+          const code = await main(["print-config", "--client", client], io);
+          // it was: exit 0, the snippet on stdout with the control raw
+          expect(code, `${label} ${what}`).toBe(1);
+          expect(io.out.text, `${label} ${what}`).toBe("");
+          expect(io.err.text, `${label} ${what}`).toContain(escapeControls(word));
+          expect(io.err.text, `${label} ${what}`).toContain("no snippet is printed");
+          for (const l of io.err.text.split("\n")) expect(l, `${label} ${what}`).not.toMatch(ANY);
+        }
+        rmSync(pkg, { recursive: true, force: true });
+      }
+    // an env-sourced directory (EFF_CONFIG_DIR) holding a bidi control: refused the same way
+    const cfg = path.join(sb.dir, "cfg\u202ex");
+    mkdirSync(cfg, { recursive: true, mode: 0o700 });
+    for (const client of ["code", "desktop"] as const) {
+      const io = makeIo(sb, {
+        packageRoot: clean,
+        env: { ESPN_LEAGUE_ID: "0", EFF_CONFIG_DIR: cfg },
+      });
+      const code = await main(["print-config", "--client", client], io);
+      expect(code, client).toBe(1);
+      expect(io.out.text, client).toBe("");
+      expect(io.err.text, client).toContain(`EFF_CONFIG_DIR (${escapeControls(cfg)})`);
+      for (const l of io.err.text.split("\n")) expect(l, client).not.toMatch(ANY);
+    }
+    // the refusal names a path, never another env value (a league id is never echoed)
+    expect(
+      controlledWords({
+        command: "/n/bin/node",
+        args: ["/r/dist/cli.js", "serve"],
+        env: { ESPN_LEAGUE_ID: "1\u001b9", EFF_CACHE_DIR: "/c\u009bd", "K\u0007": "v" },
+      }),
+    ).toEqual([
+      "the value of ESPN_LEAGUE_ID",
+      "EFF_CACHE_DIR (/c\u009bd)",
+      "the value of an env key",
+    ]);
+    // a clean install still prints its snippet
+    const ok = makeIo(sb, { packageRoot: clean, env: { ESPN_LEAGUE_ID: "0" } });
+    expect(await main(["print-config", "--client", "code"], ok)).toBe(0);
+    expect(ok.out.text).toContain(`claude mcp add ${SN} --scope user`);
+  });
+
+  it("the user-scope add takes the spare key wherever another program's project server under `espn-fantasy-football` is offered — not approved, no user or local holder — stripped project or not: that add would keep it from ever being offered (OQ-4, F1, VR8-2)", async () => {
+    sb = sandbox();
+    const { folder } = installPlugin(sb.home, folderMarketplace(sb.home));
+    const c1 = path.join(folder, "dist", "cli.js");
+    const a = path.join(sb.home, "a");
+    const b = path.join(sb.home, "b");
+    // P1: the other program's server in a stripped project (b) and in one that is not (a)
+    const p1: Model = {
+      user: {},
+      projects: { [a]: { mcpServers: { k1: launch(c1) } }, [b]: {} },
+      mcpjson: { [b]: { [SN]: OTHER }, [a]: { [SN]: OTHER } },
+      plugin: true,
+    };
+    expect(startedBy(p1, b).get(SN)).toEqual(OTHER);
+    const { r } = await rowOf(p1);
+    const add = `this server is added at user scope under the key \`${SPARE}\` (\`eff print-config --client code\` prints the command: give it that key — in ${a}, ${b} a project server that is not this server holds \`${SN}\` and is not approved there, which Claude Code never offers while the user scope holds that key)`;
+    // it was: "… — only once this server is added at user scope (`eff print-config --client code`
+    // prints the command): …" — under `espn-fantasy-football`, which hides the other program's
+    // server in ~/a and ~/b
+    expect(r.fix).toBe(
+      `keep one: remove the \`claude mcp add\` entry (\`cd ${a} && claude mcp remove --scope local k1\`), or ${UNINSTALL} and remove the other entry (\`cd ${a} && claude mcp remove --scope local k1\`) — only once ${add}: uninstalling it now leaves ${b} and every session outside the projects Claude Code records with no server; then restart the client`,
+    );
+    // followed: the spare-key add, the uninstall, the removal — one server each, and the other
+    // program's server still what ~/a and ~/b start under its key
+    const followed = edit(p1, (x) => {
+      x.user[SPARE] = launch(c1);
+      x.plugin = false;
+      x.projects[a] = {};
+    });
+    expectOneEach(p1, followed, c1, "P1: uninstall");
+    expectOthersKept(p1, followed, SN, "P1: uninstall");
+    // what the old step did: the add under `espn-fantasy-football` hid it in both
+    const old = edit(followed, (x) => {
+      x.user = { [SN]: launch(c1) };
+    });
+    expect(startedBy(old, a).get(SN)).not.toEqual(OTHER);
+    // P1b: only in ~/a, which uninstalling does not strip — the add reaches every session
+    sb.cleanup();
+    sb = sandbox();
+    const { folder: f2 } = installPlugin(sb.home, folderMarketplace(sb.home));
+    const c2 = path.join(f2, "dist", "cli.js");
+    const p1b: Model = {
+      user: {},
+      projects: { [a]: { mcpServers: { k1: launch(c2) } }, [b]: {} },
+      mcpjson: { [a]: { [SN]: OTHER } },
+      plugin: true,
+    };
+    const { r: rb } = await rowOf(p1b);
+    expect(rb.fix).toContain(
+      `added at user scope under the key \`${SPARE}\` (\`eff print-config --client code\` prints the command: give it that key — in ${a} a project server that is not this server holds \`${SN}\` and is not approved there, which Claude Code never offers while the user scope holds that key)`,
+    );
+    const fb = edit(p1b, (x) => {
+      x.user[SPARE] = launch(c2);
+      x.plugin = false;
+      x.projects[a] = {};
+    });
+    expectOneEach(p1b, fb, c2, "P1b: uninstall");
+    expectOthersKept(p1b, fb, SN, "P1b: uninstall");
+    // control: approved in ~/b (stripped), it is still the narrower-scope reason, said as before
+    rmSync(path.join(a, ".mcp.json"), { force: true });
+    const ctl = edit(p1b, (x) => {
+      x.mcpjson = { [b]: { [SN]: OTHER } };
+      x.approves = { [b]: [SN] };
+    });
+    const { r: rc } = await rowOf(ctl);
+    expect(rc.fix).toContain(
+      `give it that key — in ${b} an entry that is not this server holds \`${SN}\` at a narrower scope, which Claude Code starts there instead)`,
+    );
+    // and nothing of another program's under that key: its own key, as before
+    const none = edit(p1b, (x) => {
+      x.mcpjson = {};
+    });
+    rmSync(path.join(b, ".mcp.json"), { force: true });
+    const { r: rn } = await rowOf(none);
+    expect(rn.fix).toContain(
+      "only once this server is added at user scope (`eff print-config --client code` prints the command)",
+    );
+  });
+
+  it("a record whose key doctor cannot tell is never said to be filed under its real path or a work tree only: Claude Code may follow a linked worktree's pointer doctor refuses (F3)", async () => {
+    sb = sandbox();
+    const { folder } = installPlugin(sb.home, folderMarketplace(sb.home));
+    const c1 = path.join(folder, "dist", "cli.js");
+    const m = path.join(sb.home, "m");
+    const w = path.join(sb.home, "w");
+    write(path.join(m, ".git", "HEAD"), "ref: refs/heads/main\n");
+    write(path.join(m, ".git", "worktrees", "w", "commondir"), "../..\n");
+    write(path.join(m, ".git", "worktrees", "w", "gitdir"), `${path.join(w, ".git")}\n`);
+    mkdirSync(w, { recursive: true });
+    // the pointer Claude Code 2.1.308 reads whole and trims; past doctor's bound
+    write(
+      path.join(w, ".git"),
+      `gitdir: ${path.join(m, ".git", "worktrees", "w")}${" ".repeat(MAX_GIT_POINTER_BYTES + 100)}\n`,
+    );
+    expect(codeProjectKey(w).kind).toBe("unknown");
+    expect(codeProjectKey(`${w}/`)).toEqual({
+      kind: "other",
+      at: w,
+      how: "real path or work tree",
+    });
+    const file = path.join(sb.home, ".claude.json");
+    write(file, { mcpServers: {}, projects: { [`${w}/`]: { mcpServers: { k1: launch(c1) } } } });
+    const scan = scanClientConfig("code", file);
+    const r = await checkLaunchConfig(makeIo(sb, { exec: shimOk }), [scan], scanPlugin(sb.home));
+    const where = `a key doctor cannot tell (its real path ${w}, a git work tree above it, or the repository a linked worktree's pointer there names) — never this record, which is not its own real path`;
+    // it was: "… files under its real path ~/w or a git work tree above it (doctor cannot tell
+    // which) …" — Claude Code files it under ~/m, the main repository
+    expect(r.details).toContain(
+      `code (local scope, ${w}/): recorded for ${w}/, which Claude Code 2.1.308 files under ${where}, so it never starts it — not counted`,
+    );
+    const steps = manualSteps(sb.home, [], findRegistrations(sb.home)).join("\n");
+    expect(steps).toContain(`which Claude Code 2.1.308 files under ${where}, so never started`);
+    expect(steps).toContain(
+      "(`claude mcp remove` there, or `claude purge` of it while it exists, acts on the record of the key a session there is filed under, which doctor cannot tell)",
+    );
+    expect(steps).not.toContain(`acts on the record of ${w} or of a git work tree above it`);
+    // within the bound, doctor follows it to the main repository
+    write(path.join(w, ".git"), `gitdir: ${path.join(m, ".git", "worktrees", "w")}\n`);
+    expect(codeProjectKey(w)).toEqual({ kind: "other", at: m, how: "main repository" });
+  });
+
+  it("an entry running the plugin's command line is said to drop the plugin except in every session that reads it and where it does not start — its key turned off there included — and never where another started entry drops it (F5, VR8-1)", async () => {
+    sb = sandbox();
+    const { folder } = installPlugin(sb.home, folderMarketplace(sb.home));
+    const shim = path.join(folder, "scripts", "eff-launch.sh");
+    const line = { command: "/bin/sh", args: [shim, "serve"] };
+    const DROPS = `runs the plugin's own command line (/bin/sh ${shim} serve) — Claude Code drops the plugin's server as a duplicate of it, so they are one server`;
+    const x = path.join(sb.home, "x");
+    const y = path.join(sb.home, "y");
+    // P6: turned off in ~/x, where the plugin then starts
+    const p6: Model = {
+      user: { k1: line },
+      projects: { [x]: { disabledMcpServers: ["k1"] }, [y]: {} },
+      mcpjson: {},
+      plugin: true,
+    };
+    expect([...startedBy(p6, x, line).keys()]).toEqual([PK]);
+    const { r } = await rowOf(p6);
+    // it was: "… so they are one server" with no exception for ~/x
+    expect(r.details).toContain(
+      `code (user scope): ${DROPS} — except in ${x}, where it does not start, so the plugin starts there`,
+    );
+    // VR8-1's P4: a local entry running the same line starts in ~/a and drops the plugin there
+    const a = path.join(sb.home, "a");
+    const p4: Model = {
+      user: { k1: line },
+      projects: { [a]: { mcpServers: { k1: line } } },
+      mcpjson: {},
+      plugin: true,
+    };
+    expect(startedBy(p4, a, line).has(PK)).toBe(false);
+    const { r: r4 } = await rowOf(p4);
+    expect(r4.status).toBe("ok");
+    // it was: "… — except in ~/a, where it does not start, so the plugin starts there"
+    expect(r4.details).toContain(`code (user scope): ${DROPS}`);
+    expect(r4.details).toContain(`code (local scope, ${a}): ${DROPS}`);
+    expect(r4.details.join("\n")).not.toContain("so the plugin starts there");
+  });
+
+  it("outside the projects, no alternative ends in removing an entry a project whose key doctor cannot tell still needs: beside the plugin no step at all, beside none the key kept at user scope is one it starts (F4)", async () => {
+    sb = sandbox();
+    const { folder } = installPlugin(sb.home, folderMarketplace(sb.home));
+    const c1 = path.join(folder, "dist", "cli.js");
+    const q = path.join(sb.home, "q");
+    const d = path.join(sb.home, "d");
+    mkdirSync(d, { recursive: true });
+    symlinkSync(path.join(sb.home, "nowhere", ".git"), path.join(d, ".git"));
+    expect(codeProjectKey(d).kind).toBe("unknown");
+    // P5b: ~/q and ~/d both turn the plugin off; ~/d's key doctor cannot tell
+    const p5b: Model = {
+      user: { [SN]: launch(c1) },
+      projects: { [q]: { disabledMcpServers: [PK] }, [d]: { disabledMcpServers: [PK] } },
+      mcpjson: {},
+      plugin: true,
+    };
+    const { r } = await rowOf(p5b);
+    // it was: "… — turn the plugin back on in ~/q (…), or keep it only there (…; then `claude mcp
+    // remove --scope user …`), and doctor cannot tell … ~/d …" — each removing ~/d's only server
+    expect(r.fix).toBe(
+      `keep one: outside the projects Claude Code records, the plugin and "${SN}" start, and removing it leaves ${q}, ${d} (which turn the plugin off) with no server — ${NO_STEP(d)}, or ${UNINSTALL}; then restart the client`,
+    );
+    expect(r.fix).not.toContain("claude mcp remove --scope user");
+    expectOneEach(
+      p5b,
+      edit(p5b, (m) => (m.plugin = false)),
+      c1,
+      "P5b: uninstall",
+    );
+    // P5c: beside no plugin, ~/p1 (key unknown) turns k1 off and starts only k2
+    sb.cleanup();
+    sb = sandbox();
+    const one = espnCopy(path.join(sb.home, "src", "espn-fantasy-football-mcp"));
+    const c2 = path.join(one, "dist", "cli.js");
+    const p1 = path.join(sb.home, "p1");
+    const p2 = path.join(sb.home, "p2");
+    const p3 = path.join(sb.home, "p3");
+    mkdirSync(p1, { recursive: true });
+    symlinkSync(path.join(sb.home, "nowhere", ".git"), path.join(p1, ".git"));
+    const p5c: Model = {
+      user: { k1: launch(c2), k2: launch(c2) },
+      projects: { [p1]: { disabledMcpServers: ["k1"] }, [p2]: { disabledMcpServers: ["k2"] } },
+      mcpjson: {},
+      plugin: false,
+    };
+    const { r: rc } = await rowOf(p5c);
+    // it was: "… keep one at user scope and the others only in the projects that need them …" —
+    // keeping k1 there removes ~/p1's only server
+    expect(rc.fix).toBe(
+      `keep one: outside the projects Claude Code records, "k1", "k2" all start, and removing any of them leaves a project with no server — keep "k2" at user scope and the others only in the projects that need them (\`claude mcp add --scope local\` there, then their \`claude mcp remove --scope user\`); then restart the client`,
+    );
+    expectOneEach(
+      p5c,
+      edit(p5c, (m) => {
+        delete m.user.k1;
+        m.projects[p2] = { disabledMcpServers: ["k2"], mcpServers: { k1: launch(c2) } };
+      }),
+      c2,
+      "P5c: keep k2",
+    );
+    // two such projects needing different keys: no key to keep, so no step
+    mkdirSync(p3, { recursive: true });
+    symlinkSync(path.join(sb.home, "nowhere", ".git"), path.join(p3, ".git"));
+    const both = edit(p5c, (m) => {
+      m.projects[p3] = { disabledMcpServers: ["k2"] };
+    });
+    const { r: r2 } = await rowOf(both);
+    expect(r2.fix).toBe(
+      `keep one: outside the projects Claude Code records, "k1", "k2" all start, and removing any of them leaves a project with no server — which to keep is yours: doctor offers no local add in ${p1}, ${p3}, where doctor cannot tell which record that command writes, and no one of them starts in each of those, so it offers no step there: \`/mcp\` in a session there shows what it starts; then restart the client`,
+    );
+    expect(r2.fix).not.toContain("claude mcp remove");
+  });
+
+  it("the choice outside the projects is settled first: a project's choice is planned without the user-scope entries it removes in every branch, so no `/mcp disable` there turns off another program's server they hid (VR8-3)", async () => {
+    sb = sandbox();
+    const { folder } = installPlugin(sb.home, folderMarketplace(sb.home));
+    const c1 = path.join(folder, "dist", "cli.js");
+    const a = path.join(sb.home, "a");
+    const abc = path.join(a, "b", "c");
+    const c = path.join(sb.home, "c");
+    const p5: Model = {
+      user: { k2: launch(c1) },
+      projects: { [abc]: {}, [c]: { disabledMcpServers: [PK] } },
+      mcpjson: { [a]: { k2: OTHER } },
+      plugin: true,
+    };
+    const { r } = await rowOf(p5);
+    // it was: "…; in ~/a/b/c ("k2", beside the plugin), removing it leaves another directory with
+    // no server — turn it off there (`/mcp disable <name>` …)" — once the user-scope k2 is gone,
+    // ~/a/b/c offers ~/a/.mcp.json's k2, another program's, and that turns it off
+    expect(r.fix).not.toContain("/mcp disable");
+    expect(r.fix).toBe(
+      `keep one: outside the projects Claude Code records, the plugin and "k2" start, and removing it leaves ${c} (which turns the plugin off) with no server — turn the plugin back on there (\`/mcp enable ${PK}\` in a session in each), or keep it only there (\`claude mcp add --scope local\` in a terminal there, under "k2" in ${c}; then \`claude mcp remove --scope user k2\`), or ${UNINSTALL}; then restart the client`,
+    );
+    // both branches of the outside clause followed, and the uninstall
+    const onAgain = edit(p5, (m) => {
+      m.user = {};
+      m.projects[c] = {};
+    });
+    const onlyThere = edit(p5, (m) => {
+      m.user = {};
+      m.projects[c] = { disabledMcpServers: [PK], mcpServers: { k2: launch(c1) } };
+    });
+    const uninstall = edit(p5, (m) => (m.plugin = false));
+    for (const [label, after] of [
+      ["turn the plugin back on", onAgain],
+      ["keep it only there", onlyThere],
+      ["uninstall", uninstall],
+    ] as const) {
+      expectOneEach(p5, after, c1, `VR8-3: ${label}`);
+      expect(startedBy(after, abc).get("k2"), label).toEqual(
+        label === "uninstall" ? launch(c1) : OTHER,
+      );
+    }
+    // beside no plugin: the key kept at user scope settles ~/p3 too, whose local k3 then goes —
+    // planned once the outside choice's removals are made, and listed
+    sb.cleanup();
+    sb = sandbox();
+    const one = espnCopy(path.join(sb.home, "src", "espn-fantasy-football-mcp"));
+    const c2 = path.join(one, "dist", "cli.js");
+    const [p1, p2, p3] = ["p1", "p2", "p3"].map((x) => path.join(sb.home, x)) as [
+      string,
+      string,
+      string,
+    ];
+    const no: Model = {
+      user: { k1: launch(c2), k2: launch(c2) },
+      projects: {
+        [p1]: { disabledMcpServers: ["k1"] },
+        [p2]: { disabledMcpServers: ["k2"] },
+        [p3]: { mcpServers: { k3: launch(c2) } },
+      },
+      mcpjson: {},
+      plugin: false,
+    };
+    const { r: rn } = await rowOf(no);
+    expect(rn.fix).toBe(
+      `keep one: remove the other entry (\`cd ${p3} && claude mcp remove --scope local k3\`); outside the projects Claude Code records, "k1", "k2" all start, and removing any of them leaves a project with no server — keep "k1" at user scope and the others only in the projects that need them (\`claude mcp add --scope local\` there, then their \`claude mcp remove --scope user\`); then restart the client`,
+    );
+    expectOneEach(
+      no,
+      edit(no, (m) => {
+        delete m.user.k2;
+        m.projects[p1] = { disabledMcpServers: ["k1"], mcpServers: { k2: launch(c2) } };
+        m.projects[p3] = {};
+      }),
+      c2,
+      "VR8-3: beside no plugin",
+    );
+  });
+
+  it("uninstall offers no `claude purge` of a gone directory whose records — the path, its trailing-slash twin — hold an entry that is not this server's, and names every record a purge it offers deletes (VR8-5)", () => {
+    sb = sandbox();
+    const one = espnCopy(path.join(sb.home, "src", "espn-fantasy-football-mcp"));
+    const c1 = path.join(one, "dist", "cli.js");
+    const gone = path.join(sb.home, "gone");
+    const g2 = path.join(sb.home, "g2");
+    const g3 = path.join(sb.home, "g3");
+    write(path.join(sb.home, ".claude.json"), {
+      mcpServers: {},
+      projects: {
+        [gone]: { mcpServers: { [SN]: launch(c1), k1: OTHER } },
+        [g2]: { mcpServers: { k2: OTHER } },
+        [`${g2}/`]: { mcpServers: { k3: launch(c1) } },
+        [g3]: { allowedTools: [] },
+        [`${g3}/`]: { mcpServers: { k4: launch(c1) } },
+      },
+    });
+    const steps = manualSteps(sb.home, [], findRegistrations(sb.home));
+    const at = (needle: string): string => steps.find((l) => l.includes(needle)) ?? "";
+    // it was: "… mkdir -p ~/gone && cd ~/gone && claude mcp remove … (or claude purge ~/gone, …)"
+    const g = at(`project ${gone})`);
+    expect(g).toContain(`mkdir -p ${gone} && cd ${gone} && claude mcp remove --scope local ${SN}`);
+    expect(g).not.toContain(`(or claude purge ${gone}`);
+    expect(g).toContain(
+      `never claude purge ${gone}: it deletes every record of that directory whole (projects[${JSON.stringify(gone)}]), an entry that is not this server's included`,
+    );
+    // it was: "… claude purge ~/g2/ while ~/g2/ does not exist …" — which deletes projects["~/g2"] too
+    const t = at(`project ${g2}/)`);
+    expect(t).not.toMatch(/to remove it: claude purge/u);
+    expect(t).toContain(
+      `to remove it: delete projects[${JSON.stringify(`${g2}/`)}].mcpServers["k3"] from ${path.join(sb.home, ".claude.json")} by hand, with every Claude Code session closed and the file backed up first (claude purge ${g2}/ deletes every record of that directory whole (projects[${JSON.stringify(`${g2}/`)}], projects[${JSON.stringify(g2)}]), an entry that is not this server's included)`,
+    );
+    // a twin holding nothing that is not this server's: the purge, every record it deletes named
+    const t3 = at(`project ${g3}/)`);
+    expect(t3).toContain(
+      `to remove it: claude purge ${g3}/ while ${g3}/ does not exist (it deletes all of Claude Code's state for that directory: projects[${JSON.stringify(`${g3}/`)}], projects[${JSON.stringify(g3)}])`,
+    );
+    for (const l of steps) expect(l).not.toMatch(ANY);
+    // the record of its real path, which the purge may delete too: never a purge there
+    sb.cleanup();
+    sb = sandbox();
+    const two = espnCopy(path.join(sb.home, "src", "espn-fantasy-football-mcp"));
+    mkdirSync(path.join(sb.home, "real"), { recursive: true });
+    symlinkSync(path.join(sb.home, "real"), path.join(sb.home, "link"));
+    const viaLink = path.join(sb.home, "link", "gone");
+    const real = path.join(sb.home, "real", "gone");
+    write(path.join(sb.home, ".claude.json"), {
+      mcpServers: {},
+      projects: {
+        [viaLink]: { mcpServers: { k5: launch(path.join(two, "dist", "cli.js")) } },
+        [real]: { mcpServers: { k6: OTHER } },
+      },
+    });
+    const s2 = manualSteps(sb.home, [], findRegistrations(sb.home));
+    const v = s2.find((l) => l.includes(`project ${viaLink})`)) ?? "";
+    expect(v).not.toMatch(/to remove it: claude purge/u);
+    expect(v).toContain(
+      `to remove it: delete projects[${JSON.stringify(viaLink)}].mcpServers["k5"] from ${path.join(sb.home, ".claude.json")} by hand, with every Claude Code session closed and the file backed up first (claude purge ${viaLink} may also delete projects[${JSON.stringify(real)}], the record of its real path, which uninstall cannot tell apart from it)`,
+    );
+  });
+
+  it("past the first 1000 records ~/.claude.json holds, doctor says so and prints no step that removes an entry, turns one off or uninstalls the plugin: a session there may need it (F6)", async () => {
+    sb = sandbox();
+    const { folder } = installPlugin(sb.home, folderMarketplace(sb.home));
+    const c1 = path.join(folder, "dist", "cli.js");
+    const n = MAX_CLIENT_PROJECTS + 2;
+    const projects: Record<string, unknown> = {};
+    for (let i = 0; i < n; i++) {
+      const d = path.join(sb.home, "p", String(i));
+      mkdirSync(d, { recursive: true });
+      projects[d] = i === n - 1 ? { disabledMcpServers: [PK] } : {};
+    }
+    const file = path.join(sb.home, ".claude.json");
+    write(file, { mcpServers: { [SN]: launch(c1) }, projects });
+    const scan = scanClientConfig("code", file);
+    expect(scan.projectCount).toBe(n);
+    const r = await checkLaunchConfig(makeIo(sb, { exec: shimOk }), [scan], scanPlugin(sb.home));
+    expect(r.status).toBe("warn");
+    expect(r.details).toContain(
+      `code: ${file} records ${String(n)} projects and doctor reads the first ${String(MAX_CLIENT_PROJECTS)}: it cannot tell what a session in the other ${String(n - MAX_CLIENT_PROJECTS)} starts, so it prints no step that removes an entry, turns one off or uninstalls the plugin`,
+    );
+    // it was: "keep one: remove the `claude mcp add` entry (`claude mcp remove --scope user …`), or
+    // uninstall the plugin (…)" — the last project, unread, turns the plugin off
+    expect(r.fix).toBe(
+      `keep one: doctor cannot tell what a session in the ${String(n - MAX_CLIENT_PROJECTS)} projects past the first ${String(MAX_CLIENT_PROJECTS)} it reads starts, so it offers no step that removes an entry, turns one off or uninstalls the plugin: \`/mcp\` in a session shows what it starts`,
+    );
+    // the uninstall step's own detail is no fix's either: ~/p/1 turned this server's key off, and
+    // within the bound the detail says the entry the fix adds does not start there
+    const said = "the user-scope entry the fix adds does not start there";
+    const layoutOf = (count: number): Record<string, unknown> =>
+      Object.fromEntries(
+        Array.from({ length: count }, (_, i) => [
+          path.join(sb.home, "p", String(i)),
+          i === 0
+            ? { mcpServers: { k1: launch(c1) } }
+            : i === 1
+              ? { disabledMcpServers: [SN] }
+              : {},
+        ]),
+      );
+    write(file, { mcpServers: {}, projects: layoutOf(3) });
+    const within = await checkLaunchConfig(
+      makeIo(sb, { exec: shimOk }),
+      [scanClientConfig("code", file)],
+      scanPlugin(sb.home),
+    );
+    expect(within.details.join("\n")).toContain(said);
+    write(file, { mcpServers: {}, projects: layoutOf(n) });
+    const past = await checkLaunchConfig(
+      makeIo(sb, { exec: shimOk }),
+      [scanClientConfig("code", file)],
+      scanPlugin(sb.home),
+    );
+    expect(past.fix).not.toContain("claude mcp remove");
+    expect(past.details.join("\n")).not.toContain(said);
+    // a plugin Claude Code cannot load: its fix keeps the entries' own keep-one out too
+    rmSync(path.join(sb.home, ".claude", "plugins", "known_marketplaces.json"), { force: true });
+    write(file, { mcpServers: { k1: launch(c1), k2: launch(c1) }, projects: layoutOf(n) });
+    const unloaded = await checkLaunchConfig(
+      makeIo(sb, { exec: shimOk }),
+      [scanClientConfig("code", file)],
+      scanPlugin(sb.home),
+    );
+    expect(unloaded.fix).toContain("doctor cannot tell what a session in the");
+    expect(unloaded.fix).not.toContain("claude mcp remove");
+  }, 60_000);
+
+  it("the keep rule's work budget: user-scope entries every one of 1000 projects reads are planned only within it (F7)", () => {
+    const at = (name: string): ClientEntry => ({
+      name,
+      spec: {},
+      scope: "user",
+      file: "/h/.claude.json",
+      dir: null,
+      pluginSource: false,
+      declined: false,
+      declinedBy: [],
+      absent: false,
+    });
+    const sessions = Array.from({ length: 1000 }, (_, i) => ({
+      dir: `/p/${String(i)}`,
+      declined: [],
+      disabled: [`u${String(i % 8)}`],
+    }));
+    const few = Array.from({ length: 8 }, (_, j) => at(`u${String(j)}`));
+    expect(duplicateRegistrations(few, sessions).planned).toBe(true);
+    const many = Array.from({ length: 256 }, (_, j) => at(`u${String(j)}`));
+    expect(1001 * 256 * 257).toBeGreaterThan(MAX_PLAN_WORK);
+    const d = duplicateRegistrations(many, sessions);
+    expect(d.planned).toBe(false);
+    expect(d.most).toBe(256);
+    expect(d.extra).toEqual([]);
+    expect(d.unresolved).toEqual([]);
+  });
+
+  it("more registrations than the keep rule plans for: row 2 still counts the duplicate, says so, and offers no step — it was a multi-MB fix line after minutes (F7)", async () => {
+    sb = sandbox();
+    const { folder } = installPlugin(sb.home, folderMarketplace(sb.home));
+    const c1 = path.join(folder, "dist", "cli.js");
+    const n = MAX_PLANNED_REGISTRATIONS + 1;
+    const user = Object.fromEntries(
+      Array.from({ length: n }, (_, i) => [`k${String(i)}`, launch(c1)]),
+    );
+    const p = path.join(sb.home, "p");
+    mkdirSync(p, { recursive: true });
+    const file = path.join(sb.home, ".claude.json");
+    write(file, { mcpServers: user, projects: { [p]: { disabledMcpServers: [PK] } } });
+    const scan = scanClientConfig("code", file);
+    const t0 = performance.now();
+    const r = await checkLaunchConfig(makeIo(sb, { exec: shimOk }), [scan], scanPlugin(sb.home));
+    expect(performance.now() - t0).toBeLessThan(20_000);
+    expect(r.status).toBe("warn");
+    expect(r.message).toContain("Claude Code registers this server");
+    expect(r.fix).toBe(
+      `keep one: Claude Code holds more registrations of this server (${String(n)}), and sessions reading them, than doctor plans a fix for, so it offers no step that removes an entry, turns one off or uninstalls the plugin: \`/mcp\` in a session shows what it starts`,
+    );
+    expect(r.fix).not.toContain("claude mcp remove");
+  }, 60_000);
 });

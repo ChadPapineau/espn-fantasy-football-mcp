@@ -58,6 +58,7 @@ import {
   duplicateRegistrations,
   filedWhere,
   launchOf,
+  MAX_CLIENT_PROJECTS,
   outputLine,
   pluginLoads,
   pluginMayLoad,
@@ -561,8 +562,11 @@ function runsPluginLine(e: ClientEntry, root: string | null): boolean {
  * entry starts (VR7-1, VR7-4); a decline or removal is offered instead of `/mcp disable` only where
  * nothing else then starts under that key (VR7-3); and where doctor cannot tell which record a
  * session reads, no step there writes one — `/mcp enable` and `/mcp disable` included — and the
- * line says that step is the user's, each withheld add saying why (VR1, VR2, VR3). Doctor models
- * Claude Code 2.1.308's rules; its known limits are listed in docs/evals/stage-c-backlog.md.
+ * line says that step is the user's, each withheld add saying why (VR1, VR2, VR3). Round 9 (ruling
+ * D-9): no outside-the-projects alternative removes an entry a project whose key doctor cannot tell
+ * still needs (F4); past the records doctor reads, or the registrations its keep rule plans for, it
+ * says so and offers no step (F6, F7). Doctor models Claude Code 2.1.308's rules; its known limits
+ * are listed in docs/evals/stage-c-backlog.md.
  */
 export async function checkLaunchConfig(
   io: CliIo,
@@ -600,6 +604,8 @@ async function launchConfigRow(
   /** Every Claude Code entry that is not a registration of ours: under a key of ours at a narrower
    * scope, it is what a session there starts (V5-2, V5-3). */
   const codeHeld: HeldEntry[] = [];
+  /** The `projects` records past those doctor reads (F6): no keep-one step is printed then. */
+  let unreadProjects = 0;
   const desktopDuplicates: {
     file: string;
     most: number;
@@ -638,6 +644,14 @@ async function launchConfigRow(
     if (s.client === "code") {
       codeSessions.push(...s.sessions);
       codeHeld.push(...s.held);
+      // past the records doctor reads, a session may start what it does not see: said, and no
+      // step that removes an entry, turns one off or uninstalls the plugin is printed (F6)
+      if (s.projectCount > MAX_CLIENT_PROJECTS) {
+        unreadProjects += s.projectCount - MAX_CLIENT_PROJECTS;
+        details.push(
+          `${s.client}: ${s.file} records ${String(s.projectCount)} projects and doctor reads the first ${String(MAX_CLIENT_PROJECTS)}: it cannot tell what a session in the other ${String(s.projectCount - MAX_CLIENT_PROJECTS)} starts, so it prints no step that removes an entry, turns one off or uninstalls the plugin`,
+        );
+      }
     }
     // a project directory doctor cannot stat is still a session: said (V3-5); so is one whose key
     // doctor cannot tell, whose local entries are then removed by hand (D-7 (d))
@@ -779,6 +793,7 @@ async function launchConfigRow(
       : null,
     codeHeld,
   );
+  const counted = new Set(codeRegistrations);
   // the plugin turned off in a project: said wherever the fix weighs it — one Claude Code loads or
   // may load, and one it cannot load yet whose re-add the fix offers (verifier F1)
   if (pluginRuns || pluginMaybe || pluginUnresolved) {
@@ -791,14 +806,14 @@ async function launchConfigRow(
   // a counted entry `/mcp disable` turned off in some projects: said the same way (V3-1); one
   // turned off everywhere it is seen is declined, said above
   for (const o of code.offIn)
-    if (codeRegistrations.includes(o.entry))
+    if (counted.has(o.entry))
       details.push(
         `${whereOf(o.entry.scope, o.entry.dir)}: turned off in ${listedDirs(o.dirs)} (\`/mcp disable\`: \`disabledMcpServers\` in ~/.claude.json) — Claude Code does not start it there`,
       );
   // a counted entry whose key another program's entry holds at a narrower scope in some projects:
   // Claude Code starts that one there instead (V5-2, V5-3)
   for (const o of code.overriddenIn)
-    if (codeRegistrations.includes(o.entry))
+    if (counted.has(o.entry))
       details.push(
         o.by === "narrower"
           ? `${whereOf(o.entry.scope, o.entry.dir)}: in ${listedDirs(o.dirs)}, an entry that is not this server holds its key at a narrower scope — Claude Code starts that one there instead`
@@ -858,7 +873,14 @@ async function launchConfigRow(
                 `in ${allDirs(control)}, whose ${control.length === 1 ? "path holds" : "paths hold"} a control character, which no command shows as it runs`,
               ]),
         ];
-        return `outside the projects Claude Code records, ${names} all start, and removing any of them leaves a project with no server — keep one at user scope and the others only in the projects that need them (\`claude mcp add --scope local\` there, then their \`claude mcp remove --scope user\`${never.length === 0 ? "" : `; doctor offers no such add ${never.join(" or ")}`})`;
+        // the key kept at user scope is one every such project starts, so no alternative removes
+        // the only server of a project where no local add is offered (F4); none: no step there
+        if (u.keepsAdded === true)
+          return `outside the projects Claude Code records, the entry the first step adds and ${names} start, and removing ${it} leaves a project with no server — keep ${it} only in the projects that need ${it} (\`claude mcp add --scope local\` there, then ${it === "it" ? "its" : "their"} \`claude mcp remove --scope user\`)`;
+        const keep = u.keepAtUser ?? null;
+        if (keep === null)
+          return `outside the projects Claude Code records, ${names} all start, and removing any of them leaves a project with no server — which to keep is yours: doctor offers no local add ${never.join(" or ")}, and no one of them starts in each of those, so it offers no step there: \`/mcp\` in a session there shows what it starts`;
+        return `outside the projects Claude Code records, ${names} all start, and removing any of them leaves a project with no server — keep ${quotedWord(keep)} at user scope and the others only in the projects that need them (\`claude mcp add --scope local\` there, then their \`claude mcp remove --scope user\`)`;
       }
       // the projects it would strip, every one named: turning the plugin back on anywhere else
       // starts it beside an entry there (U3, VR6-4); keeping the entries there adds in each only
@@ -868,24 +890,24 @@ async function launchConfigRow(
       const add = u.leaves.filter((l) => l.blocked === null);
       const control = u.leaves.filter((l) => l.blocked === "control").map((l) => l.dir);
       const unknown = u.leaves.filter((l) => l.blocked === "key").map((l) => l.dir);
-      const enableIn = u.leaves.filter((l) => l.blocked !== "key").map((l) => l.dir);
+      const leaves = `removing ${it} leaves ${allDirs(u.leaves.map((l) => l.dir))} (which turn${u.leaves.length === 1 ? "s" : ""} the plugin off) with no server`;
+      // a project whose key doctor cannot tell needs the entry: every alternative ends in its
+      // removal, so no step at all (F4: "keep it only there …; then `claude mcp remove`" left it
+      // with none)
+      if (unknown.length > 0)
+        return `outside the projects Claude Code records, the plugin and ${names} start, and ${leaves} — ${noStep(unknown)}`;
       const byKeys = new Map<string, string[]>();
       for (const l of add) {
         const ks = l.keys.map(quotedWord).join(", ");
         byKeys.set(ks, [...(byKeys.get(ks) ?? []), l.dir]);
       }
       const under = [...byKeys].map(([ks, ds]) => `${ks} in ${allDirs(ds)}`).join(" and ");
-      const enable =
-        enableIn.length === 0
-          ? ""
-          : `turn the plugin back on ${unknown.length === 0 ? "there" : `in ${allDirs(enableIn)}`} (\`/mcp enable ${PLUGIN_SERVER_KEY}\` in a session in each${add.length === 0 ? `; ${controlWhy(control.length)}, so doctor offers no local entry` : ""})`;
+      const enable = `turn the plugin back on there (\`/mcp enable ${PLUGIN_SERVER_KEY}\` in a session in each${add.length === 0 ? `; ${controlWhy(control.length)}, so doctor offers no local entry` : ""})`;
       const keep =
         add.length === 0
           ? ""
           : `, or keep ${it} only there (\`claude mcp add --scope local\` in a terminal there, under ${under}${control.length === 0 ? "" : `, and the plugin turned back on in ${allDirs(control)}, whose ${control.length === 1 ? "path holds" : "paths hold"} a control character, which no command shows as it runs`}; then ${commands(u.entries)})`;
-      const yours =
-        unknown.length === 0 ? "" : `${enable === "" ? "" : ", and "}${noStep(unknown)}`;
-      return `outside the projects Claude Code records, the plugin and ${names} start, and removing ${it} leaves ${allDirs(u.leaves.map((l) => l.dir))} (which turn${u.leaves.length === 1 ? "s" : ""} the plugin off) with no server — ${enable}${keep}${yours}`;
+      return `outside the projects Claude Code records, the plugin and ${names} start, and ${leaves} — ${enable}${keep}`;
     }
     // turned off there: `/mcp disable`, which turns the key off whatever holds it; a decline or a
     // removal instead only where nothing else then starts under that key there (VR7-3); and no step
@@ -927,7 +949,7 @@ async function launchConfigRow(
   /** Without the plugin: the keep rule over the `claude mcp add` entries alone. */
   const planB = clause(code.extra, code.unresolved, "remove the other");
   /** Where `espn-fantasy-football` is another program's, so the entry a step adds takes a spare key. */
-  const heldWhy = (heldIn: readonly (string | null)[]): string =>
+  const heldWhy = (heldIn: readonly (string | null)[], hiddenIn: readonly string[]): string =>
     [
       ...(heldIn.includes(null)
         ? [
@@ -937,6 +959,12 @@ async function launchConfigRow(
       ...(heldIn.some((d) => d !== null)
         ? [
             `in ${allDirs(heldIn.flatMap((d) => (d === null ? [] : [d])))} an entry that is not this server holds \`${SERVER_NAME}\` at a narrower scope, which Claude Code starts there instead`,
+          ]
+        : []),
+      // the add would keep another program's pending project server from ever being offered (OQ-4)
+      ...(hiddenIn.length > 0
+        ? [
+            `in ${allDirs(hiddenIn)} a project server that is not this server holds \`${SERVER_NAME}\` and is not approved there, which Claude Code never offers while the user scope holds that key`,
           ]
         : []),
     ].join("; ");
@@ -988,7 +1016,7 @@ async function launchConfigRow(
         : [
             add.key === SERVER_NAME
               ? "this server is added at user scope (`eff print-config --client code` prints the command)"
-              : `this server is added at user scope under the key \`${add.key}\` (\`eff print-config --client code\` prints the command: give it that key — ${heldWhy(add.heldIn)})`,
+              : `this server is added at user scope under the key \`${add.key}\` (\`eff print-config --client code\` prints the command: give it that key — ${heldWhy(add.heldIn, add.hiddenIn)})`,
           ]),
       ...(on.length > 0
         ? [
@@ -1040,7 +1068,17 @@ async function launchConfigRow(
     duplicateMessages.push(
       `doctor cannot tell whether Claude Code loads the plugin beside the \`claude mcp add\` ${entriesWord(live.length)}: ${registryUnjudged ? "it cannot judge known_marketplaces.json" : "it does not follow the plugin's source in its folder marketplace"}`,
     );
-  if (pluginRuns && worst.servers > 1)
+  // records doctor does not read (F6), or more registrations than the keep rule plans for (F7):
+  // no step that removes, turns off or uninstalls
+  const unread =
+    unreadProjects > 0
+      ? `doctor cannot tell what a session in the ${String(unreadProjects)} projects past the first ${String(MAX_CLIENT_PROJECTS)} it reads starts, so it offers no step that removes an entry, turns one off or uninstalls the plugin: \`/mcp\` in a session shows what it starts`
+      : code.planned
+        ? null
+        : `Claude Code holds more registrations of this server (${String(codeAll.length)}), and sessions reading them, than doctor plans a fix for, so it offers no step that removes an entry, turns one off or uninstalls the plugin: \`/mcp\` in a session shows what it starts`;
+  if (unread !== null && (worst.servers > 1 || maybeBeside))
+    duplicateFixes.push(`keep one: ${unread}`);
+  else if (pluginRuns && worst.servers > 1)
     // beside a plugin Claude Code loads, keeping one entry means uninstalling the plugin — even where
     // an entry running its command line makes Claude Code drop it, removing that entry restores it
     duplicateFixes.push(
@@ -1068,6 +1106,7 @@ async function launchConfigRow(
   // turning it back on there — never where the fix adds no such entry (M1)
   const strips = code.withPlugin?.uninstallStrips ?? [];
   if (
+    unread === null &&
     ((pluginRuns && worst.servers > 1) || maybeBeside) &&
     code.withPlugin?.uninstallAdd?.key === SERVER_NAME
   ) {
@@ -1102,11 +1141,11 @@ async function launchConfigRow(
           codeHeld,
         ).withPlugin
       : null;
-  const once = asIf !== null && asIf.worst.servers > 1 ? keepOne(asIf).planA : "";
+  const once = asIf !== null && asIf.worst.servers > 1 ? (unread ?? keepOne(asIf).planA) : "";
   const unloadableFix =
     live.length === 0
       ? reAdd
-      : `${reAdd}${once === "" ? "" : `, and once it loads keep one: ${once}`} — or \`claude plugin uninstall ${PLUGIN_ID}\` and keep the \`claude mcp add\` ${entriesWord(live.length)} instead${planB === "" ? "" : `: ${planB}`}`;
+      : `${reAdd}${once === "" ? "" : `, and once it loads keep one: ${once}`} — or \`claude plugin uninstall ${PLUGIN_ID}\` and keep the \`claude mcp add\` ${entriesWord(live.length)} instead${planB === "" ? "" : `: ${unread ?? planB}`}`;
   if (hard)
     return row(
       2,

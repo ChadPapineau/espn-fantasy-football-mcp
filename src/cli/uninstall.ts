@@ -65,7 +65,9 @@ import {
   cookieFindings,
   filedWhere,
   gitWorkTreeAt,
+  localHandEdit,
   outputLine,
+  quotedWord,
   realPathOnceMade,
   removalOf,
   shellWord,
@@ -352,6 +354,10 @@ function pluginWhere(plugin: PluginInstall): string {
  * nothing is at the path (with something there, purge also acts on the other record). A key or
  * directory holding a terminal control gets the hand edit, never a command (D-8).
  */
+// A purge deletes every record of the path whole — its twin with or without a trailing slash too —
+// so none is offered where one of them holds an entry that is not this server's, or where it may
+// delete the record of the path's real path (verifier VR8-5: the hand edit then), and each purge
+// offered names the records it deletes.
 function goneRemoval(who: string, e: ClientEntry, dir: string, notDirectory: boolean): string {
   const what = notDirectory ? "is not a directory" : "does not exist";
   const r = removalOf(e);
@@ -372,18 +378,32 @@ function goneRemoval(who: string, e: ClientEntry, dir: string, notDirectory: boo
           : real === null
             ? { at: null, said: null, why: null }
             : { at: real, said: `its real path ${real}`, why: null };
+  // the records the purge deletes whole: never offered where one holds an entry that is not this
+  // server's, or where it may delete the record of the path's real path too (VR8-5); named where
+  // there is more than this one
+  const purge = e.purges ?? { records: [dir], unsafe: null };
+  const named =
+    purge.records.length > 1
+      ? `: ${purge.records.map((h) => `projects[${quotedWord(h)}]`).join(", ")}`
+      : "";
+  const byHand =
+    purge.unsafe === null
+      ? null
+      : `${who}: recorded for ${dir}, which ${what}, so never started — to remove it: ${localHandEdit(e, `claude purge ${d} ${purge.unsafe}`)}`;
   if (!notDirectory) {
     if (other === null)
-      return `${who}: recorded for ${dir}, which does not exist, so never started — to remove it: mkdir -p ${d} && ${r.command} (or claude purge ${d}, which deletes all of Claude Code's state for that directory)`;
+      return `${who}: recorded for ${dir}, which does not exist, so never started — to remove it: mkdir -p ${d} && ${r.command}${purge.unsafe === null ? ` (or claude purge ${d}, which deletes all of Claude Code's state for that directory${named})` : ` — never claude purge ${d}: it ${purge.unsafe}`}`;
+    if (byHand !== null) return byHand;
     const why =
       other.at === null
         ? `uninstall cannot tell which record Claude Code would file a session there under${other.why === null ? "" : ` (${other.why})`}, so \`claude mcp remove\` there, or \`claude purge\` once it exists, may act on another record`
         : `Claude Code files a session there under ${other.said}, so \`claude mcp remove\` there, or \`claude purge\` once it exists, acts on ${other.at}'s record`;
-    return `${who}: recorded for ${dir}, which does not exist, so never started — to remove it: claude purge ${d} while ${dir} does not exist (it deletes all of Claude Code's state for that directory); never make ${dir} first: ${why}`;
+    return `${who}: recorded for ${dir}, which does not exist, so never started — to remove it: claude purge ${d} while ${dir} does not exist (it deletes all of Claude Code's state for that directory${named}); never make ${dir} first: ${why}`;
   }
+  if (byHand !== null) return byHand;
   if (other === null)
-    return `${who}: recorded for ${dir}, which is not a directory, so never started — to remove it: claude purge ${d} (it deletes all of Claude Code's state for that path; \`claude mcp remove\` cannot run there)`;
-  return `${who}: recorded for ${dir}, which is not a directory, so never started — to remove it: move ${dir} aside, then claude purge ${d} while nothing is there, then move it back; with ${dir} there, claude purge ${other.said === null ? "may also act on another record" : `also acts on the record of ${other.said}`}`;
+    return `${who}: recorded for ${dir}, which is not a directory, so never started — to remove it: claude purge ${d} (it deletes all of Claude Code's state for that path${named}; \`claude mcp remove\` cannot run there)`;
+  return `${who}: recorded for ${dir}, which is not a directory, so never started — to remove it: move ${dir} aside, then claude purge ${d} while nothing is there, then move it back${named === "" ? "" : ` (it deletes all of Claude Code's state for that path${named})`}; with ${dir} there, claude purge ${other.said === null ? "may also act on another record" : `also acts on the record of ${other.said}`}`;
 }
 
 const COOKIE_NOTE =

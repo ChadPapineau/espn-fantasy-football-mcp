@@ -857,7 +857,11 @@ the owner's delegation:
   under the main repository but reads the worktree's own `.mcp.json` chain (round-3 verifier F5,
   confirmed as covered by this limit). Doctor reads each recorded project directory and its
   ancestors only: it never scans subdirectories (a recorded project may be the home directory) or
-  worktrees.
+  worktrees. It reads the first 1000 `projects` records of `~/.claude.json` only
+  (`MAX_CLIENT_PROJECTS`): past them it cannot tell what a session in the others starts, so row 2
+  says so and prints no step that removes an entry, turns one off or uninstalls the plugin (round-8
+  verifier F6; smallest layout: 1001 recorded projects, the last turning the plugin off, a
+  user-scope entry beside the plugin); `eff uninstall` lists no entry of a record past them.
 - **D-3 — the keep rule is greedy** (accepted). It never strips a session's only server, and where
   it cannot settle a view it names the choice as the user's; no global search.
 - **One entry per key (round-6 verifiers V5-2, V5-3, U2; round-7 VR6-1, F2, F3; Claude Code
@@ -932,5 +936,59 @@ the owner's delegation:
   and a sequence's final letter is no word boundary to it (round-7 VR6-5: `leagueId=ESC[31m<id>`
   printed the id). A command whose words hold one is never printed; the line
   says that the entry's key or directory holds a control character and gives the hand edit of its
-  record instead. print-config's stdout snippet is built from this install's own paths and is
-  printed as it runs.
+  record instead. print-config's stdout snippet is built from this install's own paths; where one
+  of its words (the node binary, `dist/cli.js`, an env value) holds a control, print-config prints
+  no snippet and exits 1, naming the path escaped (ruling OQ-1).
+- **D-9 — the bar that ends the refix loop** (orchestrator's ruling, round 9, under the owner's
+  delegation). A finding of reach "contrived" blocks, and is fixed, only when for a layout Claude
+  Code 2.1.308 can hold, doctor, uninstall or print-config: **H1** prints a statement of fact that is
+  false (a detail line, a reason, a claim of what starts where or what a step does) — a missed
+  detection, doctor not seeing a duplicate or a broken entry that exists, is not H1 but a limit;
+  **H2** prints a step or alternative that, followed as written, leaves a session that started this
+  server with none, acts on a record other than the one it names, removes, declines, turns off or
+  overrides another program's entry, starts a new registration of this server beside another in
+  one session, or is refused by Claude Code as written; **H3** prints a credential, cookie,
+  identifier pattern or terminal control raw; **H4** throws, hangs, or reads a file beyond those it
+  is specified to read. Everything else of contrived reach — a missed detection, an alternative that
+  is harmless but leaves an existing duplicate for the next doctor run, a step withheld where doctor
+  says it cannot tell, a less-than-best keep choice (D-3), true-but-unclear wording, a test or
+  mutation gap that cannot yield H1–H4 — is a known limit, recorded below with its smallest layout,
+  not fixed. Findings of reach "owner" or "common" block at any severity.
+- **The round-8 open questions, ruled.** OQ-1: print-config refuses a snippet a word of which holds
+  a terminal control (D-8 above). OQ-2: the gone-directory route's refusal of `mkdir -p` where
+  `realPathOnceMade` cannot tell the path's real path once made is accepted. OQ-3: Claude Code's
+  own path-safety checks on a plain path (its `Ki`, `SS`, `He`) are not modelled — a known limit
+  (D-7's last sentence). OQ-4: the uninstall step's user-scope add takes the spare key wherever
+  another program's project server under `espn-fantasy-football`, not approved, is offered in a
+  session (any recorded project, stripped or not): that add would keep it from ever being offered.
+  OQ-5: another program's entry starting next under a key counts as that key not being off there
+  (round-8 VR7-3's strict reading) — accepted. OQ-6: a project whose key doctor cannot tell gets no
+  `settings.local.json` decline either — accepted.
+- **Known limits recorded under D-9 (round 9), each with its smallest layout.**
+  - The spare-key rule's own-entries term (`heldBelow`'s `winnerOf(d, key, [own, ...regs])`) is
+    untested (round-8 mutant M17): a stripped project with its local `espn-fantasy-football` entry
+    turned off beside another program's approved project server under that key (L1).
+  - A choice repeated per project: where one project turning the plugin off pins a user-scope entry,
+    every other project gets its own "turn it off there" clause — N projects, N clauses (L2; 500
+    recorded projects, the last one turning the plugin off, a user-scope entry beside the plugin
+    and a local entry in each); a fix listing thousands of removals is as long (row 2 plans none past
+    `MAX_PLANNED_REGISTRATIONS` or `MAX_PLAN_WORK`, round-8 F7).
+  - A project whose key doctor cannot tell is planned as a session reading its own record (D-7 (d)),
+    so row 2's count, a choice's "removing any of them leaves another directory with no server" and
+    the "drops the plugin's server" detail can be false for it; no step there is printed (VR8-L1;
+    `~/a/.git` a symbolic link to a git directory, `projects` `~/a/b` {} and `~/a/b/c` with a local
+    entry of ours, the plugin loading: "registers this server twice", where each session starts one).
+  - print-config's own `claude mcp add espn-fantasy-football --scope user` (README step 5) always
+    uses this server's key: it reads no project config, so where another program's project server
+    under that key, not approved, is offered in a recorded project, that add hides it there (VR8-L2;
+    `~/p/.mcp.json` holding `espn-fantasy-football` → `uvx other-server`, `~/p` recorded).
+  - Beside no plugin, "keep \"k\" at user scope and the others only in the projects that need
+    them" does not name those projects, and a project starting two of the others may be given both
+    — an existing duplicate left for the next run (round 9; user scope `k1`, `k2`, `k3`, a project
+    turning `k1` off).
+  - Round 9's mutation pass left survivors that cannot yield H1–H4: the keep rule's readers kept in
+    the pool's order (a local entry is never tied with a user-scope one on reach and depth), the
+    local-entry `reads` check of `dirsReading` and the extra-set check of the pinned keys (neither an
+    absent entry nor a pinned one can be removed or started there), and the `reads` filter of a
+    project server's "nothing starts next" check, whose loss only withholds a decline (a project
+    server declinable where an entry under its key lies in another, unread project).
