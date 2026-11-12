@@ -942,7 +942,8 @@ the owner's delegation:
   control: the C0 controls, DEL, the C1 controls (U+0080–U+009F), the Unicode bidi controls (U+061C,
   U+200E, U+200F, U+202A–U+202E, U+2066–U+2069) and U+2028/U+2029 are printed escaped (ESC as
   `\u{1b}`) at each output's choke point (row 2's `redactedLine`, every doctor row, uninstall's
-  step lines, print-config's warnings). Doctor's and uninstall's lines pass the log redaction
+  step lines, print-config's warnings). Doctor's and uninstall's lines, and print-config's stderr
+  (since round 11's VR10-1: its refusal and missing-build lines name a path), pass the log redaction
   first and are escaped after it (round-6 verifier V5-1: escaped first, a TAB before a fake league
   id hid it from the pattern), every doctor row included (V5-4), and a word quoted in a line is
   redacted before it is quoted. The log redaction allows a terminal control or a whole escape
@@ -978,6 +979,15 @@ the owner's delegation:
   OQ-5: another program's entry starting next under a key counts as that key not being off there
   (round-8 VR7-3's strict reading) — accepted. OQ-6: a project whose key doctor cannot tell gets no
   `settings.local.json` decline either — accepted.
+- **D-10 — the freeze** (orchestrator's ruling, round 11, under the owner's delegation; as ruling
+  R8-8 froze the news matcher in October). Row 2's fix text and uninstall's steps are frozen at
+  51d81fd for contrived layouts. From now on a finding of reach "contrived" is fixed only if (a) it
+  is class H3 (any origin), or (b) it is class H1, H2 or H4 and was introduced by 51d81fd itself (it
+  does not happen at 9338281). Every other contrived finding — pre-existing H1, H2 or H4 included —
+  is recorded below as a known limit with its smallest layout, under the "frozen at 51d81fd (D-10)"
+  heading. A finding of reach "owner" or "common" is fixed at any class and origin. After round 11
+  there is no further doctor verify round in this run; the orchestrator reviews the last refix
+  itself.
 - **Known limits recorded under D-9 (round 9), each with its smallest layout.**
   - The spare-key rule's own-entries term (`heldBelow`'s `winnerOf(d, key, [own, ...regs])`) is
     untested (round-8 mutant M17): a stripped project with its local `espn-fantasy-football` entry
@@ -1023,3 +1033,49 @@ the owner's delegation:
   - Round 10's mutation pass: no survivor yields H1–H4. One survives the unit suite and is killed
     by the process project's `doctor-plan.perf.test.ts` only: the budget's `<=` (2000 registrations
     are planned).
+- **Known limits frozen at 51d81fd (D-10), each with its smallest layout.**
+  - Doctor throws (`RangeError: Maximum call stack size exceeded`, exit 1, no row printed) once
+    Claude Code's config holds about 125,000 entries that are not this server's: `launchConfigRow`
+    spreads the scan's lists into `push` (`codeHeld.push(...s.held)`, `codeSessions`, `codeAll`),
+    past V8's argument limit; `eff uninstall` does not (VR10-2, H4, same at eeb0d08; one
+    `~/.claude.json` holding 130,000 user-scope entries of another program, 5.2 MB, under the 16 MB
+    cap). The fix when wanted: loops in place of the spread pushes.
+  - Row 2 takes a minute or more within the plan budget where other programs' project servers sit
+    under this server's keys across the recorded projects: the budget counts this server's readers
+    only, and `othersRead` filters every project-scope entry of another program under a key on each
+    call (VR10-3, H4; 16 user-scope keys of ours, 1000 recorded projects each turning the plugin and
+    15 of the keys off, each with a `.mcp.json` declaring the 16 keys for another program, not
+    approved: 53 s; 64 keys, 170 s at both 51d81fd and 9338281). The fix when wanted: index those
+    entries by key and directory and look up a session's ancestors only, or count them in the budget.
+  - The keep-it-only-there leaf step and the key-kept-at-user choice re-add an entry at local scope
+    under its own key, and Claude Code 2.1.308's `claude mcp add` refuses a name outside
+    `[A-Za-z0-9_-]` (its `Fz`): for a hand-edited key the printed add is refused, and the user-scope
+    removal after it leaves that project with no server (VR10-4, H2; the plugin, one user-scope
+    entry of ours under `espn.ff`, one recorded project turning the plugin off). The fix when
+    wanted: take such a key only when it is a valid name, else the spare key.
+  - Past `MAX_CLIENT_PROJECTS`, row 2's F6 detail and the fix's unread clause say doctor offers no
+    step that removes an entry, turns one off or uninstalls the plugin, and the same fix then gives
+    Claude Desktop's removal step — right in itself, so the statement is false as written: it means
+    Claude Code's entries (VR10-5, H1; 1001 recorded projects with two user-scope entries of ours,
+    and two Claude Desktop entries of ours).
+  - Past either bound, beside a plugin Claude Code cannot load and a `claude mcp add` entry, row 2's
+    only alternative is to add the marketplace again "and once it loads keep one: doctor cannot
+    tell …": followed as written, the plugin's server starts beside the entry in every session that
+    reads it, with no keep-one step offered; round 10's VR9-2 fix removed the uninstall alternative
+    beside it, the re-add itself is printed at 9338281 (VR10-1 of the fix-text lens, H2; more than
+    1000 `projects` records, one user-scope entry of ours, the plugin's marketplace not known).
+  - Beside no plugin (and in uninstall's alternative), "keep \"k\" at user scope and the others only
+    in the projects that need them (`claude mcp add --scope local` there, …)" names no key for those
+    adds, so each is re-added under its own; where another program's project server under that key,
+    not approved, sits in such a project's `.mcp.json`, the local add keeps it hidden where removing
+    the user-scope entry would let it be offered — VR9-1's class, in the branch VR9-1's fix did not
+    touch (VR10-2 of the fix-text lens, H2, 50 of 40,000 generated layouts at both commits; user
+    scope `espn-fantasy-football` and `k1`, ours; `~/a` turns `espn-fantasy-football` off and
+    `~/a/.mcp.json` holds `k1` → `uvx other-server`, not approved; `~/c` turns `k1` off; no
+    plugin). The fix when wanted: name those projects and give each one local add under a key it
+    starts with no other program's entry read there, else the spare key.
+  - The VR9-3 tests hold no entry running the plugin's command line, so `viewAt` is never built
+    there and a mutant calling the plugin's line check per view entry passes the targeted suite, its
+    quadratic cost unpinned; 51d81fd's code is linear (20,000 user-scope entries × 1,000 projects
+    with one such entry: 2.5 s) (VR10-L1, a test gap; the VR9-3 layout with one entry running the
+    plugin's command line, last in the pool).

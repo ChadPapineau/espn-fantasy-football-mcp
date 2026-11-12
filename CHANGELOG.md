@@ -347,9 +347,10 @@ minor version (plan 04 §4.4; plan 09 K6). One version covers the server, the Sk
   `eff uninstall` no longer prints a `claude mcp remove espn-fantasy-football` that would remove it.
   A registration by package name (npx, npm exec) is diagnosed without running npx. Doctor and `eff
   uninstall` never print a launch word that holds more than a path (an `sh -c` command line can
-  carry `ESPN_S2=…` and other values), and every line of every doctor row, and of `eff uninstall`,
-  passes the log redaction (a key named in the fix, or in a hand edit, is redacted before it is
-  quoted) before its terminal controls are escaped, so a credential-shaped word beside a TAB or a
+  carry `ESPN_S2=…` and other values), and every line of every doctor row, of `eff uninstall` and
+  of `eff print-config`'s stderr (its refusal and missing-build lines name a path) passes the log
+  redaction (a key named in the fix, or in a hand edit, is redacted before it is quoted) before its
+  terminal controls are escaped, so a credential-shaped word beside a TAB or a
   line break is still pseudonymized — as is one whose name and value a terminal control or escape
   sequence (`ESC[31m`, CSI, OSC) separates, or that follows such a sequence (the log redaction
   allows them as a gap and as a word boundary); every path, key or name they read from a client config,

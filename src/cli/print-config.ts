@@ -11,7 +11,7 @@ import { existsSync } from "node:fs";
 import path from "node:path";
 import { assertNotSynced, fileProviderMarks, PathSecurityError } from "../config/paths.js";
 import type { ConfigKey, LenientConfig } from "../config/schema.js";
-import { escapeControls, holdsControl, pluginLoads, scanPlugin } from "./client-config.js";
+import { holdsControl, outputLine, pluginLoads, scanPlugin } from "./client-config.js";
 import { EXIT, UsageError } from "./exit.js";
 import { distEntry, write, writeLine, type CliIo } from "./io.js";
 
@@ -241,8 +241,10 @@ export function controlledWords(spec: LaunchSpec): string[] {
 
 /**
  * `eff print-config`: the snippet on stdout; where to paste it and any warning on stderr — each
- * warning with its terminal controls escaped (ruling D-8: a path is shown, never acted on). A
- * snippet one of whose words holds a terminal control is never printed (ruling OQ-1).
+ * warning passed through the log redaction, then its terminal controls escaped, as doctor's and
+ * uninstall's lines are (`outputLine`; rulings D-6, D-8: a path is shown, never acted on, and a
+ * credential-shaped word in it is pseudonymized — round-11 VR10-1). A snippet one of whose words
+ * holds a terminal control is never printed (ruling OQ-1).
  */
 export async function printConfig(
   io: CliIo,
@@ -251,7 +253,7 @@ export async function printConfig(
 ): Promise<number> {
   if (client === undefined || !(CLIENTS as readonly string[]).includes(client))
     throw new UsageError("print-config needs --client desktop or --client code");
-  const warn = (line: string): Promise<void> => writeLine(io.stderr, escapeControls(line));
+  const warn = (line: string): Promise<void> => writeLine(io.stderr, outputLine(line));
   let spec: LaunchSpec;
   try {
     spec = launchSpec(io, config);

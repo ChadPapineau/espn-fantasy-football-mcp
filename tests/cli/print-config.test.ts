@@ -1,9 +1,11 @@
 // print-config.test.ts — plan 03 L4, §4.1–§4.3 (absolute, quoted paths; the `espn-fantasy-football`
 // key; only non-secret env keys that came from the environment; never a cookie, an API key or the
 // credential-store keys; a warning under a file-provider or synced directory — ADV OBJ-10).
-import { mkdirSync, symlinkSync } from "node:fs";
+import { mkdirSync, symlinkSync, writeFileSync } from "node:fs";
 import path from "node:path";
 import { afterEach, describe, expect, it } from "vitest";
+import { fakeEspnS2, fakeGuid } from "../../scripts/ci/secret-fixtures.mjs";
+import { main } from "../../src/cli/main.js";
 import {
   MissingBuildError,
   RUNTIME_LOCATION_FIX,
@@ -232,5 +234,84 @@ describe("the printed `claude mcp add` is accepted by Claude Code's option parse
     expect(parsed.command).toEqual(["/abs/node", "/abs/My Repo/dist/cli.js", "serve"]);
     expect(words).toContain("--scope");
     expect(words[words.indexOf("--scope") + 1]).toBe("user");
+  });
+});
+
+describe("Refix round 11 (D-10): print-config's stderr passes the log redaction before its controls are escaped, as doctor's and uninstall's lines do (VR10-1, D-6, D-8)", () => {
+  /** Every terminal-control class D-8 names. */
+  const ANY =
+    /[\u0000-\u001f\u007f-\u009f\u061c\u200e\u200f\u202a-\u202e\u2066-\u2069\u2028\u2029]/u;
+  const built = (root: string): string => {
+    mkdirSync(path.join(root, "dist"), { recursive: true });
+    writeFileSync(path.join(root, "dist", "cli.js"), "#!/usr/bin/env node\n");
+    return root;
+  };
+  it("a refusal naming a path, node binary or directory override that holds `espn_s2=…` or `SWID={…}` beside a control, and the missing-build line, print no fake token", async () => {
+    sb = sandbox();
+    const s2 = fakeEspnS2("d10-vr10-1", 120);
+    const guid = fakeGuid("d10-vr10-1");
+    const clean = built(path.join(sb.dir, "clean"));
+    // a bidi control in each directory override: the config loader refuses a C0 one first (exit 2)
+    const cfg = path.join(sb.dir, `cfg-espn_s2=${s2}\u202e`);
+    const cache = path.join(sb.dir, `cache-SWID={${guid}}\u2066`);
+    mkdirSync(cfg, { recursive: true, mode: 0o700 });
+    mkdirSync(cache, { recursive: true, mode: 0o700 });
+    const cases: [string, Partial<Parameters<typeof makeIo>[1]>, string][] = [
+      [
+        "packageRoot",
+        { packageRoot: built(path.join(sb.dir, `espn_s2=${s2}\u001b[0m`)) },
+        "the argument (",
+      ],
+      [
+        "execPath",
+        { packageRoot: clean, execPath: `/opt/espn_s2=${s2}\u009b/node` },
+        "the node binary (",
+      ],
+      [
+        "execPath (SWID)",
+        { packageRoot: clean, execPath: `/opt/SWID={${guid}}\u001b/node` },
+        "the node binary (",
+      ],
+      [
+        "EFF_CONFIG_DIR",
+        { packageRoot: clean, env: { ESPN_LEAGUE_ID: "0", EFF_CONFIG_DIR: cfg } },
+        "EFF_CONFIG_DIR (",
+      ],
+      [
+        "EFF_CACHE_DIR",
+        { packageRoot: clean, env: { ESPN_LEAGUE_ID: "0", EFF_CACHE_DIR: cache } },
+        "EFF_CACHE_DIR (",
+      ],
+    ];
+    for (const client of ["code", "desktop"] as const)
+      for (const [what, over, names] of cases) {
+        const label = `${client} ${what}`;
+        const io = makeIo(sb, { env: { ESPN_LEAGUE_ID: "0" }, ...over });
+        expect(await main(["print-config", "--client", client], io), label).toBe(1);
+        expect(io.out.text, label).toBe("");
+        // it was: the word printed whole, only its control escaped — the fake espn_s2 or GUID raw
+        expect(io.err.text, label).not.toContain(s2);
+        expect(io.err.text.toUpperCase(), label).not.toContain(guid);
+        // the refusal still names the word that holds the control
+        expect(io.err.text, label).toContain(names);
+        expect(io.err.text, label).toContain("no snippet is printed");
+        for (const l of io.err.text.split("\n")) expect(l, label).not.toMatch(ANY);
+      }
+    // no build under a path holding a brace GUID: the missing-build line (`expected …/dist/cli.js`)
+    const unbuilt = path.join(sb.dir, `SWID={${guid}}`);
+    mkdirSync(unbuilt, { recursive: true });
+    for (const client of ["code", "desktop"] as const) {
+      const io = makeIo(sb, { packageRoot: unbuilt, env: { ESPN_LEAGUE_ID: "0" } });
+      expect(await main(["print-config", "--client", client], io), client).toBe(1);
+      expect(io.err.text, client).toContain("npm run build");
+      expect(io.err.text, client).toContain("(expected ");
+      // it was: "(expected <SB>/SWID={<the GUID>}/dist/cli.js)"
+      expect(io.err.text.toUpperCase(), client).not.toContain(guid);
+    }
+    // the stdout snippet stays exact: a path with no control is printed as it runs
+    const exact = built(path.join(sb.dir, "exact root"));
+    const ok = makeIo(sb, { packageRoot: exact, env: { ESPN_LEAGUE_ID: "0" } });
+    expect(await main(["print-config", "--client", "code"], ok)).toBe(0);
+    expect(ok.out.text).toContain(`'${path.join(exact, "dist", "cli.js")}' serve`);
   });
 });
