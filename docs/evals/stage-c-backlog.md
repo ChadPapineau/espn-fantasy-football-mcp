@@ -809,6 +809,28 @@ entry. Everything else they raised is fixed, or ruled in `docs/plan/changelog.md
     repository; the verifier read it statically and found no scripts or dependencies. It may still
     sit in npm's `npx` cache on the development Mac.
 
+## Open optimizations (2026-11-11)
+
+Found by the read-only investigation of CI's `retrospective-stall` failure at `552e3d3` (40.6 ms
+over a 27.7 ms bound; one 37.8 ms minor GC). Its root cause, the ~2,576 node:sqlite statements
+each `espn_analyze_retrospective` call prepared and dropped, is fixed: every store statement is
+prepared once per connection (CHANGELOG [Unreleased], Fixed). What follows was measured and left
+open.
+
+- **E13 re-normalises the same box scores on every call.** `getBoxScores`
+  (`src/providers/espn/provider.ts`) runs `normalizeBoxScores` even when the parse memo still holds
+  the same body; `numericMap` (`src/providers/espn/normalize.ts`) alone allocates 14–17 MB of each
+  E13 call's 30 MB (5 log records) to 38 MB (400). Reusing the normalised result while the memo
+  holds the same body cut a call's allocation to 6.5 / 14.8 MB and its scavenges to 0.20 / 0.27
+  per E13 window, but on its own (before the statement fix) it made the pauses worse — a median of
+  8.4–9 ms, with 22.5 and 29.1 ms seen — because each rarer scavenge freed the dead statements of
+  several calls at once (weak callbacks 7–28 ms). With both (scratch, on the development Mac): 6–14
+  MB per call, scavenges in 0.2–0.24 of E13 windows, a pause median of 0.5–1.65 ms (worst 3.7 ms),
+  the call 12–18 ms. Not done, because the experiment's memo hit only once its `id.identity` check
+  was dropped (that object is new on every call), so a real one needs a stable league-identity key,
+  and a reused result must never outlive the body or the settings it was normalised from (a
+  staleness risk). Revisit if a CI stall notice again shows a minor GC in E13's window.
+
 ## Known limitations of eff doctor's client-config model (Claude Code 2.1.308)
 
 `eff doctor` rows 2 and 24, `eff print-config --client code` and `eff uninstall` model the config

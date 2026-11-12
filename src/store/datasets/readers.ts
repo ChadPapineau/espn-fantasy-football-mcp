@@ -37,6 +37,7 @@ import {
   type ProTeam,
   type Week,
 } from "../../domain/league/types.js";
+import { cachedAll } from "../sqlite.js";
 import type { DatasetConnection, DatasetConnections } from "./connections.js";
 import { epochMsToIso, impliedPoints } from "./derive.js";
 import {
@@ -242,7 +243,7 @@ export function createReaders(o: ReadersOptions): StoreReaders {
       typeof params.season === "number" ? params.season : null,
     );
     if (conn === null) return null;
-    const rows = conn.db.prepare(st.sql).all(params) as unknown as SqlRow[];
+    const rows = cachedAll(conn.db, st.sql, params) as unknown as SqlRow[];
     return { rows, conn };
   }
 

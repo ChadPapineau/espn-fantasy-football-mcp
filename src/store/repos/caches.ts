@@ -4,6 +4,7 @@
 // lock is a counted miss, never an error. Reads never write (plan 03 §1.2).
 import type { BestEffortOutcome } from "../../domain/analytics/types.js";
 import type { IsoInstant } from "../../domain/league/types.js";
+import { cachedGet, cachedRun } from "../sqlite.js";
 import type { EspnCacheEntry, EspnCacheRepository, PointsCacheRepository } from "../types.js";
 import { intIn, isoMs, isoMsOrNull, keyString, num, type RepoDeps } from "./common.js";
 
@@ -51,11 +52,11 @@ export function espnCacheRepository(deps: RepoDeps): EspnCacheRepository {
     get(key) {
       if (typeof key !== "string" || key.length === 0 || key.length > ESPN_CACHE_KEY_MAX)
         return null;
-      const r = db
-        .prepare(
-          "SELECT key, parsed_json, fetched_at, server_time, etag, http_status, raw_body FROM espn_cache WHERE key = ?",
-        )
-        .get(key) as CacheRow | undefined;
+      const r = cachedGet(
+        db,
+        "SELECT key, parsed_json, fetched_at, server_time, etag, http_status, raw_body FROM espn_cache WHERE key = ?",
+        key,
+      ) as CacheRow | undefined;
       if (r === undefined) return null;
       return {
         key: r.key,
@@ -72,16 +73,25 @@ export function espnCacheRepository(deps: RepoDeps): EspnCacheRepository {
       // Plan 01 §5.3: raw ESPN bodies carry GUIDs, names and an IP — kept only when recording.
       const raw = deps.recordRawBodies ? e.raw_body : null;
       return writes.bestEffort(() => {
-        db.prepare(
+        cachedRun(
+          db,
           `INSERT OR REPLACE INTO espn_cache (key, parsed_json, fetched_at, fetched_ms, server_time, etag, http_status, raw_body)
            VALUES (?, ?, ?, ?, ?, ?, ?, ?)`,
-        ).run(e.key, e.parsed_json, e.fetched_at, ms, e.server_time, e.etag, e.http_status, raw);
+          e.key,
+          e.parsed_json,
+          e.fetched_at,
+          ms,
+          e.server_time,
+          e.etag,
+          e.http_status,
+          raw,
+        );
       });
     },
     prune(before: IsoInstant) {
       const ms = isoMs(before, "before");
       return writes.required("espn_cache", () =>
-        Number(db.prepare("DELETE FROM espn_cache WHERE fetched_ms < ?").run(ms).changes),
+        Number(cachedRun(db, "DELETE FROM espn_cache WHERE fetched_ms < ?", ms).changes),
       );
     },
   };
@@ -92,9 +102,12 @@ export function pointsCacheRepository(deps: RepoDeps): PointsCacheRepository {
   return {
     get(lineHash, settingsHash) {
       if (typeof lineHash !== "string" || typeof settingsHash !== "string") return null;
-      const r = db
-        .prepare("SELECT result_json FROM points_cache WHERE line_hash = ? AND settings_hash = ?")
-        .get(lineHash, settingsHash) as { result_json: string } | undefined;
+      const r = cachedGet(
+        db,
+        "SELECT result_json FROM points_cache WHERE line_hash = ? AND settings_hash = ?",
+        lineHash,
+        settingsHash,
+      ) as { result_json: string } | undefined;
       return r?.result_json ?? null;
     },
     put(lineHash, settingsHash, resultJson) {
@@ -104,9 +117,14 @@ export function pointsCacheRepository(deps: RepoDeps): PointsCacheRepository {
         throw new RangeError("store: result_json must be a string of bounded size");
       const used = clock.nowMs();
       return writes.bestEffort(() => {
-        db.prepare(
+        cachedRun(
+          db,
           "INSERT OR REPLACE INTO points_cache (line_hash, settings_hash, result_json, used_ms) VALUES (?, ?, ?, ?)",
-        ).run(lineHash, settingsHash, resultJson, used);
+          lineHash,
+          settingsHash,
+          resultJson,
+          used,
+        );
       });
     },
   };

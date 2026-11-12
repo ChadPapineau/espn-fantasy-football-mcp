@@ -29,6 +29,7 @@ import {
   type RecordResult,
 } from "../../domain/reclog/types.js";
 import { SETTINGS_HASH_RE } from "../../domain/scoring/types.js";
+import { cachedAll, cachedGet, cachedRun } from "../sqlite.js";
 import type { RecommendationLogStore, WeekRecordCount } from "../types.js";
 import {
   bitOrNull,
@@ -312,7 +313,7 @@ export function recommendationLogRepository({
   /** A league-week's keys in read order (recorded_ms, then log_id), with their stored sizes. */
   const weekKeys = (leagueId: string, season: number, week: number): WeekKey[] =>
     (
-      db.prepare(RECLOG_SQL.weekKeys).all(leagueId, season, week) as {
+      cachedAll(db, RECLOG_SQL.weekKeys, leagueId, season, week) as {
         log_id: string;
         bytes: number;
       }[]
@@ -325,9 +326,14 @@ export function recommendationLogRepository({
     week: number,
   ): RecommendationRecord[] => {
     if (ids.length === 0) return [];
-    const rows = db
-      .prepare(RECLOG_SQL.weekRowsByIds)
-      .all(JSON.stringify(ids), leagueId, season, week) as unknown as LogRow[];
+    const rows = cachedAll(
+      db,
+      RECLOG_SQL.weekRowsByIds,
+      JSON.stringify(ids),
+      leagueId,
+      season,
+      week,
+    ) as unknown as LogRow[];
     return inOrder(rows, ids).map(toRecord);
   };
   return {
@@ -338,10 +344,15 @@ export function recommendationLogRepository({
       return writes.requiredTx("recommendation_log", () => {
         const scope = recordDedupScope(input);
         if (scope !== null) {
-          const prior = db
-            .prepare(RECLOG_SQL.dedupProbe)
-            .get(scope.league_id, scope.season, scope.week, scope.kind, scope.client_ref) as
-            { log_id: string; recorded_at: string; week: number; kind: string } | undefined;
+          const prior = cachedGet(
+            db,
+            RECLOG_SQL.dedupProbe,
+            scope.league_id,
+            scope.season,
+            scope.week,
+            scope.kind,
+            scope.client_ref,
+          ) as { log_id: string; recorded_at: string; week: number; kind: string } | undefined;
           if (prior !== undefined)
             return {
               log_id: prior.log_id,
@@ -356,20 +367,24 @@ export function recommendationLogRepository({
         // the week's bound, checked inside the same write transaction (BEGIN IMMEDIATE), so two
         // recorders can never both take the last place; bytes on both sides (octet_length = the
         // stored UTF-8 bytes, read from each row's header: no record text is loaded)
-        const held = db
-          .prepare(RECLOG_SQL.weekHeld)
-          .get(input.league_id, input.season, input.week) as { n: number; bytes: number };
+        const held = cachedGet(
+          db,
+          RECLOG_SQL.weekHeld,
+          input.league_id,
+          input.season,
+          input.week,
+        ) as { n: number; bytes: number };
         if (
           num(held.n) >= RECORDS_PER_WEEK_MAX ||
           num(held.bytes) + Buffer.byteLength(stored, "utf8") > RECORD_WEEK_BYTES_MAX
         )
           throw new RecordWeekFullError();
         const logId = newLogId(ms);
-        db.prepare(
+        cachedRun(
+          db,
           `INSERT INTO recommendation_log
            (log_id, league_id, season, week, kind, recorded_at, recorded_ms, settings_hash, client_ref, record_json)
            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
-        ).run(
           logId,
           input.league_id,
           input.season,
@@ -393,9 +408,11 @@ export function recommendationLogRepository({
 
     get(logId) {
       if (typeof logId !== "string" || !LOG_ID_RE.test(logId)) return null;
-      const r = db
-        .prepare("SELECT log_id, recorded_at, record_json FROM recommendation_log WHERE log_id = ?")
-        .get(logId) as LogRow | undefined;
+      const r = cachedGet(
+        db,
+        "SELECT log_id, recorded_at, record_json FROM recommendation_log WHERE log_id = ?",
+        logId,
+      ) as LogRow | undefined;
       return r === undefined ? null : toRecord(r);
     },
 
@@ -415,17 +432,17 @@ export function recommendationLogRepository({
       if (q.season !== null) params.push(q.season);
       if (q.week !== null) params.push(q.week);
       if (q.kind !== null) params.push(q.kind);
-      const total = num((db.prepare(sql.count).get(...params) as { n: number }).n);
+      const total = num((cachedGet(db, sql.count, ...params) as { n: number }).n);
       // the page's ids first (keys only), then those rows by primary key: no record text is read
       // for a row the page does not show, however deep the offset
-      const ids = (db.prepare(sql.ids).all(...params, limit, offset) as { log_id: string }[]).map(
+      const ids = (cachedAll(db, sql.ids, ...params, limit, offset) as { log_id: string }[]).map(
         (r) => r.log_id,
       );
       const rows =
         ids.length === 0
           ? []
           : inOrder(
-              db.prepare(RECLOG_SQL.listRowsByIds).all(JSON.stringify(ids)) as unknown as LogRow[],
+              cachedAll(db, RECLOG_SQL.listRowsByIds, JSON.stringify(ids)) as unknown as LogRow[],
               ids,
             );
       const items = rows.map((r): RecommendationListItem => {
@@ -452,7 +469,7 @@ export function recommendationLogRepository({
     weekCounts(leagueId, season): readonly WeekRecordCount[] {
       matching(leagueId, ESPN_LEAGUE_ID_RE, "league_id");
       intIn(season, SEASON_MIN, SEASON_MAX, "season");
-      const rows = db.prepare(RECLOG_SQL.weekCounts).all(leagueId, season) as {
+      const rows = cachedAll(db, RECLOG_SQL.weekCounts, leagueId, season) as {
         week: number;
         n: number;
       }[];
@@ -481,7 +498,7 @@ export function recommendationLogRepository({
     recordOutcome(o: RecommendationOutcome) {
       checkOutcome(o);
       writes.required("recommendation_outcome", () => {
-        db.prepare(UPSERT_OUTCOME).run(...outcomeParams(o));
+        cachedRun(db, UPSERT_OUTCOME, ...outcomeParams(o));
       });
     },
 
@@ -491,14 +508,13 @@ export function recommendationLogRepository({
       for (const o of outcomes) checkOutcome(o);
       if (outcomes.length === 0) return;
       writes.requiredTx("recommendation_outcome", () => {
-        const upsert = db.prepare(UPSERT_OUTCOME);
-        for (const o of outcomes) upsert.run(...outcomeParams(o));
+        for (const o of outcomes) cachedRun(db, UPSERT_OUTCOME, ...outcomeParams(o));
       });
     },
 
     outcome(logId) {
       if (typeof logId !== "string" || !LOG_ID_RE.test(logId)) return null;
-      const r = db.prepare("SELECT * FROM recommendation_outcome WHERE log_id = ?").get(logId) as
+      const r = cachedGet(db, "SELECT * FROM recommendation_outcome WHERE log_id = ?", logId) as
         OutcomeRow | undefined;
       if (r === undefined) return null;
       return {

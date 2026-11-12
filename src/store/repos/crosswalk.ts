@@ -15,6 +15,7 @@ import {
   type CrosswalkRepository,
   type CrosswalkSource,
 } from "../../domain/crosswalk/types.js";
+import { cachedAll, cachedGet, cachedRun } from "../sqlite.js";
 import {
   boundedArray,
   finite,
@@ -86,22 +87,28 @@ const toPair = (r: Row): CrosswalkPair => ({
 });
 
 const COLS = "espn_id, gsis_id, method, source, confidence, first_seen, last_seen";
+/** The repository's statements (prepared once per connection: sqlite.ts cachedGet). */
+const GET_SQL = `SELECT ${COLS} FROM crosswalk WHERE espn_id = ?`;
+const BY_GSIS_SQL = `SELECT ${COLS} FROM crosswalk WHERE gsis_id = ? ORDER BY espn_id`;
+const CURRENT_SQL =
+  "SELECT gsis_id, method, source, confidence, first_seen FROM crosswalk WHERE espn_id = ?";
+const INSERT_SQL = `INSERT INTO crosswalk (${COLS}, last_seen_ms) VALUES (?, ?, ?, ?, ?, ?, ?, ?)`;
+const UPDATE_SQL = `UPDATE crosswalk SET gsis_id = ?, method = ?, source = ?, confidence = ?, first_seen = ?,
+     last_seen = ?, last_seen_ms = ?
+   WHERE espn_id = ?`;
+const DELETE_SQL = `DELETE FROM crosswalk
+   WHERE espn_id = ? AND gsis_id = ? AND method = ? AND source = ? AND confidence = ?`;
 
 export function crosswalkRepository({ db, writes }: RepoDeps): CrosswalkRepository {
   return {
     get(espnId) {
       if (!Number.isSafeInteger(espnId)) return null;
-      const r = db.prepare(`SELECT ${COLS} FROM crosswalk WHERE espn_id = ?`).get(espnId) as
-        Row | undefined;
+      const r = cachedGet(db, GET_SQL, espnId) as Row | undefined;
       return r === undefined ? null : toPair(r);
     },
     byGsis(gsisId) {
       if (typeof gsisId !== "string" || !GSIS_ID_RE.test(gsisId)) return [];
-      return (
-        db
-          .prepare(`SELECT ${COLS} FROM crosswalk WHERE gsis_id = ? ORDER BY espn_id`)
-          .all(gsisId) as unknown as Row[]
-      ).map(toPair);
+      return (cachedAll(db, BY_GSIS_SQL, gsisId) as unknown as Row[]).map(toPair);
     },
     upsertDelta(pairs) {
       const checked = boundedArray(pairs, UPSERT_MAX_PAIRS, "pairs").map((p) => ({
@@ -110,20 +117,9 @@ export function crosswalkRepository({ db, writes }: RepoDeps): CrosswalkReposito
       }));
       if (checked.length === 0) return 0;
       return writes.requiredTx("crosswalk", () => {
-        const sel = db.prepare(
-          "SELECT gsis_id, method, source, confidence, first_seen FROM crosswalk WHERE espn_id = ?",
-        );
-        const ins = db.prepare(
-          `INSERT INTO crosswalk (${COLS}, last_seen_ms) VALUES (?, ?, ?, ?, ?, ?, ?, ?)`,
-        );
-        const upd = db.prepare(
-          `UPDATE crosswalk SET gsis_id = ?, method = ?, source = ?, confidence = ?, first_seen = ?,
-             last_seen = ?, last_seen_ms = ?
-           WHERE espn_id = ?`,
-        );
         let written = 0;
         for (const { p, ms } of checked) {
-          const cur = sel.get(p.espn_id) as
+          const cur = cachedGet(db, CURRENT_SQL, p.espn_id) as
             | {
                 gsis_id: string;
                 method: string;
@@ -133,7 +129,9 @@ export function crosswalkRepository({ db, writes }: RepoDeps): CrosswalkReposito
               }
             | undefined;
           if (cur === undefined) {
-            ins.run(
+            cachedRun(
+              db,
+              INSERT_SQL,
               p.espn_id,
               p.gsis_id,
               p.method,
@@ -154,7 +152,9 @@ export function crosswalkRepository({ db, writes }: RepoDeps): CrosswalkReposito
             // and takes the pair's; the same gsis under a new method, source or confidence is the
             // same pairing and keeps its own
             const firstSeen = cur.gsis_id === p.gsis_id ? cur.first_seen : p.first_seen;
-            upd.run(
+            cachedRun(
+              db,
+              UPDATE_SQL,
               p.gsis_id,
               p.method,
               p.source,
@@ -175,14 +175,11 @@ export function crosswalkRepository({ db, writes }: RepoDeps): CrosswalkReposito
       if (checked.length === 0) return 0;
       return writes.requiredTx("crosswalk", () => {
         // only while the row still equals the pair the run read: a rewrite since is kept
-        const del = db.prepare(
-          `DELETE FROM crosswalk
-           WHERE espn_id = ? AND gsis_id = ? AND method = ? AND source = ? AND confidence = ?`,
-        );
         let removed = 0;
         for (const p of checked)
           removed += Number(
-            del.run(p.espn_id, p.gsis_id, p.method, p.source, p.confidence).changes,
+            cachedRun(db, DELETE_SQL, p.espn_id, p.gsis_id, p.method, p.source, p.confidence)
+              .changes,
           );
         return removed;
       });
@@ -194,25 +191,27 @@ export function crosswalkRepository({ db, writes }: RepoDeps): CrosswalkReposito
       );
       if (ids.length === 0) return { written: true };
       return writes.bestEffort(() => {
-        db.prepare(
+        cachedRun(
+          db,
           `UPDATE crosswalk SET last_seen = :at, last_seen_ms = :at_ms
            WHERE espn_id IN (SELECT value FROM json_each(:ids)) AND last_seen_ms < :threshold`,
-        ).run({
-          at,
-          at_ms: atMs,
-          ids: JSON.stringify(ids),
-          threshold: atMs - LAST_SEEN_GRANULARITY_MS,
-        });
+          {
+            at,
+            at_ms: atMs,
+            ids: JSON.stringify(ids),
+            threshold: atMs - LAST_SEEN_GRANULARITY_MS,
+          },
+        );
       });
     },
     count() {
-      return num((db.prepare("SELECT COUNT(*) AS n FROM crosswalk").get() as { n: number }).n);
+      return num((cachedGet(db, "SELECT COUNT(*) AS n FROM crosswalk") as { n: number }).n);
     },
     countMatchedByName() {
       // the rebuild alert's own test (resolver: `pair.confidence < 1`); the column is REAL NOT NULL
       return num(
         (
-          db.prepare("SELECT COUNT(*) AS n FROM crosswalk WHERE confidence < 1").get() as {
+          cachedGet(db, "SELECT COUNT(*) AS n FROM crosswalk WHERE confidence < 1") as {
             n: number;
           }
         ).n,

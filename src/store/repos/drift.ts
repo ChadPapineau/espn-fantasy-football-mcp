@@ -2,6 +2,7 @@
 // stored diff and additive-drift lists — plan 01 §7) and `probe_log` (one row per probe; `doctor` #9
 // reads the last success). Both required writes; error fields are fixed-vocabulary codes only.
 import { DRIFT_STATUSES } from "../../config/schema.js";
+import { cachedAll, cachedGet, cachedRun } from "../sqlite.js";
 import type {
   DriftStateRepository,
   DriftStateRow,
@@ -69,7 +70,7 @@ interface DriftRow {
 export function driftStateRepository({ db, writes }: RepoDeps): DriftStateRepository {
   return {
     get() {
-      const r = db.prepare("SELECT * FROM drift_state WHERE id = 1").get() as DriftRow | undefined;
+      const r = cachedGet(db, "SELECT * FROM drift_state WHERE id = 1") as DriftRow | undefined;
       if (r === undefined) return null;
       return {
         status: r.status as DriftStateRow["status"],
@@ -87,11 +88,11 @@ export function driftStateRepository({ db, writes }: RepoDeps): DriftStateReposi
     put(row) {
       checkDrift(row);
       writes.required("drift_state", () => {
-        db.prepare(
+        cachedRun(
+          db,
           `INSERT OR REPLACE INTO drift_state (id, status, since, last_probe_at, manifest_hash, manifest_version,
              host, host_moved_at, diff_json, additive_json, updated_at)
            VALUES (1, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
-        ).run(
           row.status,
           row.since,
           row.last_probe_at,
@@ -136,25 +137,35 @@ export function probeLogRepository({ db, writes }: RepoDeps): ProbeLogRepository
       if (row.upstream_status !== null) intIn(row.upstream_status, 100, 599, "upstream_status");
       if (row.error !== null) matching(row.error, PROBE_ERROR_RE, "probe error");
       writes.required("probe_log", () => {
-        db.prepare(
+        cachedRun(
+          db,
           "INSERT INTO probe_log (at, at_ms, kind, ok, status, upstream_status, error) VALUES (?, ?, ?, ?, ?, ?, ?)",
-        ).run(row.at, ms, row.kind, row.ok ? 1 : 0, row.status, row.upstream_status, row.error);
+          row.at,
+          ms,
+          row.kind,
+          row.ok ? 1 : 0,
+          row.status,
+          row.upstream_status,
+          row.error,
+        );
       });
     },
     lastSuccess(kind) {
-      const r = db
-        .prepare(
-          "SELECT * FROM probe_log WHERE kind = ? AND ok = 1 ORDER BY at_ms DESC, id DESC LIMIT 1",
-        )
-        .get(kind) as ProbeRow | undefined;
+      const r = cachedGet(
+        db,
+        "SELECT * FROM probe_log WHERE kind = ? AND ok = 1 ORDER BY at_ms DESC, id DESC LIMIT 1",
+        kind,
+      ) as ProbeRow | undefined;
       return r === undefined ? null : toProbe(r);
     },
     recent(limit) {
       const lim = intIn(limit, 1, PROBE_RECENT_MAX, "limit");
       return (
-        db
-          .prepare("SELECT * FROM probe_log ORDER BY at_ms DESC, id DESC LIMIT ?")
-          .all(lim) as unknown as ProbeRow[]
+        cachedAll(
+          db,
+          "SELECT * FROM probe_log ORDER BY at_ms DESC, id DESC LIMIT ?",
+          lim,
+        ) as unknown as ProbeRow[]
       ).map(toProbe);
     },
   };

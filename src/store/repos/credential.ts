@@ -8,6 +8,7 @@ import {
   CREDENTIAL_STORE_KINDS,
   ESPN_LEAGUE_ID_RE,
 } from "../../config/schema.js";
+import { cachedGet, cachedRun } from "../sqlite.js";
 import type {
   CredentialObserver,
   CredentialStateRepository,
@@ -85,16 +86,16 @@ const toRow = (r: Row): CredentialStateRow => ({
 
 export function credentialStateRepository({ db, writes }: RepoDeps): CredentialStateRepository {
   const read = (): CredentialStateRow | null => {
-    const r = db.prepare("SELECT * FROM credential_state WHERE id = 1").get() as Row | undefined;
+    const r = cachedGet(db, "SELECT * FROM credential_state WHERE id = 1") as Row | undefined;
     return r === undefined ? null : toRow(r);
   };
   const write = (row: CredentialStateRow): void => {
-    db.prepare(
+    cachedRun(
+      db,
       `INSERT OR REPLACE INTO credential_state (id, league_id, state, store, stored_at, last_accepted_at,
          last_rejected_at, rejected_since, next_probe_at, rejected_view, board_probe_discriminates,
          updated_at, updated_by)
        VALUES (1, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
-    ).run(
       row.league_id,
       row.state,
       row.store,
@@ -121,7 +122,7 @@ export function credentialStateRepository({ db, writes }: RepoDeps): CredentialS
       return writes.requiredTx("credential_state", () => {
         const next = fn(read());
         if (next === null) {
-          db.prepare("DELETE FROM credential_state WHERE id = 1").run();
+          cachedRun(db, "DELETE FROM credential_state WHERE id = 1");
           return null;
         }
         checkCredentialRow(next); // a malformed row rolls the whole transition back
@@ -131,7 +132,7 @@ export function credentialStateRepository({ db, writes }: RepoDeps): CredentialS
     },
     clear() {
       writes.required("credential_state", () => {
-        db.prepare("DELETE FROM credential_state WHERE id = 1").run();
+        cachedRun(db, "DELETE FROM credential_state WHERE id = 1");
       });
     },
   };

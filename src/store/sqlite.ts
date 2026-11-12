@@ -1,9 +1,17 @@
 // sqlite.ts — the one place the store opens `node:sqlite` connections (plan 01 §5.1 WAL + pragmas;
 // §5.5 each dataset file its OWN read-only connection, no attach; plan 03 §1.1 step 3 busy_timeout
-// 5000; plan 05 §2 the statement trace: zero ds_* DML from the server). Ported from sibling
-// @cf3b015, adapted (separate read-only dataset connections; synchronous required writes).
+// 5000; plan 05 §2 the statement trace: zero ds_* DML from the server; plan 03 §1.2 the stall
+// bound: each statement prepared once per connection — the guard's statement cache). Ported from
+// sibling @cf3b015, adapted (separate read-only dataset connections; synchronous required writes).
 import { closeSync, constants as fsc, openSync } from "node:fs";
-import { constants as C, DatabaseSync } from "node:sqlite";
+import {
+  constants as C,
+  DatabaseSync,
+  type SQLInputValue,
+  type SQLOutputValue,
+  type StatementResultingChanges,
+  type StatementSync,
+} from "node:sqlite";
 import {
   BEST_EFFORT_BUSY_MS,
   BUSY_TIMEOUT_MS,
@@ -112,21 +120,116 @@ function denies(
   return onAttachment || isDatasetObject(object);
 }
 
+/** What a cached statement may do: run to completion and reset (never `iterate()`). */
+type CachedOp = "get" | "all" | "run";
+
+/** One statement of a connection's cache. */
+interface CachedEntry {
+  readonly st: StatementSync;
+  /** Runs of it under way: above 0 only while a run calls back into JS (a SQL function). */
+  running: number;
+}
+
+/** A connection the guard holds: its authorizer's label and mode, and its statement cache. */
+interface Guarded {
+  readonly label: string;
+  readonly mode: GuardMode;
+  /** `bypass` depth: above 0 while the authorizer is lifted. */
+  lifted: number;
+  /**
+   * A statement prepared at install and never run: node:sqlite finalizes every statement of a
+   * connection when it closes, so a finalized sentinel means the handle the authorizer was set on
+   * is gone (closed, or closed and re-opened on the same object — without the authorizer).
+   */
+  readonly sentinel: StatementSync;
+  /** Its statements by SQL text, least recently used first. */
+  readonly cache: Map<string, CachedEntry>;
+}
+
+/** The guard holding each connection (install/forget), so a repository needs only its `db`. */
+const guardOfDb = new WeakMap<DatabaseSync, StatementGuard>();
+
+function runOp(st: StatementSync, op: CachedOp, params: SQLInputValue[]): unknown {
+  switch (op) {
+    case "get":
+      return st.get(...params);
+    case "all":
+      return st.all(...params);
+    case "run":
+      return st.run(...params);
+  }
+}
+
+/** Whether a statement is still live (node:sqlite refuses a finalized one's every member). */
+function alive(st: StatementSync): boolean {
+  try {
+    return typeof st.sourceSQL === "string";
+  } catch {
+    return false;
+  }
+}
+
 /**
  * The authorizer every server connection carries: denies dataset writes (and, on dataset files,
  * every write) and, while tracing, records every decision so a test can prove the server prepared
  * zero `ds_*` DML (plan 05 §2 `store`). Authorizers run at prepare time, so the trace sees every
  * statement the store prepares. One guard serves all of a store's connections.
+ *
+ * It also keeps each connection's statement cache (cachedGet/cachedAll/cachedRun): a statement is
+ * prepared once per connection and reused, not compiled per lookup and dropped. E13 prepared ~2,576
+ * statements per call (2,332 of them one projection lookup, twice per player-week) and freeing
+ * them — V8's weak callbacks, one per StatementSync — was ~70 % of each young-generation pause
+ * that landed in its stall window (CI read 40.6 ms over a 27.7 ms bound at 552e3d3). The cache
+ * lives here, not in each repository, because the guard is what the cache must never weaken:
+ * - a statement is cached only as prepared under its connection's authorizer, keyed by the
+ *   connection, whose label and mode never change under it (a re-install with another drops it);
+ * - nothing is prepared, cached or run through the cache while `bypass` lifts the authorizer;
+ * - `forget` (every close) drops the connection's cache, and a handle found closed (a sentinel
+ *   statement finalized) is never cached on again: a dataset re-open is a new connection, with a
+ *   cache of its own;
+ * - `startTrace` drops every cache, so every statement run while tracing is prepared — and its
+ *   authorizer decisions recorded — while tracing (plan 05 §2 holds for a warm store too);
+ * - only get/all/run, which run a statement to completion and reset it: no iterator is ever open
+ *   on a cached statement, its options are never set (no setter is reachable) and node:sqlite
+ *   clears its bindings on every run; a run re-entered from inside its own run (a SQL function)
+ *   gets a statement of its own, never the running one;
+ * - at most MAX_CACHED statements per connection (least recently used dropped first), and SQL
+ *   longer than MAX_CACHED_SQL is prepared for its run only.
+ * (node:sqlite's own createTagStore was not used: it keys on template-literal call sites, hands
+ * out iterate(), and knows nothing of the guard's bypass or trace.)
  */
 export class StatementGuard {
   /** Most trace entries kept (oldest dropped), so a long trace stays bounded. */
   static readonly MAX_TRACE = 200_000;
+  /** Most statements one connection keeps (the store's runs about 100 texts, a dataset's a few). */
+  static readonly MAX_CACHED = 256;
+  /** Longest SQL text cached (the store's longest is about 1 KB); a longer one is never kept. */
+  static readonly MAX_CACHED_SQL = 16 * 1024;
   private readonly entries: TraceEntry[] = [];
   private tracing = false;
-  private readonly installed = new Map<DatabaseSync, { label: string; mode: GuardMode }>();
+  private readonly installed = new Map<DatabaseSync, Guarded>();
 
   install(db: DatabaseSync, label: string, mode: GuardMode): void {
-    this.installed.set(db, { label, mode });
+    const other = guardOfDb.get(db);
+    if (other !== undefined && other !== this) other.forget(db);
+    const prev = this.installed.get(db);
+    // another label or mode, or another handle on the same object: a new cache
+    if (prev?.label !== label || prev.mode !== mode || !alive(prev.sentinel)) {
+      const sentinel = db.prepare("SELECT 1");
+      this.installed.set(db, {
+        label,
+        mode,
+        lifted: 0,
+        sentinel,
+        cache: new Map(),
+      });
+    }
+    guardOfDb.set(db, this);
+    this.arm(db, label, mode);
+  }
+
+  /** Sets the connection's authorizer (install, and the end of a bypass). */
+  private arm(db: DatabaseSync, label: string, mode: GuardMode): void {
     db.setAuthorizer((action, a1, _a2, schema) => {
       const denied = denies(mode, action, a1, schema);
       if (this.tracing) {
@@ -137,28 +240,98 @@ export class StatementGuard {
     });
   }
 
-  /** Forgets a closed connection. */
+  /** Forgets a closed connection, and with it its statement cache. */
   forget(db: DatabaseSync): void {
     this.installed.delete(db);
+    if (guardOfDb.get(db) === this) guardOfDb.delete(db);
   }
 
   /**
    * Runs `fn` with the guard lifted on `db`. Only for `VACUUM INTO`, which attaches and writes its
-   * own temporary schema; never around a caller's SQL.
+   * own temporary schema; never around a caller's SQL. The statement cache refuses `db` meanwhile.
    */
   bypass<T>(db: DatabaseSync, fn: () => T): T {
     const cfg = this.installed.get(db);
     if (cfg === undefined) return fn();
+    cfg.lifted += 1;
     db.setAuthorizer(null);
     try {
       return fn();
     } finally {
-      this.install(db, cfg.label, cfg.mode);
+      cfg.lifted -= 1;
+      this.arm(db, cfg.label, cfg.mode);
     }
   }
 
-  /** Starts (and clears) the trace. */
+  /**
+   * Runs `sql` once through `db`'s statement cache (cachedGet/cachedAll/cachedRun): the cached
+   * statement, prepared on first use under the connection's authorizer — a denied or failing
+   * prepare caches nothing. A connection this guard does not hold, or whose handle is gone,
+   * prepares per run as before the cache; a lifted guard refuses.
+   */
+  execute(db: DatabaseSync, sql: string, op: CachedOp, params: SQLInputValue[]): unknown {
+    const g = this.installed.get(db);
+    if (g === undefined) return runOp(db.prepare(sql), op, params);
+    if (g.lifted > 0)
+      throw new Error("store: no statement runs from the cache while the guard is lifted");
+    let e = g.cache.get(sql);
+    if (e === undefined) {
+      // about to cache: only on the handle the authorizer was set on (else per run from here on)
+      if (!alive(g.sentinel)) return this.retire(g, db, sql, op, params);
+      const st = db.prepare(sql);
+      if (sql.length > StatementGuard.MAX_CACHED_SQL) return runOp(st, op, params);
+      e = { st, running: 0 };
+      g.cache.set(sql, e);
+      // over the cap: the least recently used (the first key) goes
+      if (g.cache.size > StatementGuard.MAX_CACHED)
+        for (const oldest of g.cache.keys()) {
+          g.cache.delete(oldest);
+          break;
+        }
+    } else if (e.running > 0) {
+      // re-entered from inside its own run: re-running it would reset the run under way
+      return runOp(db.prepare(sql), op, params);
+    } else {
+      g.cache.delete(sql); // most recently used last
+      g.cache.set(sql, e);
+    }
+    e.running += 1;
+    try {
+      return runOp(e.st, op, params);
+    } catch (err) {
+      // a closed handle's statements are finalized, refused before they run: never used again
+      if (alive(g.sentinel)) throw err;
+      return this.retire(g, db, sql, op, params);
+    } finally {
+      e.running -= 1;
+    }
+  }
+
+  /**
+   * The connection's handle is gone (closed — node:sqlite then refuses the prepare, "database is
+   * not open" — or closed and re-opened without the authorizer): its cache is dropped, and with
+   * the sentinel finalized nothing is cached on it again (each run prepares its own, as before the
+   * cache) until a re-install on the new handle.
+   */
+  private retire(
+    g: Guarded,
+    db: DatabaseSync,
+    sql: string,
+    op: CachedOp,
+    params: SQLInputValue[],
+  ): unknown {
+    g.cache.clear();
+    return runOp(db.prepare(sql), op, params);
+  }
+
+  /** The SQL texts `db`'s cache holds, least recently used first (tests and diagnostics). */
+  cachedSql(db: DatabaseSync): readonly string[] {
+    return [...(this.installed.get(db)?.cache.keys() ?? [])];
+  }
+
+  /** Starts (and clears) the trace; drops every statement cache, so the trace sees every run. */
   startTrace(): void {
+    for (const g of this.installed.values()) g.cache.clear();
     this.entries.length = 0;
     this.tracing = true;
   }
@@ -168,6 +341,45 @@ export class StatementGuard {
     this.tracing = false;
     return [...this.entries];
   }
+}
+
+/** A cached statement's parameters: anonymous ones, or a named-parameter object then anonymous. */
+export type SqlParams = SQLInputValue[] | [Record<string, SQLInputValue>, ...SQLInputValue[]];
+
+function execute(db: DatabaseSync, sql: string, op: CachedOp, params: SqlParams): unknown {
+  const p = params as SQLInputValue[];
+  const guard = guardOfDb.get(db);
+  return guard === undefined ? runOp(db.prepare(sql), op, p) : guard.execute(db, sql, op, p);
+}
+
+/**
+ * `db.prepare(sql).get(...params)` through the connection's statement cache (StatementGuard): the
+ * statement is prepared once per guarded connection. The statement itself never leaves the cache.
+ */
+export function cachedGet(
+  db: DatabaseSync,
+  sql: string,
+  ...params: SqlParams
+): Record<string, SQLOutputValue> | undefined {
+  return execute(db, sql, "get", params) as Record<string, SQLOutputValue> | undefined;
+}
+
+/** `db.prepare(sql).all(...params)` through the connection's statement cache (cachedGet). */
+export function cachedAll(
+  db: DatabaseSync,
+  sql: string,
+  ...params: SqlParams
+): Record<string, SQLOutputValue>[] {
+  return execute(db, sql, "all", params) as Record<string, SQLOutputValue>[];
+}
+
+/** `db.prepare(sql).run(...params)` through the connection's statement cache (cachedGet). */
+export function cachedRun(
+  db: DatabaseSync,
+  sql: string,
+  ...params: SqlParams
+): StatementResultingChanges {
+  return execute(db, sql, "run", params) as StatementResultingChanges;
 }
 
 // --- connections ----------------------------------------------------------------------------------

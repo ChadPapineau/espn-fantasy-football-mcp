@@ -8,7 +8,6 @@
 // the loop 60–600 ms over a season: Stage C, store-refresh-log-unpruned-status-stall); `store prune`
 // bounds the history itself (src/store/prune.ts REFRESH_LOG_RETENTION_MS). Ported from sibling
 // @cf3b015, adapted (synchronous repositories; SourceErrorCode errors).
-import type { StatementSync } from "node:sqlite";
 import {
   DATASET_SOURCE_IDS,
   isDatasetSourceId,
@@ -18,6 +17,7 @@ import {
 import type { JournalState, WriteJournalRepository } from "../../domain/gate/types.js";
 import { JOURNAL_STATES } from "../../domain/gate/types.js";
 import { pidAlive } from "../lock.js";
+import { cachedAll, cachedGet, cachedRun } from "../sqlite.js";
 import type { JobLockRepository, RefreshLogRepository, RefreshLogRow } from "../types.js";
 import { intIn, isoMs, isoMsOrNull, keyString, num, parseJson, type RepoDeps } from "./common.js";
 
@@ -78,25 +78,23 @@ export function checkRefreshRow(row: RefreshLogRow): void {
 
 /** Inserts one refresh_log row (no validation, no busy mapping — callers wrap it). */
 export function insertRefreshRow(deps: Pick<RepoDeps, "db">, row: RefreshLogRow): void {
-  deps.db
-    .prepare(
-      `INSERT INTO refresh_log (source, file, file_version, release_updated_at, seasons_json, rows, columns_hash,
+  cachedRun(
+    deps.db,
+    `INSERT INTO refresh_log (source, file, file_version, release_updated_at, seasons_json, rows, columns_hash,
          started_at, finished_at, ok, error, checked_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
-    )
-    .run(
-      row.source,
-      row.file,
-      row.file_version,
-      row.release_updated_at,
-      JSON.stringify(row.seasons),
-      row.rows,
-      row.columns_hash,
-      row.started_at,
-      row.finished_at,
-      row.ok ? 1 : 0,
-      row.error,
-      row.checked_at,
-    );
+    row.source,
+    row.file,
+    row.file_version,
+    row.release_updated_at,
+    JSON.stringify(row.seasons),
+    row.rows,
+    row.columns_hash,
+    row.started_at,
+    row.finished_at,
+    row.ok ? 1 : 0,
+    row.error,
+    row.checked_at,
+  );
 }
 
 /** The newest successful refresh_log row of `source` (or null). */
@@ -104,9 +102,11 @@ export function currentRefreshRow(
   deps: Pick<RepoDeps, "db">,
   source: DatasetSourceId,
 ): RefreshLogRow | null {
-  const r = deps.db
-    .prepare("SELECT * FROM refresh_log WHERE source = ? AND ok = 1 ORDER BY id DESC LIMIT 1")
-    .get(source) as RefreshRow | undefined;
+  const r = cachedGet(
+    deps.db,
+    "SELECT * FROM refresh_log WHERE source = ? AND ok = 1 ORDER BY id DESC LIMIT 1",
+    source,
+  ) as RefreshRow | undefined;
   return r === undefined ? null : toRefresh(r);
 }
 
@@ -116,11 +116,12 @@ export function refreshRowFor(
   source: DatasetSourceId,
   version: string,
 ): RefreshLogRow | null {
-  const r = deps.db
-    .prepare(
-      "SELECT * FROM refresh_log WHERE source = ? AND ok = 1 AND file_version = ? ORDER BY id DESC LIMIT 1",
-    )
-    .get(source, version) as RefreshRow | undefined;
+  const r = cachedGet(
+    deps.db,
+    "SELECT * FROM refresh_log WHERE source = ? AND ok = 1 AND file_version = ? ORDER BY id DESC LIMIT 1",
+    source,
+    version,
+  ) as RefreshRow | undefined;
   return r === undefined ? null : toRefresh(r);
 }
 
@@ -137,22 +138,30 @@ export function markCheckedRow(
   checkedAt: string,
 ): void {
   const { db } = deps;
-  const cur = db
-    .prepare("SELECT id FROM refresh_log WHERE source = ? AND ok = 1 ORDER BY id DESC LIMIT 1")
-    .get(source) as { id: number } | undefined;
+  const cur = cachedGet(
+    db,
+    "SELECT id FROM refresh_log WHERE source = ? AND ok = 1 ORDER BY id DESC LIMIT 1",
+    source,
+  ) as { id: number } | undefined;
   if (cur === undefined) return;
   const failedSince =
-    db
-      .prepare("SELECT 1 AS x FROM refresh_log WHERE source = ? AND id > ? LIMIT 1")
-      .get(source, cur.id) !== undefined;
+    cachedGet(
+      db,
+      "SELECT 1 AS x FROM refresh_log WHERE source = ? AND id > ? LIMIT 1",
+      source,
+      cur.id,
+    ) !== undefined;
   if (failedSince)
-    db.prepare(
+    cachedRun(
+      db,
       `INSERT INTO refresh_log (source, file, file_version, release_updated_at, seasons_json, rows,
          columns_hash, started_at, finished_at, ok, error, checked_at)
        SELECT source, file, file_version, release_updated_at, seasons_json, rows, columns_hash,
          started_at, finished_at, ok, error, ? FROM refresh_log WHERE id = ?`,
-    ).run(checkedAt, cur.id);
-  else db.prepare("UPDATE refresh_log SET checked_at = ? WHERE id = ?").run(checkedAt, cur.id);
+      checkedAt,
+      cur.id,
+    );
+  else cachedRun(db, "UPDATE refresh_log SET checked_at = ? WHERE id = ?", checkedAt, cur.id);
 }
 
 /** The known source ids as the JSON array `REFRESH_LOG_SQL.current` iterates (fixed at build). */
@@ -185,21 +194,12 @@ export const REFRESH_LOG_SQL = Object.freeze({
 
 export function refreshLogRepository(deps: RepoDeps): RefreshLogRepository {
   const { db, writes } = deps;
-  // Prepared once per connection, on first use: G1 runs these three once per listed source per call
-  // (51 runs under `full`), and compiling a statement — the guard's authorizer called back for every
-  // column it reads — costs far more than running it (≈ 0.3–0.6 ms per compile against ≈ 0.08 ms
-  // per run of `current`, measured on a loaded host): compiled per run, the compiles alone ate
-  // 15–30 ms of the 50 ms stall budget. node:sqlite resets a statement after every run, so a cached
-  // one never holds a read snapshot open.
-  const statements = new Map<keyof typeof REFRESH_LOG_SQL, StatementSync>();
-  const statement = (name: keyof typeof REFRESH_LOG_SQL): StatementSync => {
-    let st = statements.get(name);
-    if (st === undefined) {
-      st = db.prepare(REFRESH_LOG_SQL[name]);
-      statements.set(name, st);
-    }
-    return st;
-  };
+  // Prepared once per connection (sqlite.ts cachedGet, as every repository statement): G1 runs
+  // these three once per listed source per call (51 runs under `full`), and compiling a statement —
+  // the guard's authorizer called back for every column it reads — costs far more than running it
+  // (≈ 0.3–0.6 ms per compile against ≈ 0.08 ms per run of `current`, measured on a loaded host):
+  // compiled per run, the compiles alone ate 15–30 ms of the 50 ms stall budget. node:sqlite resets
+  // a statement after every run, so a cached one never holds a read snapshot open.
   return {
     record(row) {
       checkRefreshRow(row);
@@ -209,16 +209,22 @@ export function refreshLogRepository(deps: RepoDeps): RefreshLogRepository {
     },
     current() {
       // known sources only, by construction: a row of an id this binary does not know is never served
-      return (statement("current").all({ sources: SOURCE_IDS_JSON }) as unknown as RefreshRow[])
+      return (
+        cachedAll(db, REFRESH_LOG_SQL.current, {
+          sources: SOURCE_IDS_JSON,
+        }) as unknown as RefreshRow[]
+      )
         .filter((r) => isDatasetSourceId(r.source))
         .map(toRefresh);
     },
     latest(source) {
-      const r = statement("latest").get({ s: source }) as RefreshRow | undefined;
+      const r = cachedGet(db, REFRESH_LOG_SQL.latest, { s: source }) as RefreshRow | undefined;
       return r === undefined ? null : toRefresh(r);
     },
     consecutiveFailures(source) {
-      return num((statement("consecutiveFailures").get({ s: source }) as { n: number }).n);
+      return num(
+        (cachedGet(db, REFRESH_LOG_SQL.consecutiveFailures, { s: source }) as { n: number }).n,
+      );
     },
   };
 }
@@ -237,7 +243,7 @@ export function jobLockRepository({ db, writes }: RepoDeps): JobLockRepository {
       const nowMs = isoMs(now, "now");
       intIn(staleAfterMs, 0, JOB_STALE_MAX_MS, "staleAfterMs");
       return writes.requiredTx("job_lock", () => {
-        const cur = db.prepare("SELECT pid, acquired_ms FROM job_lock WHERE job = ?").get(job) as
+        const cur = cachedGet(db, "SELECT pid, acquired_ms FROM job_lock WHERE job = ?", job) as
           { pid: number; acquired_ms: number } | undefined;
         const free =
           cur === undefined ||
@@ -245,9 +251,14 @@ export function jobLockRepository({ db, writes }: RepoDeps): JobLockRepository {
           nowMs - num(cur.acquired_ms) > staleAfterMs ||
           !pidAlive(num(cur.pid));
         if (!free) return false;
-        db.prepare(
+        cachedRun(
+          db,
           "INSERT OR REPLACE INTO job_lock (job, pid, acquired_at, acquired_ms) VALUES (?, ?, ?, ?)",
-        ).run(job, pid, now, nowMs);
+          job,
+          pid,
+          now,
+          nowMs,
+        );
         return true;
       });
     },
@@ -256,7 +267,7 @@ export function jobLockRepository({ db, writes }: RepoDeps): JobLockRepository {
         throw new RangeError("store: invalid job name");
       intIn(pid, 1, 2 ** 31 - 1, "pid");
       writes.required("job_lock", () => {
-        db.prepare("DELETE FROM job_lock WHERE job = ? AND pid = ?").run(job, pid);
+        cachedRun(db, "DELETE FROM job_lock WHERE job = ? AND pid = ?", job, pid);
       });
     },
   };
@@ -276,9 +287,10 @@ export const PENDING_JOURNAL_STATES: readonly JournalState[] = Object.freeze([
 export function writeJournalRepository({ db }: RepoDeps): WriteJournalRepository {
   return {
     countByStatus() {
-      const rows = db
-        .prepare("SELECT status, COUNT(*) AS n FROM write_journal GROUP BY status ORDER BY status")
-        .all() as unknown as { status: string; n: number }[];
+      const rows = cachedAll(
+        db,
+        "SELECT status, COUNT(*) AS n FROM write_journal GROUP BY status ORDER BY status",
+      ) as unknown as { status: string; n: number }[];
       const out: Partial<Record<JournalState, number>> = {};
       for (const r of rows)
         if ((JOURNAL_STATES as readonly string[]).includes(r.status))
@@ -287,11 +299,11 @@ export function writeJournalRepository({ db }: RepoDeps): WriteJournalRepository
     },
     oldestPendingAgeSeconds(nowIso) {
       const nowMs = isoMs(nowIso, "now");
-      const r = db
-        .prepare(
-          "SELECT MIN(created_ms) AS m FROM write_journal WHERE status IN (SELECT value FROM json_each(?))",
-        )
-        .get(JSON.stringify(PENDING_JOURNAL_STATES)) as { m: number | null };
+      const r = cachedGet(
+        db,
+        "SELECT MIN(created_ms) AS m FROM write_journal WHERE status IN (SELECT value FROM json_each(?))",
+        JSON.stringify(PENDING_JOURNAL_STATES),
+      ) as { m: number | null };
       if (r.m === null) return null;
       return Math.max(0, Math.floor((nowMs - num(r.m)) / 1000));
     },

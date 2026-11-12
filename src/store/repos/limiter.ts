@@ -16,6 +16,7 @@ import {
   type RequestCounts,
   type RequestOrigin,
 } from "../types.js";
+import { cachedAll, cachedGet, cachedRun } from "../sqlite.js";
 import { bool, boundedArray, intIn, isoMs, msToIso, num, oneOf, type RepoDeps } from "./common.js";
 import { latestTrustedMs, REQUEST_SKEW_TOLERANCE_MS } from "./skew.js";
 
@@ -80,7 +81,9 @@ export function limiterRepository({ db, writes, clock }: RepoDeps): LimiterRepos
         // finding store-future-stamped-rows-block). The store's clock bounds it from below: a row
         // stamped no later than that clock is legitimate whatever instant a caller passes, and is
         // never moved.
-        db.prepare("UPDATE espn_requests SET ts = ? WHERE ts > ?").run(
+        cachedRun(
+          db,
+          "UPDATE espn_requests SET ts = ? WHERE ts > ?",
           atMs,
           Math.max(atMs + REQUEST_SKEW_TOLERANCE_MS, latestTrustedMs(clock.nowMs())),
         );
@@ -91,27 +94,33 @@ export function limiterRepository({ db, writes, clock }: RepoDeps): LimiterRepos
             ? 0
             : num(
                 (
-                  db
-                    .prepare(
-                      "SELECT COUNT(*) AS n FROM espn_requests WHERE outcome = 'pending' AND ts >= ?",
-                    )
-                    .get(inFlight.sinceMs) as { n: number }
+                  cachedGet(
+                    db,
+                    "SELECT COUNT(*) AS n FROM espn_requests WHERE outcome = 'pending' AND ts >= ?",
+                    inFlight.sinceMs,
+                  ) as { n: number }
                 ).n,
               );
-        const inWindow = db.prepare("SELECT ts FROM espn_requests WHERE ts >= ? ORDER BY ts");
         const windowRows = windows.map((w) =>
-          (inWindow.all(w.startMs) as unknown as { ts: number }[]).map((r) => num(r.ts)),
+          (
+            cachedAll(
+              db,
+              "SELECT ts FROM espn_requests WHERE ts >= ? ORDER BY ts",
+              w.startMs,
+            ) as unknown as { ts: number }[]
+          ).map((r) => num(r.ts)),
         );
         const used =
           cap === null
             ? 0
             : num(
                 (
-                  db
-                    .prepare(
-                      "SELECT COUNT(*) AS n FROM espn_requests WHERE origin = 'job' AND keyless = ? AND ts >= ?",
-                    )
-                    .get(req.keyless ? 1 : 0, cap.dayStartMs) as { n: number }
+                  cachedGet(
+                    db,
+                    "SELECT COUNT(*) AS n FROM espn_requests WHERE origin = 'job' AND keyless = ? AND ts >= ?",
+                    req.keyless ? 1 : 0,
+                    cap.dayStartMs,
+                  ) as { n: number }
                 ).n,
               );
         const verdict = limiterDecision({
@@ -126,11 +135,13 @@ export function limiterRepository({ db, writes, clock }: RepoDeps): LimiterRepos
               : { max: inFlight.max, pending, retryAfterMs: inFlight.retryAfterMs },
         });
         if (!verdict.ok) return verdict;
-        const id = db
-          .prepare(
-            "INSERT INTO espn_requests (ts, keyless, origin, outcome) VALUES (?, ?, ?, 'pending')",
-          )
-          .run(atMs, req.keyless ? 1 : 0, req.origin).lastInsertRowid;
+        const id = cachedRun(
+          db,
+          "INSERT INTO espn_requests (ts, keyless, origin, outcome) VALUES (?, ?, ?, 'pending')",
+          atMs,
+          req.keyless ? 1 : 0,
+          req.origin,
+        ).lastInsertRowid;
         return { ok: true, id: Number(id) };
       });
     },
@@ -139,7 +150,7 @@ export function limiterRepository({ db, writes, clock }: RepoDeps): LimiterRepos
       intIn(id, 1, Number.MAX_SAFE_INTEGER, "request id");
       oneOf(outcome, REQUEST_OUTCOMES, "request outcome");
       writes.required("espn_requests", () => {
-        db.prepare("UPDATE espn_requests SET outcome = ? WHERE id = ?").run(outcome, id);
+        cachedRun(db, "UPDATE espn_requests SET outcome = ? WHERE id = ?", outcome, id);
       });
     },
 
@@ -147,7 +158,7 @@ export function limiterRepository({ db, writes, clock }: RepoDeps): LimiterRepos
       const ms = isoMs(since, "since");
       return num(
         (
-          db.prepare("SELECT COUNT(*) AS n FROM espn_requests WHERE ts >= ?").get(ms) as {
+          cachedGet(db, "SELECT COUNT(*) AS n FROM espn_requests WHERE ts >= ?", ms) as {
             n: number;
           }
         ).n,
@@ -156,11 +167,11 @@ export function limiterRepository({ db, writes, clock }: RepoDeps): LimiterRepos
 
     countToday(dayStart): RequestCounts {
       const ms = isoMs(dayStart, "dayStart");
-      const rows = db
-        .prepare(
-          "SELECT origin, keyless, COUNT(*) AS n FROM espn_requests WHERE ts >= ? GROUP BY origin, keyless",
-        )
-        .all(ms) as unknown as { origin: string; keyless: number; n: number }[];
+      const rows = cachedAll(
+        db,
+        "SELECT origin, keyless, COUNT(*) AS n FROM espn_requests WHERE ts >= ? GROUP BY origin, keyless",
+        ms,
+      ) as unknown as { origin: string; keyless: number; n: number }[];
       const out = {
         server: { cookie: 0, keyless: 0 },
         job: { cookie: 0, keyless: 0 },
@@ -176,9 +187,11 @@ export function limiterRepository({ db, writes, clock }: RepoDeps): LimiterRepos
 
     recentOutcomes(limit) {
       const lim = intIn(limit, 1, RECENT_OUTCOMES_MAX, "limit");
-      const rows = db
-        .prepare("SELECT ts, outcome FROM espn_requests ORDER BY ts DESC, id DESC LIMIT ?")
-        .all(lim) as unknown as { ts: number; outcome: string }[];
+      const rows = cachedAll(
+        db,
+        "SELECT ts, outcome FROM espn_requests ORDER BY ts DESC, id DESC LIMIT ?",
+        lim,
+      ) as unknown as { ts: number; outcome: string }[];
       return rows
         .filter((r) => (REQUEST_OUTCOMES as readonly string[]).includes(r.outcome))
         .map((r) => ({
@@ -191,11 +204,11 @@ export function limiterRepository({ db, writes, clock }: RepoDeps): LimiterRepos
       const ms = isoMs(since, "since");
       return num(
         (
-          db
-            .prepare(
-              "SELECT COUNT(*) AS n FROM espn_requests WHERE outcome = 'not_modified' AND ts >= ?",
-            )
-            .get(ms) as { n: number }
+          cachedGet(
+            db,
+            "SELECT COUNT(*) AS n FROM espn_requests WHERE outcome = 'not_modified' AND ts >= ?",
+            ms,
+          ) as { n: number }
         ).n,
       );
     },
@@ -203,7 +216,7 @@ export function limiterRepository({ db, writes, clock }: RepoDeps): LimiterRepos
     prune(before) {
       const ms = isoMs(before, "before");
       return writes.required("espn_requests", () =>
-        Number(db.prepare("DELETE FROM espn_requests WHERE ts < ?").run(ms).changes),
+        Number(cachedRun(db, "DELETE FROM espn_requests WHERE ts < ?", ms).changes),
       );
     },
   };

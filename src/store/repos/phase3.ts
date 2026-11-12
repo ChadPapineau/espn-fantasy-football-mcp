@@ -22,6 +22,7 @@ import type {
   PendingClaim,
   ScoredClaimRepository,
 } from "../../domain/reclog/types.js";
+import { cachedAll, cachedGet, cachedRun } from "../sqlite.js";
 import {
   boundedArray,
   finite,
@@ -59,22 +60,31 @@ export function parameterProposalRepository({ db, writes }: RepoDeps): Parameter
       const createdMs = isoMs(valid.created_at, "created_at");
       const json = toJson(valid, "proposal set", PROPOSAL_JSON_MAX);
       writes.required("parameter_proposal", () => {
-        db.prepare(
+        cachedRun(
+          db,
           `INSERT OR IGNORE INTO parameter_proposal
            (league_id, season, week, hash, created_at, created_ms, set_json)
            VALUES (?, ?, ?, ?, ?, ?, ?)`,
-        ).run(league, valid.season, valid.week, valid.hash, valid.created_at, createdMs, json);
+          league,
+          valid.season,
+          valid.week,
+          valid.hash,
+          valid.created_at,
+          createdMs,
+          json,
+        );
       });
     },
     latest(leagueId, season) {
       const league = leagueOf(leagueId);
       intIn(season, SEASON_MIN, SEASON_MAX, "season");
-      const r = db
-        .prepare(
-          `SELECT set_json FROM parameter_proposal WHERE league_id = ? AND season = ?
+      const r = cachedGet(
+        db,
+        `SELECT set_json FROM parameter_proposal WHERE league_id = ? AND season = ?
            ORDER BY created_ms DESC, hash LIMIT 1`,
-        )
-        .get(league, season) as { set_json: string } | undefined;
+        league,
+        season,
+      ) as { set_json: string } | undefined;
       // returned as stored: `eff tune` re-validates every set it reads (the store is never trusted)
       return r === undefined ? null : parseJson<ParameterProposalSet>(r.set_json);
     },
@@ -104,23 +114,32 @@ export function waiverRunRepository({ db, writes }: RepoDeps): WaiverRunReposito
       );
       const json = JSON.stringify(surplus);
       return writes.bestEffort(() => {
-        db.prepare(
+        cachedRun(
+          db,
           `INSERT INTO waiver_run (league_id, season, run_at, run_ms, w, surplus_json, updated_at)
            VALUES (?, ?, ?, ?, ?, ?, ?)
            ON CONFLICT (league_id, season, run_ms) DO UPDATE SET
              w = excluded.w, surplus_json = excluded.surplus_json, updated_at = excluded.updated_at`,
-        ).run(league, run.season, run.run_at, runMs, W, json, updatedAt);
+          league,
+          run.season,
+          run.run_at,
+          runMs,
+          W,
+          json,
+          updatedAt,
+        );
       });
     },
     list(leagueId, season): readonly WaiverRunRecord[] {
       const league = leagueOf(leagueId);
       intIn(season, SEASON_MIN, SEASON_MAX, "season");
-      const rows = db
-        .prepare(
-          `SELECT season, run_at, w, surplus_json FROM waiver_run
+      const rows = cachedAll(
+        db,
+        `SELECT season, run_at, w, surplus_json FROM waiver_run
            WHERE league_id = ? AND season = ? ORDER BY run_ms`,
-        )
-        .all(league, season) as unknown as WaiverRunRow[];
+        league,
+        season,
+      ) as unknown as WaiverRunRow[];
       const out: WaiverRunRecord[] = [];
       for (const r of rows) {
         const s = parseJson<unknown>(r.surplus_json);
@@ -183,11 +202,11 @@ export function scoredClaimRepository({ db, writes }: RepoDeps): ScoredClaimRepo
       const claim = checkedClaim(c.claim);
       const key = claimKeyOf(league, { ...c, claim });
       return writes.bestEffort(() => {
-        db.prepare(
+        cachedRun(
+          db,
           `INSERT OR IGNORE INTO scored_claim
            (claim_key, league_id, season, week, player_id, logged_at, logged_ms, claim_json)
            VALUES (?, ?, ?, ?, ?, ?, ?, ?)`,
-        ).run(
           key,
           league,
           c.season,
@@ -203,13 +222,15 @@ export function scoredClaimRepository({ db, writes }: RepoDeps): ScoredClaimRepo
       const league = leagueOf(leagueId);
       intIn(season, SEASON_MIN, SEASON_MAX, "season");
       intIn(week, WEEK_MIN, WEEK_MAX, "week");
-      const rows = db
-        .prepare(
-          `SELECT claim_key, season, week, player_id, claim_json, outcome_json FROM scored_claim
+      const rows = cachedAll(
+        db,
+        `SELECT claim_key, season, week, player_id, claim_json, outcome_json FROM scored_claim
            WHERE league_id = ? AND season = ? AND week = ? AND scored_at IS NULL
            ORDER BY logged_ms, claim_key`,
-        )
-        .all(league, season, week) as unknown as ClaimRow[];
+        league,
+        season,
+        week,
+      ) as unknown as ClaimRow[];
       const out: PendingClaim[] = [];
       for (const r of rows) {
         let claim: LoggedClaim["claim"];
@@ -235,21 +256,26 @@ export function scoredClaimRepository({ db, writes }: RepoDeps): ScoredClaimRepo
         if (v !== null && typeof v !== "boolean") throw new RangeError("store: invalid outcome");
       const json = JSON.stringify({ active: outcome.active, borne_out: outcome.borne_out });
       return writes.bestEffort(() => {
-        db.prepare(
+        cachedRun(
+          db,
           `UPDATE scored_claim SET scored_at = ?, outcome_json = ?
            WHERE claim_key = ? AND scored_at IS NULL`,
-        ).run(scoredAt, json, key);
+          scoredAt,
+          json,
+          key,
+        );
       });
     },
     scored(leagueId, limit): readonly ScoredClaim[] {
       const league = leagueOf(leagueId);
       intIn(limit, 0, SCORED_CLAIMS_MAX, "limit");
-      const rows = db
-        .prepare(
-          `SELECT claim_key, season, week, player_id, claim_json, outcome_json FROM scored_claim
+      const rows = cachedAll(
+        db,
+        `SELECT claim_key, season, week, player_id, claim_json, outcome_json FROM scored_claim
            WHERE league_id = ? AND scored_at IS NOT NULL ORDER BY logged_ms DESC, claim_key LIMIT ?`,
-        )
-        .all(league, limit) as unknown as ClaimRow[];
+        league,
+        limit,
+      ) as unknown as ClaimRow[];
       const out: ScoredClaim[] = [];
       for (const r of rows) {
         let raw: unknown;

@@ -6,6 +6,7 @@
 // keyed by sha256 of the upper-cased GUID, so the store holds no real GUID outside the parsed cache.
 import { createHash } from "node:crypto";
 import type { DatabaseSync } from "node:sqlite";
+import { cachedGet, cachedRun } from "./sqlite.js";
 
 /** A brace-GUID anywhere in a string (the logger's redaction shape, plan 01 §8). */
 export const BRACE_GUID_RE =
@@ -47,15 +48,15 @@ export function createPseudonymizer(db: DatabaseSync): Pseudonymizer {
         const upper = g.toUpperCase();
         if (map.has(upper) || PSEUDONYM_RE.test(g)) continue;
         const key = guidKey(upper);
-        const row = db.prepare("SELECT n FROM guid_pseudonym WHERE guid_sha256 = ?").get(key) as
+        const row = cachedGet(db, "SELECT n FROM guid_pseudonym WHERE guid_sha256 = ?", key) as
           { n: number } | undefined;
         let n = row?.n;
         if (n === undefined) {
-          const next = db
-            .prepare("SELECT COALESCE(MAX(n), 0) + 1 AS n FROM guid_pseudonym")
-            .get() as { n: number };
+          const next = cachedGet(db, "SELECT COALESCE(MAX(n), 0) + 1 AS n FROM guid_pseudonym") as {
+            n: number;
+          };
           n = next.n;
-          db.prepare("INSERT INTO guid_pseudonym (guid_sha256, n) VALUES (?, ?)").run(key, n);
+          cachedRun(db, "INSERT INTO guid_pseudonym (guid_sha256, n) VALUES (?, ?)", key, n);
         }
         map.set(upper, pseudonymOf(n));
       }

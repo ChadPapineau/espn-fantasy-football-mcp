@@ -461,6 +461,20 @@ minor version (plan 04 §4.4; plan 09 K6). One version covers the server, the Sk
   under the 20 ms batch on three Linux CI runs in a row; answers are unchanged (compared byte for
   byte, cold and warm). A stall window the host set is judged by the server's own longest CPU run
   (R10-9). The news matcher's work is counted and held linear by count (R10-16).
+- **A garbage-collection pause of E13's own making (plan 03 §1.2; CI at `552e3d3`).** Every
+  store statement is now prepared once per connection and reused (the statement guard's
+  cache, `src/store/sqlite.ts`), not compiled per lookup and dropped. `espn_analyze_retrospective`
+  prepared about 2,576 node:sqlite statements per call — 2,332 of them the projection lookup, two
+  per player-week — and V8's weak callbacks freeing them were about 70 % of the young-generation
+  pause that CI's `retrospective-stall` test read as growth (40.6 ms over a 27.7 ms bound). A warm
+  call now prepares none, whatever its players, weeks or log size, and takes about half the time
+  (a median of 46 → 24 ms on the development Mac). The cache never weakens the guard: nothing is
+  prepared, cached or run through it while the authorizer is lifted for `VACUUM INTO`; a statement
+  is reused only on the connection, label and mode it was prepared under; a closed connection's
+  cache is dropped and a dataset re-open starts its own; starting a trace drops every cache, so
+  the zero-`ds_*`-DML trace (plan 05 §2) still sees every statement; cached statements only run to
+  completion (no iterator), a run re-entered from its own SQL function gets a statement of its own,
+  and each connection keeps at most 256.
 - **Answers that changed with the clock alone.** The result budget counts every input's `age_s` at a
   fixed width, so an answer near its cap is trimmed the same way a second or a minute later.
 - **The season simulation's clinched and eliminated flags** are exact when no game is left in a

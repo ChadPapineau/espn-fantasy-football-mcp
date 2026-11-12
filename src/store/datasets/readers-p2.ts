@@ -31,6 +31,7 @@ import type {
 import { epExpectedOf } from "../../domain/analytics/xfp.js";
 import { newsItemWithRefs, readStoredNewsRow } from "../../domain/evidence/index.js";
 import { bareUntrusted, type IsoInstant, type Week } from "../../domain/league/types.js";
+import { cachedAll } from "../sqlite.js";
 import type { DatasetConnection } from "./connections.js";
 import { DEPTH_LABEL_OTHER, DEPTH_LABELS } from "./derive.js";
 import {
@@ -140,7 +141,7 @@ export function createPhase2Readers(d: Phase2ReaderDeps): {
     if (st === undefined) throw new Error(`store: ${method} has no statement ${String(i)}`);
     const conn = d.connFor(st.source, st.history, season);
     if (conn === null) return null;
-    const rows = conn.db.prepare(st.sql).all(params) as unknown as SqlRow[];
+    const rows = cachedAll(conn.db, st.sql, params) as unknown as SqlRow[];
     return { rows, conn };
   }
 
