@@ -182,7 +182,8 @@ function alive(st: StatementSync): boolean {
  * that landed in its stall window (CI read 40.6 ms over a 27.7 ms bound at 552e3d3). The cache
  * lives here, not in each repository, because the guard is what the cache must never weaken:
  * - a statement is cached only as prepared under its connection's authorizer, keyed by the
- *   connection, whose label and mode never change under it (a re-install with another drops it);
+ *   connection, whose label and mode never change under it (a re-install with another drops it,
+ *   and a bypass ends by re-arming the record held then, never one since replaced);
  * - nothing is prepared, cached or run through the cache while `bypass` lifts the authorizer;
  * - `forget` (every close) drops the connection's cache, and a handle found closed (a sentinel
  *   statement finalized) is never cached on again: a dataset re-open is a new connection, with a
@@ -249,6 +250,11 @@ export class StatementGuard {
   /**
    * Runs `fn` with the guard lifted on `db`. Only for `VACUUM INTO`, which attaches and writes its
    * own temporary schema; never around a caller's SQL. The statement cache refuses `db` meanwhile.
+   * Its end re-arms the record `db` holds then, not the one it lifted: after a re-install inside
+   * `fn` (another label or mode) the authorizer is the new record's, the one its cache is kept
+   * under; after `db` went to another guard, that guard's authorizer stays; forgotten (no guard
+   * holds it, no cache), it gets back the one lifted, as after a forget outside a bypass; closed,
+   * nothing (a closed handle takes no authorizer).
    */
   bypass<T>(db: DatabaseSync, fn: () => T): T {
     const cfg = this.installed.get(db);
@@ -259,7 +265,8 @@ export class StatementGuard {
       return fn();
     } finally {
       cfg.lifted -= 1;
-      this.arm(db, cfg.label, cfg.mode);
+      const now = this.installed.get(db) ?? (guardOfDb.has(db) ? undefined : cfg);
+      if (now !== undefined && db.isOpen) this.arm(db, now.label, now.mode);
     }
   }
 

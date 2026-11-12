@@ -174,6 +174,95 @@ describe("the guard is never weakened (a)", () => {
     expect(count(prepares(), SEL)).toBe(2);
   });
 
+  describe("the end of a bypass re-arms what the connection holds then, not what it lifted", () => {
+    it("re-installed inside it under another label and mode: the authorizer is the new record's", () => {
+      const { db, guard } = guarded();
+      expect(cachedRun(db, INS, 4, 40).changes).toBe(1);
+      guard.bypass(db, () => {
+        guard.install(db, "relabelled", "dataset");
+      });
+      // the record (and its cache) is dataset now: so is the authorizer, and a write is denied
+      expect(guard.cachedSql(db)).toEqual([]);
+      guard.startTrace();
+      expect(() => cachedRun(db, "INSERT INTO t (a, b) VALUES (9, 90)")).toThrow(/not authorized/);
+      expect(cachedGet(db, SEL, 4)).toEqual({ b: 40 });
+      const trace = guard.stopTrace();
+      expect(trace.length).toBeGreaterThan(0);
+      expect(trace.every((e) => e.connection === "relabelled")).toBe(true);
+      expect(trace.some((e) => e.action === C.SQLITE_INSERT && e.denied)).toBe(true);
+      expect(guard.cachedSql(db)).toEqual([SEL]);
+      expect(cachedGet(db, "SELECT COUNT(*) AS n FROM t")).toEqual({ n: 4 });
+      // a later install under the same label and mode keeps a cache that never held the write
+      guard.install(db, "relabelled", "dataset");
+      expect(guard.cachedSql(db)).not.toContain("INSERT INTO t (a, b) VALUES (9, 90)");
+    });
+
+    it("re-installed inside it the other way (dataset to store): traced under the new label", () => {
+      const { db, guard } = guarded("dataset", "src");
+      guard.bypass(db, () => {
+        guard.install(db, "store", "store");
+      });
+      guard.startTrace();
+      expect(cachedRun(db, INS, 5, 50).changes).toBe(1);
+      expect(() => cachedRun(db, "CREATE TABLE ds_x (x INTEGER)")).toThrow(/not authorized/);
+      const trace = guard.stopTrace();
+      expect(trace.length).toBeGreaterThan(0);
+      expect(trace.every((e) => e.connection === "store")).toBe(true);
+    });
+
+    it("taken by another guard inside it: the other guard's authorizer stays", () => {
+      const { db, guard: first } = guarded();
+      const second = new StatementGuard();
+      first.bypass(db, () => {
+        second.install(db, "src", "dataset");
+      });
+      expect(first.cachedSql(db)).toEqual([]);
+      first.startTrace();
+      second.startTrace();
+      expect(() => cachedRun(db, INS, 6, 60)).toThrow(/not authorized/);
+      expect(cachedGet(db, SEL, 1)).toEqual({ b: 10 });
+      expect(first.stopTrace()).toEqual([]);
+      const trace = second.stopTrace();
+      expect(trace.some((e) => e.action === C.SQLITE_INSERT && e.denied)).toBe(true);
+      expect(trace.every((e) => e.connection === "src")).toBe(true);
+      expect(second.cachedSql(db)).toEqual([SEL]);
+    });
+
+    it("forgotten inside it (still open): the authorizer lifted comes back, as after any forget", () => {
+      const { db, guard } = guarded();
+      expect(cachedGet(db, SEL, 1)).toEqual({ b: 10 });
+      guard.bypass(db, () => {
+        guard.forget(db);
+      });
+      expect(guard.cachedSql(db)).toEqual([]);
+      expect(() => db.prepare("CREATE TABLE ds_x (x INTEGER)")).toThrow(/not authorized/);
+      expect(() => cachedRun(db, "CREATE TABLE ds_x (x INTEGER)")).toThrow(/not authorized/);
+      expect(guard.cachedSql(db)).toEqual([]);
+    });
+
+    it("closed inside it, forgotten or not: nothing is re-armed on the closed handle, fn's own outcome stands", () => {
+      const a = guarded();
+      expect(
+        a.guard.bypass(a.db, () => {
+          a.guard.forget(a.db);
+          a.db.close();
+          return "closed";
+        }),
+      ).toBe("closed");
+      expect(a.guard.cachedSql(a.db)).toEqual([]);
+      const b = guarded();
+      expect(cachedGet(b.db, SEL, 1)).toEqual({ b: 10 });
+      expect(() =>
+        b.guard.bypass(b.db, () => {
+          b.db.close();
+          throw new Error("fn failed");
+        }),
+      ).toThrow(/fn failed/);
+      expect(() => cachedGet(b.db, SEL, 1)).toThrow(/database is not open/);
+      expect(b.guard.cachedSql(b.db)).toEqual([]);
+    });
+  });
+
   it("forget drops the cache; the connection then prepares per run", () => {
     const { db, guard, prepares } = guarded();
     cachedGet(db, SEL, 1);
