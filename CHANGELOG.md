@@ -496,6 +496,16 @@ minor version (plan 04 §4.4; plan 09 K6). One version covers the server, the Sk
   the zero-`ds_*`-DML trace (plan 05 §2) still sees every statement; cached statements only run to
   completion (no iterator), a run re-entered from its own SQL function gets a statement of its own,
   and each connection keeps at most 256.
+- **What a cached statement kept (the statement cache's second verification).** SQLite keeps a
+  statement's last bindings after its reset, so the ESPN cache's cached `INSERT` held the last
+  parsed object it wrote (4 MiB in a test; while recording, the raw body too) for the life of the
+  connection, in SQLite's memory where the garbage collector cannot see it, and a projection's
+  `INSERT` its samples. A run that binds more than 64 Ki in all (string lengths and buffer bytes,
+  named parameters included) now runs on a statement prepared for that run only. Every lookup binds
+  well under that, so a warm `espn_analyze_retrospective` call still prepares none. And a
+  `VACUUM INTO` bypass that a closed connection refuses no longer leaves the guard counted as
+  lifted, which had made that connection's cache refuse every later run until it was installed
+  again.
 - **Answers that changed with the clock alone.** The result budget counts every input's `age_s` at a
   fixed width, so an answer near its cap is trimmed the same way a second or a minute later.
 - **The season simulation's clinched and eliminated flags** are exact when no game is left in a

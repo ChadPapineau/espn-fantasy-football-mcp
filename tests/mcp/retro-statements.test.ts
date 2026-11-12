@@ -7,11 +7,15 @@
 // growth (40.6 ms over a 27.7 ms bound). Through the real composition root over the real store
 // (fixture mode, nflverse excerpts published; no network, no cookie): a small world (league-b, ten
 // teams, one record, week 1) and a large one (league-c, twelve teams, records in weeks 1–3, week 3),
-// every DatabaseSync.prepare in the process counted around each E13 call.
+// every DatabaseSync.prepare in the process counted around each E13 call. A run binding more than
+// StatementGuard.MAX_CACHED_BOUND is prepared for its run only (no cached statement keeps an ESPN
+// body): here the cold call's ESPN cache INSERT of each box-score body it fetched, and nothing else.
 import type { Client } from "@modelcontextprotocol/client";
-import { DatabaseSync } from "node:sqlite";
+import { createHash } from "node:crypto";
+import { DatabaseSync, type StatementSync } from "node:sqlite";
 import { afterAll, beforeAll, describe, expect, it, vi } from "vitest";
 import type { ProjectionRepository } from "../../src/domain/analytics/types.js";
+import { StatementGuard } from "../../src/store/sqlite.js";
 import { call, connect, makeWorld, type LeagueSlot, type World } from "./helpers/world.js";
 
 /** Most statements one E13 call may prepare cold (each distinct SQL text once per connection). */
@@ -63,8 +67,28 @@ async function seeded(
 interface Counted {
   readonly prepares: number;
   readonly sql: readonly string[];
+  /** The SQL of each statement prepared for a run that bound more than MAX_CACHED_BOUND. */
+  readonly large: readonly string[];
+  /** A digest of what each of those bound (its expanded SQL). */
+  readonly largeBound: readonly string[];
   readonly lookups: number;
   readonly calls: number;
+}
+
+/** The ESPN cache's INSERT (src/store/repos/caches.ts), the one write E13 makes of a fetched body. */
+const ESPN_CACHE_PUT = /^INSERT OR REPLACE INTO espn_cache \(/;
+
+/**
+ * Whether `st` was prepared for a run that bound more than MAX_CACHED_BOUND: SQLite keeps a
+ * statement's last bindings, so such a statement still holds them (its expanded SQL is longer
+ * than the bound by at least what was bound). A cached statement never binds that much.
+ */
+function boundLarge(st: StatementSync): boolean {
+  try {
+    return st.expandedSQL.length - st.sourceSQL.length > StatementGuard.MAX_CACHED_BOUND;
+  } catch {
+    return false; // finalized (its connection closed): counted as one the cache serves
+  }
 }
 
 /** Two E13 calls for `week` (the first may compile what no earlier tool ran; the second is warm). */
@@ -87,9 +111,14 @@ async function e13Twice(world: World, week: number): Promise<[Counted, Counted]>
       lookups = 0;
       const e = await ok(client, "espn_analyze_retrospective", { week, min_n: 1 });
       const sql = prepare.mock.calls.slice(from).map((c) => c[0]);
+      const largeSt = prepare.mock.results
+        .slice(from)
+        .flatMap((r) => (r.type === "return" && boundLarge(r.value) ? [r.value] : []));
       return {
         prepares: sql.length,
         sql,
+        large: largeSt.map((st) => st.sourceSQL),
+        largeBound: largeSt.map((st) => createHash("sha256").update(st.expandedSQL).digest("hex")),
         lookups,
         calls: (e.data.calls as unknown[]).length,
       };
@@ -122,6 +151,7 @@ describe("E13 prepares a bounded number of statements per call (retrospective-st
       small: { cold: smallCold.prepares, warm: smallWarm.prepares, lookups: smallCold.lookups },
       large: { cold: largeCold.prepares, warm: largeWarm.prepares, lookups: largeCold.lookups },
       warm_sql: [...new Set([...smallWarm.sql, ...largeWarm.sql])],
+      large_bound: { small: smallCold.large.length, large: largeCold.large.length },
     });
     // the worlds differ where the old cost grew: players × weeks (lookups) and the log (records)
     expect(smallCold.calls, report).toBe(1);
@@ -135,9 +165,20 @@ describe("E13 prepares a bounded number of statements per call (retrospective-st
       expect(run.prepares, report).toBeLessThanOrEqual(WARM_PREPARES_MAX);
     // independent of the player count, the weeks and the log size
     expect(largeWarm.prepares, report).toBe(smallWarm.prepares);
-    // each statement a call prepares, it prepares once (no SQL text twice in one call)
-    for (const run of [smallCold, largeCold, smallWarm, largeWarm])
-      expect(run.sql.length, report).toBe(new Set(run.sql).size);
+    // each statement a call prepares, it prepares once (no SQL text twice in one call) — save a
+    // run binding more than MAX_CACHED_BOUND, prepared for that run only (src/store/sqlite.ts):
+    // the ESPN cache INSERT of each body a cold call fetched, never anything a lookup runs
+    for (const run of [smallCold, largeCold, smallWarm, largeWarm]) {
+      const served = [...run.sql];
+      for (const sql of run.large) served.splice(served.indexOf(sql), 1);
+      expect(served.length, report).toBe(new Set(served).size);
+      for (const sql of run.large) expect(sql, report).toMatch(ESPN_CACHE_PUT);
+    }
+    // a warm call fetches nothing, and so writes no body; a cold one writes each answer it
+    // fetched once (no body bound twice in one call)
+    for (const run of [smallWarm, largeWarm]) expect(run.large, report).toEqual([]);
+    for (const run of [smallCold, largeCold])
+      expect(run.largeBound.length, report).toBe(new Set(run.largeBound).size);
     // the warm calls answer what the cold ones did
     expect(largeWarm.calls).toBe(largeCold.calls);
     expect(smallWarm.calls).toBe(smallCold.calls);

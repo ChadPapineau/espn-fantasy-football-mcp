@@ -830,6 +830,20 @@ open.
   was dropped (that object is new on every call), so a real one needs a stable league-identity key,
   and a reused result must never outlive the body or the settings it was normalised from (a
   staleness risk). Revisit if a CI stall notice again shows a minor GC in E13's window.
+- **What the statement cache still holds (store; recorded, no change).** The second verification of
+  the cache (`81c2a6c`, `35607df`) found two minor defects, both fixed (CHANGELOG [Unreleased],
+  Fixed): a cached statement kept its last run's large values, and a refused bypass left the guard
+  counted as lifted. Two smaller facts stay. A statement prepared for one run (a run binding more
+  than 64 Ki) keeps what it bound until V8 collects it, as every statement did before the cache:
+  node:sqlite has no finalize, and SQLite does not report that memory to V8. A cached statement
+  keeps its last run's values, at most 64 Ki in all, until its text runs again or its connection
+  closes. Those are the same bytes as the row that run wrote or the key it read, so the process
+  holds nothing the store file does not. One exception: an `espn_cache` row pruned or replaced
+  since can outlive itself in memory until the next ESPN cache write. No statement ever binds a
+  cookie, because the store has no column for one: `credential_state` keeps the session's state
+  and timestamps, and the limiter keeps a keyless bit. While recording, a raw body is ESPN's
+  response text, never the request's cookie, but it carries member GUIDs, and the SWID is the
+  owner's member GUID. Revisit only if node:sqlite gains a way to clear a statement's bindings.
 
 ## Known limitations of eff doctor's client-config model (Claude Code 2.1.308)
 

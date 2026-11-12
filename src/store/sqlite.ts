@@ -160,6 +160,41 @@ function runOp(st: StatementSync, op: CachedOp, params: SQLInputValue[]): unknow
   }
 }
 
+/** Whether node:sqlite binds `v` as a named-parameter object (any object but a buffer view). */
+function isNamed(v: unknown): v is Record<string, SQLInputValue> {
+  return (typeof v === "object" || typeof v === "function") && v !== null && !ArrayBuffer.isView(v);
+}
+
+/**
+ * A run's parameters as they are bound: a named-parameter object first is copied to a plain one
+ * (its own enumerable string keys, the ones node:sqlite binds), so each value is read once and
+ * what boundSize measures is what is bound — a getter cannot answer the measure small and the
+ * bind large. Anonymous parameters are the caller's own array, unchanged.
+ */
+function asBound(params: SQLInputValue[]): SQLInputValue[] {
+  const first: unknown = params[0];
+  if (!isNamed(first)) return params;
+  return [{ ...first } as unknown as SQLInputValue, ...params.slice(1)];
+}
+
+/** A bound value's size as the cache counts it: a string's length, a view's bytes, else 0. */
+function sizeOf(v: unknown): number {
+  if (typeof v === "string") return v.length;
+  if (ArrayBuffer.isView(v)) return v.byteLength;
+  return 0;
+}
+
+/** What a run binds in all (sizeOf each value, a named-parameter object's own values included). */
+function boundSize(params: readonly SQLInputValue[]): number {
+  let n = 0;
+  for (let i = 0; i < params.length; i++) {
+    const v: unknown = params[i];
+    if (i === 0 && isNamed(v)) for (const w of Object.values(v)) n += sizeOf(w);
+    else n += sizeOf(v);
+  }
+  return n;
+}
+
 /** Whether a statement is still live (node:sqlite refuses a finalized one's every member). */
 function alive(st: StatementSync): boolean {
   try {
@@ -192,8 +227,11 @@ function alive(st: StatementSync): boolean {
  *   authorizer decisions recorded — while tracing (plan 05 §2 holds for a warm store too);
  * - only get/all/run, which run a statement to completion and reset it: no iterator is ever open
  *   on a cached statement, its options are never set (no setter is reachable) and node:sqlite
- *   clears its bindings on every run; a run re-entered from inside its own run (a SQL function)
- *   gets a statement of its own, never the running one;
+ *   clears its bindings before every run binds; a run re-entered from inside its own run (a SQL
+ *   function) gets a statement of its own, never the running one;
+ * - a statement keeps what its last run bound (SQLite keeps bindings across a reset), so a run
+ *   binding more than MAX_CACHED_BOUND is prepared for its run only: no cached statement holds an
+ *   ESPN body or a projection's samples for the life of its connection;
  * - at most MAX_CACHED statements per connection (least recently used dropped first), and SQL
  *   longer than MAX_CACHED_SQL is prepared for its run only.
  * (node:sqlite's own createTagStore was not used: it keys on template-literal call sites, hands
@@ -206,6 +244,21 @@ export class StatementGuard {
   static readonly MAX_CACHED = 256;
   /** Longest SQL text cached (the store's longest is about 1 KB); a longer one is never kept. */
   static readonly MAX_CACHED_SQL = 16 * 1024;
+  /**
+   * Most a run may bind (boundSize: string lengths plus byte lengths, a named-parameter object's
+   * values included) and still run on the cached statement; a run binding more prepares its own,
+   * dropped after the run and freed — bindings and all — when V8 collects it, as before the cache.
+   * SQLite keeps a statement's last bindings after its reset (node:sqlite clears them only at the
+   * next bind), in SQLite's heap where V8 cannot see them: a cached espn_cache INSERT held its last
+   * 4 MiB parsed_json (and, while recording, the raw body) until that text ran again, a projection
+   * INSERT its samples (deflated from up to 64 MiB of JSON). 64 Ki: E13's lookups bind under 1 Ki
+   * in all (ids, an ISO instant, a model name), and the most any routine statement bound over the
+   * store and E13 tests was about 14 Ki (a league_settings INSERT); what binds more is a write of a
+   * body fetched or a value built (an ESPN answer, a projection's samples, a snapshot), against
+   * which one prepare is nothing; and the cache then holds at most MAX_CACHED × 64 Ki bound (each
+   * unit at most 3 bytes in SQLite's UTF-8).
+   */
+  static readonly MAX_CACHED_BOUND = 64 * 1024;
   private readonly entries: TraceEntry[] = [];
   private tracing = false;
   private readonly installed = new Map<DatabaseSync, Guarded>();
@@ -259,8 +312,10 @@ export class StatementGuard {
   bypass<T>(db: DatabaseSync, fn: () => T): T {
     const cfg = this.installed.get(db);
     if (cfg === undefined) return fn();
-    cfg.lifted += 1;
+    // lifted first, counted after: a handle that refuses it (closed, still installed) throws here
+    // with nothing raised, so no record's cache is left refusing every later run
     db.setAuthorizer(null);
+    cfg.lifted += 1;
     try {
       return fn();
     } finally {
@@ -274,13 +329,17 @@ export class StatementGuard {
    * Runs `sql` once through `db`'s statement cache (cachedGet/cachedAll/cachedRun): the cached
    * statement, prepared on first use under the connection's authorizer — a denied or failing
    * prepare caches nothing. A connection this guard does not hold, or whose handle is gone,
-   * prepares per run as before the cache; a lifted guard refuses.
+   * prepares per run as before the cache; a lifted guard refuses; a run binding more than
+   * MAX_CACHED_BOUND prepares its own (the cached statement, if any, keeps what it held).
    */
-  execute(db: DatabaseSync, sql: string, op: CachedOp, params: SQLInputValue[]): unknown {
+  execute(db: DatabaseSync, sql: string, op: CachedOp, args: SQLInputValue[]): unknown {
     const g = this.installed.get(db);
-    if (g === undefined) return runOp(db.prepare(sql), op, params);
+    if (g === undefined) return runOp(db.prepare(sql), op, args);
     if (g.lifted > 0)
       throw new Error("store: no statement runs from the cache while the guard is lifted");
+    const params = asBound(args);
+    if (boundSize(params) > StatementGuard.MAX_CACHED_BOUND)
+      return runOp(db.prepare(sql), op, params);
     let e = g.cache.get(sql);
     if (e === undefined) {
       // about to cache: only on the handle the authorizer was set on (else per run from here on)

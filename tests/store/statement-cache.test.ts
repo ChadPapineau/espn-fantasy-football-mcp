@@ -6,11 +6,14 @@
 // lifts the authorizer; a statement reused only on the connection, label and mode it was prepared
 // under; no cache outliving its connection or a dataset's re-open; a trace that still sees every
 // statement run while tracing; no reuse of a statement while its own run is under way; no option or
-// parameter leaking between runs; a bounded size.
+// parameter leaking between runs; a bounded size; no large bound value kept by a cached statement
+// (SQLite keeps a statement's last bindings after its reset: a cached espn_cache INSERT held its
+// last 4 MiB parsed_json for the life of the connection); a bypass refused by a closed handle that
+// lifts nothing.
 import { mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import path from "node:path";
-import { constants as C, DatabaseSync } from "node:sqlite";
+import { constants as C, DatabaseSync, type StatementSync } from "node:sqlite";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import {
   cachedAll,
@@ -22,7 +25,7 @@ import {
   type GuardMode,
 } from "../../src/store/sqlite.js";
 import { nflPlayersReaderOf, statementGuardOf, storeInternalsOf } from "../../src/store/store.js";
-import type { DatasetPublisher, Store } from "../../src/store/types.js";
+import type { DatasetPublisher, EspnCacheEntry, Store } from "../../src/store/types.js";
 import {
   emptyTables,
   injuriesTables,
@@ -35,7 +38,7 @@ import {
   statsTables,
   weatherTables,
 } from "./helpers/datasets.js";
-import { openPublisher, openStore, tempCache, type TempCache } from "./helpers/env.js";
+import { openPublisher, openStore, T0, tempCache, type TempCache } from "./helpers/env.js";
 
 const SEL = "SELECT b FROM t WHERE a = ?";
 const INS = "INSERT INTO t (a, b) VALUES (?, ?)";
@@ -44,7 +47,12 @@ const INS = "INSERT INTO t (a, b) VALUES (?, ?)";
 function guarded(
   mode: GuardMode = "store",
   label = "store",
-): { db: DatabaseSync; guard: StatementGuard; prepares: () => string[] } {
+): {
+  db: DatabaseSync;
+  guard: StatementGuard;
+  prepares: () => string[];
+  statementsOf: (sql: string) => StatementSync[];
+} {
   const db = new DatabaseSync(":memory:");
   db.exec(
     "CREATE TABLE t (a INTEGER PRIMARY KEY, b INTEGER); INSERT INTO t VALUES (1,10),(2,20),(3,30)",
@@ -52,7 +60,22 @@ function guarded(
   const guard = new StatementGuard();
   guard.install(db, label, mode);
   const spy = vi.spyOn(db, "prepare");
-  return { db, guard, prepares: () => spy.mock.calls.map((c) => c[0]) };
+  return {
+    db,
+    guard,
+    prepares: () => spy.mock.calls.map((c) => c[0]),
+    statementsOf: (sql) => preparedOf(spy, sql),
+  };
+}
+
+/** Every statement `spy` (a db.prepare spy) saw prepared for `sql`, in order. */
+function preparedOf(
+  spy: { mock: { calls: unknown[][]; results: { type: string; value: unknown }[] } },
+  sql: string,
+): StatementSync[] {
+  return spy.mock.results.flatMap((r, i) =>
+    r.type === "return" && spy.mock.calls[i]?.[0] === sql ? [r.value as StatementSync] : [],
+  );
 }
 
 const count = (xs: readonly string[], sql: string): number => xs.filter((x) => x === sql).length;
@@ -326,6 +349,52 @@ describe("the guard is never weakened (a)", () => {
       db.close();
     });
 
+    it("a bypass refused by a closed handle (still installed) lifts nothing: no run then reads 'the guard is lifted'", () => {
+      const db = new DatabaseSync(path.join(dir, "b.sqlite"));
+      db.exec("CREATE TABLE t (a INTEGER PRIMARY KEY, b INTEGER); INSERT INTO t VALUES (1, 10)");
+      const guard = new StatementGuard();
+      guard.install(db, "store", "store");
+      expect(cachedGet(db, SEL, 1)).toEqual({ b: 10 });
+      db.close();
+      let ran = 0;
+      // node:sqlite refuses the lift on a closed handle: fn never runs, and nothing stays lifted
+      expect(() => guard.bypass(db, () => (ran += 1))).toThrow(/database is not open/);
+      expect(ran).toBe(0);
+      expect(() => cachedGet(db, SEL, 1)).toThrow(/database is not open/);
+      // re-opened (no re-install): per run on the unguarded handle, never refused as lifted
+      db.open();
+      const spy = vi.spyOn(db, "prepare");
+      expect(cachedGet(db, SEL, 1)).toEqual({ b: 10 });
+      expect(cachedGet(db, SEL, 1)).toEqual({ b: 10 });
+      expect(spy).toHaveBeenCalledTimes(2);
+      expect(guard.cachedSql(db)).toEqual([]);
+      // a bypass that closes the handle and then nests another: the refused inner one lifts
+      // nothing, the outer one's end brings the count back to 0
+      expect(() => {
+        guard.bypass(db, () => {
+          db.close();
+          guard.bypass(db, () => {
+            ran += 1;
+          });
+        });
+      }).toThrow(/database is not open/);
+      expect(ran).toBe(0);
+      db.open();
+      expect(cachedGet(db, SEL, 1)).toEqual({ b: 10 });
+      expect(spy).toHaveBeenCalledTimes(3);
+      // a re-install guards and caches again, and its bypass lifts and ends as ever
+      guard.install(db, "store", "store");
+      guard.bypass(db, () => {
+        expect(() => cachedGet(db, SEL, 1)).toThrow(/guard is lifted/);
+      });
+      expect(cachedGet(db, SEL, 1)).toEqual({ b: 10 });
+      expect(cachedGet(db, SEL, 1)).toEqual({ b: 10 });
+      expect(guard.cachedSql(db)).toEqual([SEL]);
+      expect(spy).toHaveBeenCalledTimes(5); // the install's sentinel, and SEL once
+      expect(() => cachedRun(db, "CREATE TABLE ds_x (x INTEGER)")).toThrow(/not authorized/);
+      db.close();
+    });
+
     it("re-opened without any run between, the first miss is not cached either; a re-install guards and caches again", () => {
       const db = new DatabaseSync(path.join(dir, "z.sqlite"));
       db.exec("CREATE TABLE t (a INTEGER PRIMARY KEY, b INTEGER); INSERT INTO t VALUES (1, 10)");
@@ -381,6 +450,71 @@ describe("through a store", () => {
       s.repos.pointsCache.get(`line-${String(id)}`, "settings");
     }
     expect(spy).toHaveBeenCalledTimes(5);
+  });
+
+  /** The store's connection, its guard, and every ESPN cache INSERT it prepared. */
+  const cachePuts = (
+    s: Store,
+  ): { db: DatabaseSync; guard: StatementGuard; puts: () => StatementSync[] } => {
+    const db = storeInternalsOf(s)?.db;
+    const guard = statementGuardOf(s);
+    if (db === undefined || guard === null) throw new Error("no internals");
+    const spy = vi.spyOn(db, "prepare");
+    const puts = (): StatementSync[] =>
+      spy.mock.results.flatMap((r, i) =>
+        r.type === "return" && String(spy.mock.calls[i]?.[0]).includes("INTO espn_cache")
+          ? [r.value]
+          : [],
+      );
+    return { db, guard, puts };
+  };
+  const isPut = (sql: string): boolean => sql.includes("INTO espn_cache");
+  const entry = (key: string, parsed: string, raw: string | null = null): EspnCacheEntry => ({
+    key,
+    parsed_json: parsed,
+    fetched_at: T0,
+    server_time: null,
+    etag: null,
+    http_status: 200,
+    raw_body: raw,
+  });
+
+  it("a large ESPN cache put leaves no cached statement carrying its parsed object; a small one is still cached", () => {
+    const s = open();
+    const { db, guard, puts } = cachePuts(s);
+    // a 4 MiB parsed object (the size the verifier saw kept for the life of the connection)
+    const body = JSON.stringify({ teams: "P".repeat(4 * 1024 * 1024) });
+    expect(s.repos.espnCache.put(entry("big-1", body))).toEqual({ written: true });
+    expect(guard.cachedSql(db).filter(isPut)).toEqual([]);
+    expect(s.repos.espnCache.get("big-1")?.parsed_json).toBe(body);
+    expect(s.repos.espnCache.put(entry("small-1", '{"marker":"one"}'))).toEqual({ written: true });
+    expect(s.repos.espnCache.put(entry("big-2", body))).toEqual({ written: true });
+    expect(s.repos.espnCache.put(entry("small-2", '{"marker":"two"}'))).toEqual({ written: true });
+    const sts = puts();
+    // big-1 and big-2 on statements of their own; small-1's cached, and small-2 runs on it
+    expect(sts.length).toBe(3);
+    expect(guard.cachedSql(db).filter(isPut).length).toBe(1);
+    const cached = sts[1];
+    if (cached === undefined) throw new Error("not prepared");
+    expect(cached.expandedSQL).toContain('"marker":"two"');
+    expect(cached.expandedSQL).not.toContain("PPPP");
+    expect(cached.expandedSQL.length).toBeLessThan(1024);
+    expect(s.repos.espnCache.get("big-2")?.parsed_json).toBe(body);
+  });
+
+  it("while recording, a raw body over the bound is not kept by a cached statement either", () => {
+    store = openStore(t, { recordRawBodies: true });
+    const s = store;
+    const { db, guard, puts } = cachePuts(s);
+    const raw = `{"pad":"${"R".repeat(StatementGuard.MAX_CACHED_BOUND)}"}`;
+    expect(s.repos.espnCache.put(entry("rec-1", "{}", raw))).toEqual({ written: true });
+    expect(guard.cachedSql(db).filter(isPut)).toEqual([]);
+    expect(s.repos.espnCache.get("rec-1")?.raw_body).toBe(raw);
+    expect(s.repos.espnCache.put(entry("rec-2", "{}", "{}"))).toEqual({ written: true });
+    expect(guard.cachedSql(db).filter(isPut).length).toBe(1);
+    // the body is held only by rec-1's own statement (dropped by the store, freed when V8 collects
+    // it — kept alive here by the spy), never by the cached one rec-2 ran on
+    expect(puts().map((st) => st.expandedSQL.includes("RRRR"))).toEqual([true, false]);
   });
 
   it("a dataset re-open is a new connection with a cache of its own; the old one's is dropped", async () => {
@@ -609,6 +743,146 @@ describe("no option or parameter leaks between runs; a run that threw is reusabl
     expect(() => cachedAll(db, sql)).toThrow(/boom/);
     expect(cachedAll(db, sql)).toEqual([{ ha: 1 }, { ha: 2 }, { ha: 3 }, { ha: 4 }]);
     for (const s of [INS, xy, sql]) expect(count(prepares(), s)).toBe(1);
+  });
+});
+
+describe("no cached statement keeps a large bound value (f)", () => {
+  const MAX = StatementGuard.MAX_CACHED_BOUND;
+  const PUT = "INSERT OR REPLACE INTO u (k, v, w) VALUES (?, ?, ?)";
+  const NAMED = "INSERT OR REPLACE INTO u (k, v, w) VALUES (:k, :v, ?)";
+  const PREFIXED = "INSERT OR REPLACE INTO u (k, v, w) VALUES ($k, @v, :w)";
+  /** guarded(), with a table of any-typed values. */
+  const withU = (): ReturnType<typeof guarded> => {
+    const g = guarded();
+    g.db.exec("CREATE TABLE u (k INTEGER PRIMARY KEY, v, w)");
+    return g;
+  };
+  const big = (n = MAX + 1, ch = "B"): string => ch.repeat(n);
+
+  it("a run binding more than MAX_CACHED_BOUND runs on a statement of its own; the cached one keeps the small run's values", () => {
+    const { db, guard, statementsOf } = withU();
+    expect(cachedRun(db, PUT, 1, "small-one", null).changes).toBe(1);
+    expect(cachedRun(db, PUT, 2, big(), null).changes).toBe(1);
+    expect(cachedRun(db, PUT, 3, big(), 7).changes).toBe(1);
+    const sts = statementsOf(PUT);
+    expect(sts.length).toBe(3); // the cached one, then one per large run
+    expect(guard.cachedSql(db)).toEqual([PUT]);
+    const [cached] = sts;
+    if (cached === undefined) throw new Error("not prepared");
+    expect(cached.expandedSQL).toContain("small-one");
+    expect(cached.expandedSQL).not.toContain("BBBB");
+    // what a large run binds is written all the same
+    expect(cachedGet(db, "SELECT length(v) AS n, w FROM u WHERE k = 3")).toEqual({
+      n: MAX + 1,
+      w: 7,
+    });
+    // a small run after them is the cached statement's again, and replaces what it holds
+    expect(cachedRun(db, PUT, 4, "small-two", null).changes).toBe(1);
+    expect(statementsOf(PUT).length).toBe(3);
+    expect(cached.expandedSQL).toContain("small-two");
+    expect(cached.expandedSQL).not.toContain("small-one");
+  });
+
+  it("the first run of a text binding a large value caches nothing; a small run then caches it", () => {
+    const { db, guard, statementsOf } = withU();
+    expect(cachedGet(db, "SELECT length(?) AS n", big())).toEqual({ n: MAX + 1 });
+    expect(cachedRun(db, PUT, 1, big(), null).changes).toBe(1);
+    expect(guard.cachedSql(db)).toEqual([]);
+    expect(cachedRun(db, PUT, 2, "s", null).changes).toBe(1);
+    expect(guard.cachedSql(db)).toEqual([PUT]);
+    expect(statementsOf(PUT).length).toBe(2);
+    expect(statementsOf(PUT)[1]?.expandedSQL).not.toContain("BBBB");
+  });
+
+  it("counts the whole run: strings by length, buffer views by bytes, a named object's values, numbers as nothing", () => {
+    const cases: [name: string, sql: string, params: unknown[], cached: boolean][] = [
+      ["exactly MAX in one value", PUT, [1, big(MAX, "E"), null], true],
+      ["exactly MAX over two values", PUT, [2, big(MAX - 10, "E"), big(10, "F")], true],
+      ["one more over two values", PUT, [3, big(MAX - 10, "E"), big(11, "F")], false],
+      ["a Uint8Array over", PUT, [4, new Uint8Array(MAX + 1), null], false],
+      ["a Buffer over", PUT, [5, Buffer.alloc(MAX + 1), null], false],
+      ["a DataView over", PUT, [6, new DataView(new ArrayBuffer(MAX + 1)), null], false],
+      ["a Uint8Array of exactly MAX", PUT, [7, new Uint8Array(MAX), null], true],
+      ["a Float64Array by bytes", PUT, [8, new Float64Array(MAX / 8), "x"], false],
+      ["numbers and bigints count nothing", PUT, [2 ** 52, big(MAX, "E"), 2n ** 62n], true],
+      ["a named object's value over", NAMED, [{ k: 9, v: big() }, null], false],
+      [
+        "a named value and an anonymous one",
+        NAMED,
+        [{ k: 10, v: big(MAX / 2) }, big(MAX / 2 + 1)],
+        false,
+      ],
+      ["a small named run", NAMED, [{ k: 11, v: "small" }, "s"], true],
+      ["prefixed names over", PREFIXED, [{ $k: 12, "@v": big(), w: 1 }], false],
+      ["prefixed names small", PREFIXED, [{ $k: 13, "@v": "s", w: big(MAX - 1) }], true],
+      // node:sqlite binds a function's own enumerable properties as named parameters too
+      [
+        "a function's named values over",
+        NAMED,
+        [Object.assign(() => 0, { k: 14, v: big() }), 1],
+        false,
+      ],
+      [
+        "a function's named values small",
+        NAMED,
+        [Object.assign(() => 0, { k: 15, v: "s" }), 1],
+        true,
+      ],
+      // a buffer first is a value, not a named-parameter object
+      ["a buffer first, over", "INSERT INTO u (v) VALUES (?)", [new Uint8Array(MAX + 1)], false],
+      ["a buffer first, exactly MAX", "INSERT INTO u (v) VALUES (?)", [Buffer.alloc(MAX)], true],
+    ];
+    for (const [name, sql, params, cached] of cases) {
+      const { db, guard, statementsOf } = withU();
+      expect(cachedRun(db, sql, ...(params as [])).changes, name).toBe(1);
+      expect(guard.cachedSql(db).includes(sql), name).toBe(cached);
+      expect(statementsOf(sql).length, name).toBe(1);
+      // the next small run: the cached statement (no prepare) or the first one cached (one more)
+      expect(cachedRun(db, PUT, 99, "s", null).changes, name).toBe(1);
+      if (sql === PUT) expect(statementsOf(PUT).length, name).toBe(cached ? 1 : 2);
+    }
+  });
+
+  it("a named object's value is read once: measured as it is bound (a getter cannot answer small, then large)", () => {
+    const { db, guard, statementsOf } = withU();
+    const sql = "SELECT :v AS v";
+    let reads = 0;
+    const tricky = {
+      get v(): string {
+        reads += 1;
+        return reads === 1 ? "small" : big();
+      },
+    };
+    expect(cachedGet(db, sql, tricky)).toEqual({ v: "small" });
+    expect(reads).toBe(1);
+    expect(guard.cachedSql(db)).toEqual([sql]);
+    expect(statementsOf(sql)[0]?.expandedSQL).toBe("SELECT 'small' AS v");
+    // the caller's object is never changed; its next read is the large one, prepared per run
+    expect(cachedGet(db, sql, tricky)).toEqual({ v: big() });
+    expect(statementsOf(sql).length).toBe(2);
+    expect(statementsOf(sql)[0]?.expandedSQL).toBe("SELECT 'small' AS v");
+  });
+
+  it("a large run while bypass lifts the guard is refused like any other: nothing is prepared unguarded", () => {
+    const { db, guard, prepares } = withU();
+    guard.bypass(db, () => {
+      expect(() => cachedRun(db, PUT, 1, big(), null)).toThrow(/guard is lifted/);
+      db.exec("CREATE TABLE ds_y (x)");
+      expect(() => cachedRun(db, "INSERT INTO ds_y VALUES (?)", big())).toThrow(/guard is lifted/);
+    });
+    expect(count(prepares(), PUT)).toBe(0);
+    expect(count(prepares(), "INSERT INTO ds_y VALUES (?)")).toBe(0);
+    // under the authorizer again, a large run's own statement is denied a ds_* write as ever
+    expect(() => cachedRun(db, "INSERT INTO ds_y VALUES (?)", big())).toThrow(/not authorized/);
+    expect(cachedGet(db, "SELECT COUNT(*) AS n FROM ds_y")).toEqual({ n: 0 });
+  });
+
+  it("an unguarded connection's large run prepares per run, as every run there does", () => {
+    const db = new DatabaseSync(":memory:");
+    const spy = vi.spyOn(db, "prepare");
+    expect(cachedGet(db, "SELECT length(?) AS n", big())).toEqual({ n: MAX + 1 });
+    expect(cachedGet(db, "SELECT length(?) AS n", "s")).toEqual({ n: 1 });
+    expect(spy).toHaveBeenCalledTimes(2);
   });
 });
 
