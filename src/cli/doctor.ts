@@ -830,7 +830,10 @@ async function launchConfigRow(
     pluginRuns && code.withPlugin !== null
       ? code.withPlugin.worst
       : { servers: code.most, keys: code.most, plugin: false };
-  const live = [...new Set(code.views.flat())];
+  // every entry a view starts, once (VR9-3: never one array of every view's entries)
+  const liveSet = new Set<ClientEntry>();
+  for (const v of code.views) for (const e of v) liveSet.add(e);
+  const live = [...liveSet];
   // each removal: its exact command, or the hand edit of its own record where that command would
   // act on another record or show otherwise than it runs (D-7, D-8)
   const commands = (es: readonly ClientEntry[]): string =>
@@ -1125,7 +1128,8 @@ async function launchConfigRow(
   // a plugin Claude Code cannot load beside `claude mcp add` entries: re-adding it is followed by
   // the keep-one fix of a plugin it loads, planned now — never "never both", which kept only the
   // plugin and stripped a project that turns it off (verifier F1) — or the plugin goes and the
-  // entries stay (it starts nothing now, so no session loses a server)
+  // entries stay (it starts nothing now, so no session loses a server); past the records doctor
+  // reads or the registrations it plans for, no uninstall, as row 2 says (VR9-2)
   const reAdd =
     origin?.kind === "unloaded"
       ? origin.registry === "unreadable"
@@ -1142,10 +1146,13 @@ async function launchConfigRow(
         ).withPlugin
       : null;
   const once = asIf !== null && asIf.worst.servers > 1 ? (unread ?? keepOne(asIf).planA) : "";
+  const reAddThen = `${reAdd}${once === "" ? "" : `, and once it loads keep one: ${once}`}`;
   const unloadableFix =
     live.length === 0
       ? reAdd
-      : `${reAdd}${once === "" ? "" : `, and once it loads keep one: ${once}`} — or \`claude plugin uninstall ${PLUGIN_ID}\` and keep the \`claude mcp add\` ${entriesWord(live.length)} instead${planB === "" ? "" : `: ${unread ?? planB}`}`;
+      : unread !== null
+        ? reAddThen
+        : `${reAddThen} — or \`claude plugin uninstall ${PLUGIN_ID}\` and keep the \`claude mcp add\` ${entriesWord(live.length)} instead${planB === "" ? "" : `: ${planB}`}`;
   if (hard)
     return row(
       2,

@@ -1775,6 +1775,19 @@ export function duplicateRegistrations(
     return v !== undefined && (v.approvesAll || v.approved.has(key));
   };
   const otherEntries = new Set([...others.values()].flat());
+  // a key no entry uses and no session names: never off, never another program's anywhere — what a
+  // step adds where every key it could take is taken (U2, V5-3; a leaf's local add: VR9-1)
+  const used = new Set([
+    ...regs.map((e) => e.name),
+    ...others.keys(),
+    ...sessions.flatMap((v) => [...v.disabled, ...v.declined]),
+  ]);
+  let spare = PACKAGE_NAME;
+  for (const k of spareKeys())
+    if (!used.has(k)) {
+      spare = k;
+      break;
+    }
   /**
    * The entry a session in `d` starts under `key`, of `pool` (this server's entries, and those a
    * step adds) and every entry under that key that is not this server's, of those it reads —
@@ -1854,11 +1867,13 @@ export function duplicateRegistrations(
     readonly ClientEntry[],
     {
       readonly wide: readonly ClientEntry[];
+      /** Every entry of `wide` is read in every session (the user scope's): no filter (VR9-3). */
+      readonly everywhere: boolean;
       readonly local: ReadonlyMap<string, readonly ClientEntry[]>;
       readonly order: ReadonlyMap<ClientEntry, number>;
     }
   >();
-  const readersOf = (d: string | null, pool: readonly ClientEntry[]): ClientEntry[] => {
+  const readersOf = (d: string | null, pool: readonly ClientEntry[]): readonly ClientEntry[] => {
     let ix = readersIndex.get(pool);
     if (ix === undefined) {
       const wide: ClientEntry[] = [];
@@ -1866,14 +1881,19 @@ export function duplicateRegistrations(
       for (const e of pool)
         if (e.scope === "local") local.set(at(e), [...(local.get(at(e)) ?? []), e]);
         else wide.push(e);
-      ix = { wide, local, order: new Map(pool.map((e, i) => [e, i])) };
+      const everywhere = wide.every((e) => !narrow(e) && reads(null, e));
+      ix = { wide, everywhere, local, order: new Map(pool.map((e, i) => [e, i])) };
       readersIndex.set(pool, ix);
     }
     const order = ix.order;
+    const wideRead = ix.everywhere ? ix.wide : ix.wide.filter((e) => reads(d, e));
     const mine = d === null ? [] : (ix.local.get(d) ?? []);
-    return [...ix.wide, ...mine]
-      .filter((e) => reads(d, e))
-      .sort((a, b) => (order.get(a) ?? 0) - (order.get(b) ?? 0));
+    // the pool's order is the wide entries' own where no local entry is there (VR9-3: a sort per
+    // view of every user-scope entry was most of row 2's minute past the plan budget)
+    if (mine.length === 0) return wideRead;
+    return [...wideRead, ...mine.filter((e) => reads(d, e))].sort(
+      (a, b) => (order.get(a) ?? 0) - (order.get(b) ?? 0),
+    );
   };
   /**
    * What a session in `d` starts of `pool`, in its order: each entry that wins its key there
@@ -1898,7 +1918,9 @@ export function duplicateRegistrations(
     const won = new Set<Placed>();
     for (const [k, es] of byKey)
       if (!off(d, k) || on?.has(k) === true) {
-        const w = pick(d, k, [...es, ...othersRead(d, k)]);
+        // one candidate is its own pick (VR9-3)
+        const w =
+          es.length === 1 && !others.has(k) ? es[0] : pick(d, k, [...es, ...othersRead(d, k)]);
         if (w !== undefined) won.add(w);
       }
     return read.filter((e) => won.has(e));
@@ -1923,13 +1945,18 @@ export function duplicateRegistrations(
         ? [at(e)]
         : []
       : sessionDirs.filter((d) => reads(d, e));
+  // only a key some session turns off, or another program's entry uses, can be off or overridden
+  // anywhere (VR9-3: each entry's every session was checked)
+  const offAnywhere = new Set(sessions.flatMap((v) => v.disabled));
   const offIn = regs.flatMap((entry) => {
+    if (!offAnywhere.has(entry.name)) return [];
     const dirs = dirsReading(entry).filter(
       (d) => off(d, entry.name) && winnerOf(d, entry.name, regs) === entry,
     );
     return dirs.length > 0 ? [{ entry, dirs }] : [];
   });
   const overriddenIn = regs.flatMap((entry) => {
+    if (!others.has(entry.name)) return [];
     const reading = dirsReading(entry);
     return (["narrower", "unapproved"] as const).flatMap((by) => {
       const dirs = reading.filter((d) => overrider(d, entry) === by);
@@ -1943,13 +1970,14 @@ export function duplicateRegistrations(
   }));
   // the keep rule's budget (F7): past it, nothing is planned and row 2 says so
   const wide = regs.filter((e) => e.scope !== "local").length;
-  const work =
+  const work = (): number =>
     [null, ...sessionDirs].reduce((n, d) => n + readersOf(d, regs).length, 0) * (1 + wide);
-  const planned = regs.length <= MAX_PLANNED_REGISTRATIONS && work <= MAX_PLAN_WORK;
+  const planned = regs.length <= MAX_PLANNED_REGISTRATIONS && work() <= MAX_PLAN_WORK;
   /** How far up an entry reaches: the user scope above all, then the shallower directory. */
   const depth = (e: ClientEntry): number => (narrow(e) ? segments(e) : -1);
   const keysOf = (es: readonly ClientEntry[]): string[] => [...new Set(es.map((e) => e.name))];
-  const most = Math.max(0, ...views.map((v) => keysOf(v.entries).length));
+  // `startsOf` gives one entry per key
+  const most = Math.max(0, ...views.map((v) => v.entries.length));
   /** The plugin's server, as the keep rule pins it in each view where it is on. */
   const pseudo: ClientEntry = {
     name: plugin?.key ?? "",
@@ -2115,7 +2143,10 @@ export function duplicateRegistrations(
           );
         // each keeps ONE of the keys it starts at local scope (a second only started two of this
         // server's there again), so the choice gives each a server of its own in every branch —
-        // which is what lets the later views be planned without these (VR8-3)
+        // which is what lets the later views be planned without these (VR8-3) — never a key under
+        // which an entry that is not this server's is read there: another program's project server
+        // not approved there, hidden now by the user-scope entry, would stay hidden by the local
+        // one, where the choice's other branch ends with it offered (VR9-1); else the spare key
         const leaves =
           beside === null
             ? []
@@ -2124,7 +2155,8 @@ export function duplicateRegistrations(
                 if (wd === null) return [];
                 const now = served(j, extraSet).filter((e) => choice.includes(e));
                 if (now.length === 0 || served(j, gone(choice)).length > 0) return [];
-                return [{ dir: wd, keys: byRank(keysOf(now)).slice(0, 1), blocked: blockedIn(wd) }];
+                const key = byRank(keysOf(now)).find((k) => othersRead(wd, k).length === 0);
+                return [{ dir: wd, keys: [key ?? spare], blocked: blockedIn(wd) }];
               });
         // beside no plugin: the projects starting one of these where no local add is offered —
         // each must still start what is kept at user scope (F4: keeping another removed its only
@@ -2244,16 +2276,65 @@ export function duplicateRegistrations(
   );
   let withPlugin: ReturnType<typeof duplicateRegistrations>["withPlugin"] = null;
   if (plugin !== null) {
+    // whether an entry runs the plugin's command line, asked once per entry (VR9-3: once per entry
+    // and view, twice, was most of row 2's minute past the plan budget)
+    const dropsLine = new Set(regs.filter((e) => plugin.drops(e)));
     let worst = { servers: 0, keys: 0, plugin: false };
     let beside = false;
     for (const v of views) {
-      const keys = keysOf(v.entries).length;
+      // `startsOf` gives one entry per key
+      const keys = v.entries.length;
       // Claude Code's B5r dedupes the plugin's server against the entries a session starts only
-      const runs = v.plugin && !v.entries.some((e) => plugin.drops(e));
+      const runs = v.plugin && !(dropsLine.size > 0 && v.entries.some((e) => dropsLine.has(e)));
       if (runs && keys > 0) beside = true;
       const servers = keys + (runs ? 1 : 0);
       if (servers > worst.servers) worst = { servers, keys, plugin: runs };
     }
+    // each view by its directory, what it starts as a set, and whether a started entry drops the
+    // plugin there (F7: each entry running the plugin's line scanned every view's list)
+    const viewAt = new Map(
+      dropsLine.size === 0
+        ? []
+        : views.map((v) => [
+            v.dir,
+            {
+              plugin: v.plugin,
+              started: new Set(v.entries),
+              drops: v.entries.some((e) => dropsLine.has(e)),
+            },
+          ]),
+    );
+    const dropping = regs.flatMap((entry) => {
+      if (!dropsLine.has(entry)) return [];
+      const reading = dirsReading(entry);
+      const startsWhereOn = [...(entry.scope === "local" ? [] : [null]), ...reading].some(
+        (d) => viewAt.get(d)?.plugin === true && viewAt.get(d)?.started.has(entry) === true,
+      );
+      if (!startsWhereOn) return [];
+      // every session that reads it where it does not start — its key turned off there, or
+      // another entry winning it (F5) — and no started entry there drops the plugin (VR8-1)
+      const notIn = reading.filter((d) => {
+        const v = viewAt.get(d);
+        return v !== undefined && v.plugin && !v.started.has(entry) && !v.drops;
+      });
+      return [{ entry, notIn }];
+    });
+    // past the keep rule's budget nothing is planned (F7), so nothing of it is worked out either:
+    // row 2 prints the count, the plugin's place and the entries dropping it (VR9-3)
+    withPlugin = {
+      worst,
+      beside,
+      extra: [],
+      unresolved: [],
+      uninstallStrips: [],
+      uninstallAdd: null,
+      uninstallExtra: [],
+      uninstallUnresolved: [],
+      dropping,
+    };
+  }
+  if (plugin !== null && planned && withPlugin !== null) {
+    const { worst, beside, dropping } = withPlugin;
     const settled = plan(
       [...views.filter((v) => v.plugin), ...views.filter((v) => !v.plugin)].map((v) => ({
         dir: v.dir,
@@ -2271,18 +2352,6 @@ export function duplicateRegistrations(
     const leftWithout = regs.filter((e) => !withoutExtra.has(e));
     const stripped = views.filter((v) => v.plugin && startsOf(v.dir, leftWithout).length === 0);
     const projects = stripped.flatMap((v) => (v.dir === null ? [] : [v.dir]));
-    // a key no entry uses and no session names: never off, never another program's anywhere
-    const used = new Set([
-      ...regs.map((e) => e.name),
-      ...others.keys(),
-      ...sessions.flatMap((v) => [...v.disabled, ...v.declined]),
-    ]);
-    let spare = PACKAGE_NAME;
-    for (const k of spareKeys())
-      if (!used.has(k)) {
-        spare = k;
-        break;
-      }
     const added = (name: string, scope: "user" | "local", dir: string | null): ClientEntry => ({
       ...pseudo,
       name,
@@ -2301,11 +2370,15 @@ export function duplicateRegistrations(
     // in every session the add reaches, stripped or not: another program's project server under
     // that key that a session starts or is offered there now, and that the add would keep from
     // ever being offered — Claude Code 2.1.308 skips one not approved while the user scope holds
-    // its key (ruling OQ-4; verifiers F1, VR8-2)
+    // its key (ruling OQ-4; verifiers F1, VR8-2); never another program's user-scope entry, which
+    // the add replaces as the user scope's own in this model and `heldAtUser` already says
+    // (VR9-1: every session was said to hold an unapproved project server there)
     const hiddenIn = sessionDirs.filter((d) => {
       const now = winnerOf(d, SERVER_NAME, regs);
       return (
-        now !== undefined && otherEntries.has(now) && winnerOf(d, SERVER_NAME, withOwn) !== now
+        now?.scope === "project" &&
+        otherEntries.has(now) &&
+        winnerOf(d, SERVER_NAME, withOwn) !== now
       );
     });
     const addKey = !stripped.some((v) => v.dir === null)
@@ -2368,33 +2441,6 @@ export function duplicateRegistrations(
     );
     const settledExtra = new Set(settled.extra);
     const afterExtra = new Set(afterSteps.extra);
-    // each view by its directory, what it starts as a set, and whether a started entry drops the
-    // plugin there (F7: each entry running the plugin's line scanned every view's list)
-    const viewAt = new Map(
-      views.map((v) => [
-        v.dir,
-        {
-          plugin: v.plugin,
-          started: new Set(v.entries),
-          drops: v.entries.some((e) => plugin.drops(e)),
-        },
-      ]),
-    );
-    const dropping = regs.flatMap((entry) => {
-      if (!plugin.drops(entry)) return [];
-      const reading = dirsReading(entry);
-      const startsWhereOn = [...(entry.scope === "local" ? [] : [null]), ...reading].some(
-        (d) => viewAt.get(d)?.plugin === true && viewAt.get(d)?.started.has(entry) === true,
-      );
-      if (!startsWhereOn) return [];
-      // every session that reads it where it does not start — its key turned off there, or
-      // another entry winning it (F5) — and no started entry there drops the plugin (VR8-1)
-      const notIn = reading.filter((d) => {
-        const v = viewAt.get(d);
-        return v !== undefined && v.plugin && !v.started.has(entry) && !v.drops;
-      });
-      return [{ entry, notIn }];
-    });
     withPlugin = {
       worst,
       beside,

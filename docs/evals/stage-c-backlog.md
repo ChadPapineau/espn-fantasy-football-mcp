@@ -992,3 +992,20 @@ the owner's delegation:
     absent entry nor a pinned one can be removed or started there), and the `reads` filter of a
     project server's "nothing starts next" check, whose loss only withholds a decline (a project
     server declinable where an entry under its key lies in another, unread project).
+- **Known limits recorded under D-9 (round 10), each with its smallest layout.**
+  - For a gone path under a symbolic-linked ancestor whose real path has a record, uninstall gives
+    the hand edit and says `claude purge` "may also delete" the real path's record; while the path
+    is absent, 2.1.308's purge resolves no real path (its `realpath` fails, so it uses the NFC
+    path) and deletes only the path's own twins — a safe step withheld, a hedged reason (VR9-L1;
+    `~/lnk` a symbolic link to `~/real`, records `~/lnk/gone` holding an entry of ours and
+    `~/real/gone` another program's). In `purgeOf`, an absent path could count only its own twins.
+  - For a recorded path that is not a directory, the reason the purge is withheld says it "deletes
+    every record of that directory whole" — true, but the path is no directory (VR9-L2; `~/file6` a
+    file, records `~/file6` holding an entry of ours and `~/file6/` another program's).
+  - Past the plan budget, beside a plugin Claude Code cannot load, "…and keep the `claude mcp add`
+    entries instead" had no keep-one after it, leaving the duplicate for the next run (VR9-L3; 2003
+    user-scope entries of ours, the plugin's marketplace not known) — moot since round 10's VR9-2
+    fix, which prints no uninstall alternative past either bound.
+  - Round 10's mutation pass: no survivor yields H1–H4. One survives the unit suite and is killed
+    by the process project's `doctor-plan.perf.test.ts` only: the budget's `<=` (2000 registrations
+    are planned).

@@ -408,9 +408,11 @@ minor version (plan 04 §4.4; plan 09 K6). One version covers the server, the Sk
   never removes an entry a project that turned the plugin off still needs: where that choice is the
   user's, it keeps one entry in such a project, and outside the projects it names every project
   that turns the plugin off and would be left with none, and keeping the entries there adds in each
-  only the keys that project starts — never a key another program's entry holds there — and only
+  one key that project starts — never a key under which another program's entry is read there (its
+  project server, not approved, that the user-scope entry hides now and the other branch leaves
+  offered), else a key no entry uses — and only
   where doctor can tell which record `claude mcp add --scope local` writes (elsewhere the plugin is
-  turned back on instead), one key per project; where a project whose key doctor cannot tell would
+  turned back on instead); where a project whose key doctor cannot tell would
   be left with none, that choice offers no alternative at all, and beside no plugin the key kept at
   user scope is one every such project starts. That choice is settled first: the projects' own
   choices are worked out without the entries it removes, so none names one, nor turns off with
@@ -420,7 +422,7 @@ minor version (plan 04 §4.4; plan 09 K6). One version covers the server, the Sk
   turned its key off; under a key no entry uses where `espn-fantasy-football` is another program's
   at user scope, holds that key at a narrower scope in such a session, or is another program's
   project server, not approved, that a user-scope entry under that key would keep from ever being
-  offered in any session), else one key `/mcp
+  offered in any session — each reason said only where it holds), else one key `/mcp
   enable` turns back on per project, said per key, or this server added at local scope there — and
   plans the removals that follow with what those steps add, so they never make a new duplicate. An entry
   `/mcp disable` turned off in some projects is said. A `claude mcp add` entry
@@ -439,7 +441,8 @@ minor version (plan 04 §4.4; plan 09 K6). One version covers the server, the Sk
   Claude Code loads no marketplace plugin at all. Beside a `claude mcp add` entry, that fix is
   followed by the keep-one fix of a plugin Claude Code loads, or the plugin is uninstalled and the
   entries kept (never "never both", which kept only the plugin and stripped a project that turned
-  it off). Row 2 warns that doctor cannot judge
+  it off) — that uninstall only within the records and registrations doctor plans for, as row 2
+  says. Row 2 warns that doctor cannot judge
   `known_marketplaces.json` when a record is one only Claude Code 2.1.308's own schema refuses (no
   `installLocation` or `lastUpdated`, an `autoUpdate` that is not true or false, a source without
   the field its type needs) or has a source type 2.1.308 does not have — another client version may
@@ -458,7 +461,9 @@ minor version (plan 04 §4.4; plan 09 K6). One version covers the server, the Sk
   follows the same rules. Past the first 1000 `projects` records, or past the registrations and the
   work the keep rule plans for (it now plans the 1000-project cap in under a second, where it took
   minutes and printed a multi-megabyte fix line), row 2 still counts the duplicate, says why, and
-  offers no step that removes an entry, turns one off or uninstalls the plugin. Doctor models Claude
+  offers no step that removes an entry, turns one off or uninstalls the plugin; past that budget it
+  works nothing of the plan out (45 000 user-scope entries read in 1000 projects: row 2 in about
+  7 s, where it took over a minute). Doctor models Claude
   Code 2.1.308's config rules; its known limits, and the bar (ruling D-9) that decides which of its
   findings are fixed and which are recorded as limits, are listed in
   `docs/evals/stage-c-backlog.md`.

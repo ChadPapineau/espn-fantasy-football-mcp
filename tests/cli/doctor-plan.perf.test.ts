@@ -3,7 +3,11 @@
 // local entries of this server beside the plugin, plans in bounded time — it was quadratic in views
 // and superlinear in entries (1000 projects × 4 entries: 35.8 s; × 16: 166 s and a 4 MB fix line),
 // and past its planning budget it plans nothing (row 2 then says so: registration-identity.test.ts).
+// Past that budget it works nothing of the plan out either (round-9 verifier VR9-3: 20000
+// user-scope entries × 1000 projects took 33.6 s in row 2, 45000 took 75 s, each saying it planned
+// nothing): it asks the plugin's command-line check once per entry and sorts no view's readers.
 // Pure CPU over synthetic entries: no file is read, nothing is executed.
+import path from "node:path";
 import { describe, expect, it } from "vitest";
 import {
   duplicateRegistrations,
@@ -93,4 +97,34 @@ describe("row 2's keep rule at the project cap (F7)", () => {
         expect(d.most).toBeGreaterThan(1);
       }
     }, 120_000);
+  it(`${String(MAX_CLIENT_PROJECTS)} projects reading 20000 user-scope entries beside the plugin: past the budget, counted within 10 s, the plugin's line checked once per entry (VR9-3)`, () => {
+    const u = 20_000;
+    const entries = Array.from({ length: u }, (_, j) => entry(`u${String(j)}`, "user", null));
+    const sessions: SessionView[] = Array.from({ length: MAX_CLIENT_PROJECTS }, (_, i) => ({
+      dir: `/p/${String(i)}`,
+      declined: [],
+      disabled: [],
+    }));
+    // doctor's own check: the plugin's shim path joined on every call
+    let calls = 0;
+    const drops = (e: ClientEntry): boolean => {
+      calls += 1;
+      const want = ["/bin/sh", path.join("/r", "scripts", "eff-launch.sh"), "serve"];
+      const got = [
+        e.spec.command,
+        ...(Array.isArray(e.spec.args) ? (e.spec.args as unknown[]) : []),
+      ];
+      return got.length === want.length && got.every((w, i) => w === want[i]);
+    };
+    const t0 = performance.now();
+    const d = duplicateRegistrations(entries, sessions, { key: PLUGIN.key, drops }, []);
+    const ms = performance.now() - t0;
+    // it was 15.8 s on this repo's Mac
+    expect(ms, `${ms.toFixed(0)} ms`).toBeLessThan(10_000);
+    expect(d.planned).toBe(false);
+    expect(d.most).toBe(u);
+    expect(d.withPlugin?.worst.servers).toBe(u + 1);
+    expect(d.withPlugin?.extra).toEqual([]);
+    expect(calls).toBe(u);
+  }, 120_000);
 });
