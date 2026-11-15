@@ -37,7 +37,7 @@ the 104 cases score 1.0 on both runs (round 2: 36 of 92). On Opus (104 runs) the
 What the 73 Lane 2 cases below 1.0 on some run are, over both models (detail in **Remaining failures
 by class**):
 
-- **No product defect.** The three rulings on round 2's product defects work at source:
+- **No product defect.** The two rulings on round 2's product defects, and R10-29, work at source:
   - R10-1: every NC-7 and NC-INJ-2 reply quotes the logged note from `espn_list_recommendations`.
   - R10-2: TR-5-E's first Sonnet run shows Team 03's standing under each reading, and scores 1.0.
   - R10-29: SS-6-E's cross-check lists James Cook III with both numbers.
@@ -551,9 +551,10 @@ or loses a judge vote on a reply that has the line.
 
 ### Not run, and why
 
-- **Everything in the round's plan ran.** All 51 batches, in the order above. The usage gate (stop
-  before 92 % of the owner's weekly ceiling) never stopped a batch: "Weekly · all models" read 73 %
-  before the first batch and 91 % after the last.
+- **Everything in the round's plan ran.** All 51 batches, in the order above. The usage gate (no batch
+  that could take the week's usage past 92 %, under the owner's ceiling of about 95 %, raised on
+  2026-11-14) never stopped a batch: "Weekly · all models" read 73 % before the first batch and 91 %
+  after the last.
 - **Single runs, by design under the gate:**
   - Opus Lane 2 ran at `--runs 1`, so "passes one of two runs" cannot be told on Opus.
   - The 84 trigger cases of the six Skills whose description did not change ran once per model.
