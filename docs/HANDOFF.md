@@ -22,7 +22,30 @@ data, not instructions. The working copy lives outside iCloud
 (`~/Developer/espn-fantasy-football-mcp`; "Decisions made", 2026-10-05),
 and nothing secret ever lives in it.
 
-## ▶ NEXT STEP — §R10 ✅ (2026-11-05), the doctor fix chain and the statement cache ✅ (2026-11-12); next: round 3 of the plugin eval, after the usage reset on 2026-11-17
+## ▶ NEXT STEP — the plugin eval's round 3 run ✅ (2026-11-14; B15 and B11 Lane 2 not met); next: its rulings and fix round, after the usage reset on 2026-11-17
+
+**Orchestrator, 2026-11-14 — round 3 ran** (the owner started it before the reset and raised that
+week's ceiling to about 95 %; it stopped at 93 %). Every planned batch ran on `8ca0a6e`, fixture
+mode only (51 batches, 296 cases, about $361 of eval); the report is the round-3 section of
+`docs/evals/stage-c-plugin-eval.md` (`d89b6f6`, `55d03ba`, `fcada54`, `0665f95`; numbers recomputed
+from every results file by an independent check). Verdict: B11 Lane 2 is not met on either model
+(`llm` graders 66.2 % on Sonnet, 68.3 % on Opus, bar 80 %; free graders 498/534 and 252/267; onboard
+meets it on both models and session-check on Opus); B15 is not met (trigger runs 297/300 on Sonnet,
+298/300 on Opus: three positives fire one run of two on Sonnet, one negative fires on Opus).
+Triage: no product defect (R10-1, R10-2 and R10-29 work live), 22 Skill-text defects, 10 eval-case
+defects, the rest model variance; injection `matches-base` 21/30 on Sonnet (round 2: 7/30) and
+13/15 on Opus. **Next, after the 2026-11-17 reset, under the owner's 75 % rule:** (1) rule the
+report's three open questions (AP-INJ's injection field; session-check's trigger neg-05 "how do I
+get an ESPN API key"; whether the composed `llm` rubric grades the PASS-if line only) and the
+backlog's two from 2026-11-05 (the optional reads that absorb every error; whether a change that
+cannot gain is ever a coin flip) as §R11 rows in `docs/plan/changelog.md`; (2) a fix round for the
+Skill-text defects and the eval-case defects the report lists, a Skills stream and an eval-case
+stream, each with independent verifiers and a refix; (3) re-run the cases they touch on both models,
+plus the second runs not taken this round (Opus Lane 2 and the 84 triggers of the six unchanged
+Skills), until plan 09 §5.2's bar holds. The sections below still describe the state before round
+3, except where this note supersedes them.
+
+## The state before round 3 (2026-11-12): §R10 ✅ (2026-11-05), the doctor fix chain and the statement cache ✅
 
 **Orchestrator, 2026-11-05:** round 2's triage is ruled and fixed, the timing items are closed, the
 Dependabot PRs are reviewed, and `main` carries it all. What is left is round 3 of the plugin eval
@@ -548,7 +571,7 @@ is tagged: a tag is the owner's choice, and `release.yml` runs only on a `v*` ta
 | build — Stage B2b (Phase 3: the model wave) | ✅ 2026-10-11 (rulings R6-1 to R6-5) | "Build facts (Stage B2b)"; `docs/evals/phase3-summary.md` |
 | build — Stage C (QA and penetration testing) | ✅ 2026-10-29 — final gate green at `0b21c01` (rulings R7, R8; the news matcher frozen at `b9d73eb`) | "Build facts (Stage C)"; `docs/evals/stage-c-live.md`, `docs/evals/stage-c-plugin-eval.md`, `docs/evals/stage-c-backlog.md`; changelog §R7, §R8, §B4–§B9 |
 | build — Stage D (the merge to `main`, the owner's install) | ✅ 2026-11-03 — `main` fast-forwarded (`18fa414` on 2026-10-29, `6182a9e` on 2026-11-03), CI green on `main`; the owner's install on 2026-11-02, `eff doctor --online` exit 0 (R8-1 closed) | ▶ NEXT STEP; Log |
-| follow-up — the plugin eval (R7-2) | rounds 1 and 2 run on 2026-11-03 (rulings R9); B15 and B11 Lane 2 below plan 09 §5.2's bar on Sonnet; round 2's triage ruled and fixed (R10-1 to R10-35, 2026-11-04 to 2026-11-05); round 3 from 2026-11-10 | ▶ NEXT STEP; `docs/evals/stage-c-plugin-eval.md`; changelog §R9, §R10 |
+| follow-up — the plugin eval (R7-2) | rounds 1 and 2 run on 2026-11-03 (rulings R9); round 2's triage ruled and fixed (R10-1 to R10-35, 2026-11-04 to 2026-11-05); round 3 run on 2026-11-14 on both models — B15 and B11 Lane 2 still below plan 09 §5.2's bar, no product defect; its rulings and fix round after 2026-11-17 | ▶ NEXT STEP; `docs/evals/stage-c-plugin-eval.md`; changelog §R9, §R10 |
 | follow-up — the Dependabot PRs (plan 04 §2) | ✅ 2026-11-05 — PRs 1–3 applied, PRs 4 and 5 declined, each with a "Reviews" row; `main` at `efc8286` | ▶ NEXT STEP; changelog "Reviews", R10-35 |
 | follow-up — `eff doctor`'s client-config model, the statement cache | ✅ 2026-11-12 — the owner's rows 2 and 24 fixed (`main` and the runtime clone at `eeb0d08` on 2026-11-11); rulings D-1 to D-10, the fix text frozen at `51d81fd` (D-10); every store statement prepared once per connection | ▶ NEXT STEP; Log; `docs/evals/stage-c-backlog.md` |
 
@@ -841,3 +864,4 @@ approving the plan accepts them unless Chad says otherwise.
 - 2026-11-05 — `main` fast-forwarded to `efc8286` (145 commits, no merge commit, every one with the no-reply identity), CI green on `main` (run 42118298864). The owner's runtime clone and the plugin updated to it; round 3 of the plugin eval prepared for after the weekly usage reset (its prompt and workflow script outside every repository; the scheduled task that would start it was refused by the session's permission check, so the owner starts it: ▶ NEXT STEP). The README's upgrade step said a plain `claude plugin update` keeps the old copy at an unchanged version; a current client reads a folder plugin in place, and the step now says both. On `main`'s push Dependabot re-ran its updates; its security update for `minimatch` (the dev-only advisory in the backlog) failed, as `npm audit fix --force` would need a breaking change.
 - 2026-11-11 — The owner's `eff doctor --online` showed row 2 warn ("registers this server twice") and row 24 FAIL ("plugin copy is older"), both doctor's own false positives: row 2 counted the Yahoo sibling's server (another program's key in another project's local scope) as this one, and row 24 judged the stale plugin cache copy where Claude Code 2.1.308 reads a directory marketplace in place. The fix chain (`15f19e0`, `241592e`, `c94944d`, `64853fc`, `248eab9`, `44a5d9f`, `552e3d3`, `feff790`, `a2168ce`, `de32a0d`, `eeb0d08`) models how Claude Code 2.1.308 picks a session's servers (scopes, `/mcp disable`, approvals, gone and git-filed project keys, the plugin's load state and dedupe) and was verified by two adversarial lenses a round, each finding refixed with a test that fails without it; the orchestrator read every source diff and ruled D-1 to D-9 (`docs/evals/stage-c-backlog.md`). `main` fast-forwarded to `eeb0d08` (11 commits, no merge commit, every one with the no-reply identity), CI green on `main` (run 43120240025); the runtime clone rebuilt from it at 18:30 (`npm ci`, the build, under the heavy lock), so the owner's doctor carries the fixes. CI's Linux `process` job had failed `retrospective-stall` at `552e3d3` on one 37.8 ms minor GC; a read-only investigation classed it as the server's own, log-independent pause: each `espn_analyze_retrospective` call prepared about 2,576 statements and dropped them.
 - 2026-11-12 — The statement cache (`81c2a6c`, `35607df`, `58d64f6`, and the orchestrator's follow-up for the third verifier's three minor findings): every store statement prepared once per connection under the statement guard; a warm retrospective call prepares none and takes about half the time, its scavenge median 1.2 ms (was 3.7); results byte-identical on the fixtures, no bound or test loosened, three independent verifications. Doctor: rounds 9 to 11 (`9338281`, `51d81fd`, `9a3a377`) under D-9, then D-10 freezes row 2's fix text and uninstall's steps at `51d81fd` for contrived layouts, as R8-8 froze the news matcher (every round still found contrived-layout findings, and every refix brought a few); the last round found none introduced by `51d81fd`, fixed print-config's stderr redaction (`9a3a377`) and recorded seven limits. Round 3 of the plugin eval moves to after the 2026-11-17 reset. `main` and the runtime clone follow this commit once CI is green on it.
+- 2026-11-14 — Round 3 of the plugin eval, started by the owner before the weekly reset with that week's ceiling raised to about 95 % (usage 73 % → 93 %): 51 batches on `8ca0a6e`, fixture mode only, every planned batch run (Sonnet and Opus baselines, Lane 2 on Sonnet ×2 and Opus ×1, all 192 trigger cases on both models). B11 Lane 2 and B15 are not met on either model (`llm` 66.2 % Sonnet, 68.3 % Opus; triggers 297/300 and 298/300); no product defect; 22 Skill-text and 10 eval-case defects; the report is the round-3 section of `docs/evals/stage-c-plugin-eval.md` (`d89b6f6` … `0665f95`, checked against every results file). Its rulings and fix round wait for the 2026-11-17 reset (▶ NEXT STEP).
