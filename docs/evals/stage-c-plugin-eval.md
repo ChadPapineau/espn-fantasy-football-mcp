@@ -238,7 +238,7 @@ The 84 cases of step 6 ran once per model, and all of them passed.
 | `product_defect` | 0 | 0 |
 | `skill_text_defect` | 22 (2 of them Opus only) | 0 |
 | `eval_case_defect` | 10 (1 Opus only) | 1 (Opus, needs a ruling) |
-| `model_variance` | 41 (5 Opus only) | 3 (Sonnet) |
+| `model_variance` | 41 (6 Opus only: AP-7 on a base run, five on the Lane 2 run) | 3 (Sonnet) |
 | `harness` | 0 | 0 |
 
 A case is counted once, under its main cause. Where a second cause matters, the entry names it.
