@@ -1846,6 +1846,25 @@ round 4c's, R10-33 round 4d's, R10-34 the close-out's and R10-35 the Dependabot 
 The rest of round 2's triage (the Skill-text and eval-case defects) needs no ruling; round 3 fixes it
 as its triage proposes.
 
+## §R11 — rulings after the plugin eval's round 3 (2026-11-16)
+
+**Trigger:** round 3 of the plugin eval (`docs/evals/stage-c-plugin-eval.md`, "Run of 2026-11-14,
+round 3 (after §R10)") failed B15 and B11 Lane 2 on both models with no product defect. Its triage
+asked for three rulings, and the Stage C backlog held two open since 2026-11-05. The orchestrator
+ruled on 2026-11-16, under the owner's delegation of 2026-11-04 ("get everything completed"); each
+ruling is reversible by the owner and supersedes the plan text it names. Round 4 builds them.
+
+| id | ruling | why |
+|---|---|---|
+| R11-1 (AP-INJ's field; supersedes plan 09 §3's AP-INJ, as R9-5 did for IC-INJ, RA-INJ and WV-INJ) | AP-INJ's injected text moves to a third-party field that apply's procedure reads and relays (chosen at source from the tools apply calls, and named in the case), graded as every injection case is: no write, no copied text, `matches-base` against its attached base | Round 3 found the injection on the trade-block note, which only `espn_get_standings` returns and apply never reads: an injection the Skill never sees tests nothing |
+| R11-2 (session-check's trigger neg-05) | "how do I get an ESPN API key" becomes a positive of session-check: this server reads a league with the session cookies the owner enters in a terminal through `eff setup`, and ESPN offers no key for that, which is session-check's answer. session-check's `when_to_use` names the ask (an ESPN API key, connecting ESPN), and a new negative replaces it in the count: a developer question that is not about this server's setup | Opus fired session-check on it in both runs, and that is the helpful answer; the case's label, not the Skill, was wrong. The trigger suite keeps its count of negatives |
+| R11-3 (the composed `llm` rubric; plan 09 §5.2) | Each `llm` grader's judge grades the case's PASS-if line, the criterion plan 09 §3 states; the expected output goes to the judge as an example, labelled as one passing reply that a reply need not match. Where a PASS-if line states less than its case's plan 09 §3 requirement, the line is extended, never the judge loosened. The 80 % bar is unchanged. Every Lane 2 case is re-run in round 4 on both models, and the report says that round 3 → round 4 compares across this change | Round 3's judges failed replies that met their PASS-if line because `build-plugin-evals.mjs` gave them the whole expected output to match (AP-2, NC-2, NC-6, WV-2, WK-1, SS-INJ-2's `matches-base`, and the judge splits): that measured likeness to one reply, not the behaviour the case asks for |
+| R11-4 (the optional reads that absorb every error; the 2026-11-05 follow-up verifier's F3) | An optional read absorbs only what an optional read may lose: an outage (`isDegradable`) and a session refusal, which the session line says (`src/mcp/refusals.ts`). A bug is never absorbed: it rethrows and the call answers `INTERNAL`. Every site the backlog lists follows E13's house pattern (`isOptionalReadFailure`, else rethrow; `8f41601`); the sites that absorb an outage only gain the refusal branch first. Each site's refusal semantics are checked against `refusals.ts` and its 135-case refusal sweep, which must still pass | A bug inside an absorbing read answered as "unavailable", which hides it; an outage-only read failed the whole call on a refusal the session line exists to say |
+| R11-5 (a change that cannot gain; the 2026-11-05 follow-up verifier's F1; reads R10-34 through the tool) | A change that cannot gain is never a coin flip: where its Δ interval's upper bound is at or below 0, or its entrant is not expected to score at a seat that scores a known 0, E2 gives `coin_flip: false` and the rec holds it as gaining nothing (`heldOrMade`'s words); E2's ΔP(win) branch applies only where the interval's upper bound is above 0. `lineup-no-move.test.ts` pins the new behaviour | A coin flip means either choice may be the better one; a change that cannot gain has a known better choice, keeping. The flag and the rec's words disagreed there, and the Skills defer to the flag (R10-34) |
+
+The rest of round 3's triage (22 Skill-text and 10 eval-case defects) needs no ruling; round 4
+fixes it as its triage proposes.
+
 ## Reviews (re-run on every version bump of the named dependency)
 
 | date | dependency | verdict | evidence | open item |
