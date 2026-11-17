@@ -778,7 +778,10 @@ entry. Everything else they raised is fixed, or ruled in `docs/plan/changelog.md
   eight; two handle a refusal first), `roster.ts` (two), `datasets-p1.ts` and `p1-common.ts` (one
   each), and the fallback reads in `espn-p1.ts` and `players.ts` (two each) and `league.ts` (two of
   its three). Each needs its read's refusal semantics checked against `src/mcp/refusals.ts` and the
-  refusal sweep before it narrows.
+  refusal sweep before it narrows. **Closed** (ruling R11-4, `b0bb780`): every site, re-derived at
+  source, follows the house pattern — the absorb-all reads rethrow a bug (INTERNAL) and the
+  outage-only reads also absorb a refusal, said by the session line; the 135-case refusal sweep and
+  `tests/mcp/optional-read-faults.test.ts` hold it.
 - **A pair that cannot gain, flagged a coin flip by ΔP(win)** (the follow-up verifier's F1,
   2026-11-05). F12 made the interval rule strict, so `[−p90, 0]` is no coin flip by its interval,
   but E2's ΔP(win) branch still flags such a pair `coin_flip: true` when the win-chance move is
@@ -788,6 +791,9 @@ entry. Everything else they raised is fixed, or ruled in `docs/plan/changelog.md
   expected to score is flagged a coin flip, while the rec holds such a change of its own flow as
   gaining nothing (`heldOrMade`), so the flag and the rec's words differ there. Whether a change that cannot gain should ever be
   flagged a coin flip is a ruling for round 3's triage; the Skills defer to the tool either way.
+  **Closed** (ruling R11-5, `eed56ef`): a change that cannot gain — its upper bound at or below 0, or
+  an entrant not expected to score at a seat that scores a known 0 — reads `coin_flip: false` and
+  the rec holds it as gaining nothing; `lineup-no-move.test.ts` pins it.
 - **From the Dependabot review (2026-11-04 to 2026-11-05).**
   - `hyparquet` 1.32.0 (published 2026-10-29) is not reviewed: no PR proposed it. It comes through
     Dependabot's next monthly group with its own "Reviews" row.
