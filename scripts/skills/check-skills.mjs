@@ -437,7 +437,7 @@ export const LIVE_COUNTS_SENTENCE =
  * failure on the league settings handled by orient's rejection rule, never a guessed section.
  */
 export const ACTIVITY_PARTIAL_SENTENCE =
-  "**P1:** `espn_analyze_league_activity` on a league not known to be public can answer `partial: true` with a fixed line for each read the session refused — ESPN's transaction feed, or the standings, rosters or free-agent pool the line names — each ending in `eff setup`: the section then rests on the server's persisted history; say what each line leaves out (by-team activity, waiver-order movement, rival needs) and give the one command — in a terminal, `eff setup` — once; a repeat call reads nothing more (changelog §R10, R10-11). On a private or unknown league (`league.is_public` false or null) such a line is a rejection mid-procedure (**A rejection mid-procedure** in [orient](references/orient.md)): give the section from the persisted history, labelled partial, say so in Confidence & freshness (changelog §R10, R10-12), and end the briefing with the hand-off to the `espn-fantasy-football:session-check` Skill (changelog §R10, R10-7).";
+  "**P1:** `espn_analyze_league_activity` on a league not known to be public can answer `partial: true` with a fixed line for each read the session refused — ESPN's transaction feed, or the standings, rosters or free-agent pool the line names — each ending in `eff setup`: the section then rests on the server's persisted history; say what each line leaves out (by-team activity, waiver-order movement, rival needs) and give the one command — in a terminal, `eff setup` — only in the hand-off line that ends the briefing (**The hand-off line** in [orient](references/orient.md)), never in the section; a repeat call reads nothing more (changelog §R10, R10-11). On a private or unknown league (`league.is_public` false or null) such a line is a rejection mid-procedure (**A rejection mid-procedure** in [orient](references/orient.md)): give the section from the persisted history, labelled partial, say so in Confidence & freshness (changelog §R10, R10-12), and end the briefing with the hand-off to the `espn-fantasy-football:session-check` Skill (changelog §R10, R10-7).";
 export const ACTIVITY_REFUSAL_SENTENCE =
   "When it fails with `ESPN_AUTH_REJECTED` or `ESPN_REQUIRES_COOKIES` instead (the league settings it starts from could not be read — changelog §R10, R10-18), follow **A rejection mid-procedure** in [orient](references/orient.md), an `ESPN_REQUIRES_COOKIES` the same way: never a guessed activity section; on a public league fall back to the reads above, which answer keylessly there, and say so in Confidence & freshness; on a private or unknown league the briefing ends there with the hand-off to the `espn-fantasy-football:session-check` Skill.";
 /**
@@ -601,11 +601,15 @@ export const ORIENT_SENTENCES = Object.freeze({
     '"seeding reading unconfirmed — assuming ESPN\'s rule; run `espn-fantasy-football:onboard` to record it"',
   // round 3's triage (ON-6, WK-8, WK-9, WK-10, WK-11): every hand-off to session-check is named by
   // one fixed line, the answer's last, after Confidence & freshness; a partial answer mid-procedure
-  // keeps its own sections and that section, and gives `eff setup` once, in that line
+  // keeps its own sections and that section, and gives `eff setup` once, in that line — a section
+  // naming a session-refusal line never repeats it, and the hand-off line follows the apply line
+  // (the round-4 refix's VS-5: weekly's League activity section gave the command too)
   handOff:
     'the answer names the hand-off with one fixed line, printed verbatim as its last line, after its Confidence & freshness section when it has one: "Hand-off: the `espn-fantasy-football:session-check` Skill takes it from here — `eff setup` in a terminal."',
   partialKeeps:
-    "Mid-procedure, a partial answer keeps its own sections and its Confidence & freshness section, naming the rejection and what was not read — the `espn-fantasy-football:session-check` Skill's steps never replace them — and gives the command once, in that line",
+    "Mid-procedure, a partial answer keeps its own sections and its Confidence & freshness section, naming the rejection and what was not read — the `espn-fantasy-football:session-check` Skill's steps never replace them — and gives the command once, in that line: a section that names a session-refusal line points to the hand-off line and never repeats the command.",
+  handOffAfterApply:
+    "When the answer also ends a recommendation with the apply line (guardrail 10), the hand-off line comes after it and is still the answer's last line.",
   // round 3's triage, SP-4-E: the Seeding row glosses ESPN's rule, never as points-only seeding
   seedingRule: SEEDING_RULE_SENTENCE,
 });
@@ -674,6 +678,9 @@ export const ROUND3_FRONTMATTER = Object.freeze({
     when_to_use: ["playing more", "snap share", "what did you log"],
   },
   onboard: { description: ["how seeding works"] },
+  // changelog §R11, R11-2: "how do I get an ESPN API key" is a session-check positive, and its
+  // when_to_use names the ask (the round-4 refix's VS-2)
+  "session-check": { when_to_use: ["ESPN API key", "connect ESPN"] },
 });
 
 /**
@@ -713,9 +720,14 @@ export const ROUND3_FIXED = Object.freeze({
   },
   weekly: {
     "SKILL.md": {
-      // WK-5-E: the points-only mode line against the season cutoff, and no P(win)
+      // WK-5-E: the points-only mode line against the season cutoff, and no P(win); every mode the
+      // tool gives under points-only has its reason, maximise_pf included (the round-4 refix's VS-10)
       pointsOnlyMode:
-        "Under the points-only reading print no `P(win)`, and give `mode` with the `espn-fantasy-football:start-sit` Skill's one-line reason against the season cutoff: **protect** — ahead of the season cutoff, so the higher floor (p10) is worth more; **chase** — behind the season cutoff, so the higher ceiling (p90) is worth more.",
+        "Under the points-only reading print no `P(win)`, and give `mode` with the `espn-fantasy-football:start-sit` Skill's one-line reason against the season cutoff: **protect** — ahead of the season cutoff, so the higher floor (p10) is worth more; **chase** — behind the season cutoff, so the higher ceiling (p90) is worth more; **maximise_pf** — near the season cutoff (or with no season context), so every expected point counts the same.",
+      // WK-5-E: the output contract the reply is built from asks for no P(win) under points-only
+      // (the round-4 refix's VS-3)
+      matchupPwin:
+        "`P(win)` as its band with `basis` (never under the points-only reading: step 5 prints `mode` with its reason instead)",
     },
   },
   "start-sit": {
@@ -723,16 +735,18 @@ export const ROUND3_FIXED = Object.freeze({
       // SS-5-E: described players run the lineup tool first
       described:
         '**A described player.** When the question describes players without naming them ("my safer WR", "the boom-or-bust one"), run the branch\'s `espn_analyze_lineup` first and answer from its rec and each candidate\'s p10 / p90; ask only when no swap at that position comes back.',
-      // SS-10-E: the gap between the two win probabilities
+      // SS-10-E: the gap between the two win probabilities; ours is pre-game only when it is not
+      // conditioned on the games in progress (the round-4 refix's VS-4)
       winGap:
-        'when they differ by more than 0.15, say by how much ("N points apart") and which of them is live and which pre-game, then which one the swap advice follows',
+        "when they differ by more than 0.15, say by how much (\"N points apart\") and, when ours is not live (`live` is null, or under `core`, where ours is the lineup tool's `p_win`), that ours is the pre-game number of the lineups as set while ESPN's is live; then which one the swap advice follows",
       // SS-3: a Questionable starter who plays after every replacement locks
       lateGame:
         "**A Questionable starter who plays last.** When a `QUESTIONABLE` starter's game kicks off after every replacement's lock (`lock_schedule`), the call is due before his replacements' first lock: say so with that lock time, and that waiting for his status buys nothing — once they lock, his news can no longer change the lineup.",
       // SS-6-E: each flagged starter with both numbers and the tool's pct, and why the lineup
-      // follows ESPN's
+      // follows ESPN's — at the shipped weight only: a tuned weight_espn below 1 blends the two
+      // (the round-4 refix's VS-9)
       crossCheck:
-        "when `espn_cross_check.starter_disagreements[]` lists starters, each one with ESPN's number (`espn`), ours (`ours`) and the tool's `pct`, and that the lineup follows ESPN's number, because the projection it uses weighs ESPN's fully while `inputs.weight_espn` is 1.0 (the blend is untuned in this version)",
+        "when `espn_cross_check.starter_disagreements[]` lists starters, each one with ESPN's number (`espn`), ours (`ours`) and the tool's `pct`; when `inputs.weight_espn` is 1.0 (the shipped blend), that the lineup follows ESPN's number because the projection weighs ESPN's fully; otherwise, that it follows the blend at that weight, both numbers shown",
     },
   },
   retro: {
@@ -770,8 +784,20 @@ export const ROUND3_FIXED = Object.freeze({
   },
 });
 
-/** Text round 3's fixes withdrew (RA-4-E: the tool names no player as the drop). */
+/**
+ * Text round 3's fixes withdrew (RA-4-E: the tool names no player as the drop), and what the round-4
+ * refix withdrew from them: the unconditional live / pre-game labels (VS-4), the untuned blend
+ * stated as fact (VS-9), and weekly's second `eff setup` in the League activity section (VS-5).
+ */
 export const ROUND3_ABSENT = Object.freeze({
+  "start-sit": {
+    "SKILL.md": [
+      "which of them is live and which pre-game",
+      "(the blend is untuned in this version)",
+    ],
+  },
+  // VS-5: the command is given once, in the hand-off line — never again in the League activity section
+  weekly: { "SKILL.md": ["give the one command — in a terminal, `eff setup` — once"] },
   "roster-audit": {
     "SKILL.md": ["the extra bench player designated as the drop the moment the tag clears"],
     "references/roster-audit-ir.md": [

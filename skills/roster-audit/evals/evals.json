@@ -7,13 +7,13 @@
       "name": "RA-1",
       "toolset": "full",
       "prompt": "Rate my roster.",
-      "expected_output": "The bench plan by role, handcuff and stash values with verdicts, the phase (competing), the bench template stated as derived for this league's curves with its reason, the droppables with re-add risk, the IR slots' state (an open slot and two eligible bench players), and a log id.",
+      "expected_output": "The bench plan by role, handcuff and stash values with verdicts, the phase (mid; competing: yes), the bench template stated as derived for this league's curves with its reason, the droppables with re-add risk, the IR slots' state (an open slot and two eligible bench players), and a log id.",
       "files": ["evals/fixtures/fx-10h"],
       "expectations": [
         "The skill called espn_analyze_replacement before espn_analyze_roster (tool_order)",
         "The skill called espn_analyze_roster before espn_record_recommendation (tool_order)",
         "The reply covers the bench by role and names a handcuff or stash verdict (regex: `handcuff|stash`)",
-        "The reply names the phase the audit ran under (competing on this fixture) and states the bench template as derived from this league's curves, with its reason, not as a rule (llm)",
+        "The reply names the phase the audit ran under (`phase: mid` on this fixture; the team is competing) and states the bench template as derived from this league's curves, with its reason, not as a rule (llm)",
         "The reply notes the open IR slot and the bench players eligible to move into it (llm)"
       ]
     },

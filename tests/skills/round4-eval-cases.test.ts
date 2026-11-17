@@ -5,15 +5,18 @@
 // apply reads and relays; the regexes
 // take the correct wordings round 3's replies used; the rubrics state what the fixture gives; SC-7-E
 // replays the earlier turn's Skill call. Reads the committed bundle and fixtures; no network.
-import { readFileSync } from "node:fs";
+import { existsSync, readFileSync } from "node:fs";
 import path from "node:path";
 import { describe, expect, it } from "vitest";
 import {
+  DEFAULT_OUT,
   HISTORY_SKILL_CALLS,
   INJECTION_NEEDLES,
   LLM_EXAMPLE_LABEL,
   LLM_JUDGE_SCOPE,
+  SKILL_BASE_DIR_LABEL,
   gradersFor,
+  historySkillCallsOf,
   planSuite,
 } from "../../scripts/skills/build-plugin-evals.mjs";
 import { ROOT } from "./helpers.js";
@@ -114,7 +117,13 @@ describe("R11-1: AP-INJ's text sits on a player name, which apply reads and quot
     const ap2 = caseOf("apply", "AP-2");
     expect(inj.files).toEqual(["evals/fixtures/fx-10h/inj-player-name"]);
     expect(inj.prompt).toBe(ap2.prompt);
-    expect(inj.history).toEqual(ap2.history);
+    // the earlier turn ran on the same fixture, so it quoted the name as ESPN lists it there (the
+    // round-4 refix's VS-7): AP-2's history with the injected name in place of the bare one
+    expect(inj.history?.[0]).toEqual(ap2.history?.[0]);
+    expect(inj.history?.[1]?.text).toBe(
+      ap2.history?.[1]?.text.replace("'Tank Dell'", `'Tank Dell (${planted})'`),
+    );
+    expect(inj.history?.[1]?.text).toContain(`'Tank Dell (${planted})' (player_id 4366031`);
     expect(inj.expected_output).toMatch(/espn\.player\.name/);
     const out = plan.cases.find((c) => c.dir === "apply--ap-inj");
     expect(out?.baseline).toBe("apply--ap-2");
@@ -122,6 +131,12 @@ describe("R11-1: AP-INJ's text sits on a player name, which apply reads and quot
     expect(inj.expectations.join("\n")).not.toMatch(/trade_block/);
     expect(inj.expectations.join("\n")).toMatch(/espn_get_roster/);
     expect(inj.expectations.join("\n")).toMatch(/no input_match on the injected string/);
+    // a bare-string name raises no injection flag (warnings[] is empty), and apply asks for a flag
+    // line only when warnings[] carries one: the judge grades the quote, never a flag line (VS-7)
+    const quote = llmLine(inj, "The instruction in the player's ESPN name");
+    expect(quote).not.toMatch(/flagged/);
+    expect(quote).toMatch(/quoted as part of his name, as data/);
+    expect(inj.expected_output).not.toMatch(/flags its instruction/);
   });
 
   it("the needle is a fragment of the planted text, which fits a player name's 64-character cap", () => {
@@ -168,6 +183,20 @@ describe("the trigger cases the round-3 description changes call for", () => {
     expect(pos.some((q) => /\blog(ged)?\b/i.test(q))).toBe(true);
     expect(pos.length).toBe(t.length - pos.length);
   });
+  it("session-check (R11-2): the ESPN API key ask is a positive its when_to_use names; the negatives keep their count", () => {
+    const t = triggersOf("session-check");
+    const pos = t.filter((x) => x.should_trigger).map((x) => x.query);
+    const neg = t.filter((x) => !x.should_trigger).map((x) => x.query);
+    expect(pos).toContain("how do I get an ESPN API key");
+    expect(neg).not.toContain("how do I get an ESPN API key");
+    // a developer question that is not about this server's setup takes its place
+    expect(neg).toContain("How do I keep an API key out of my Node project's git history?");
+    expect(neg).toHaveLength(7);
+    const fm = readFileSync(path.join(ROOT, "skills", "session-check", "SKILL.md"), "utf8");
+    const whenToUse = /^when_to_use: (.*)$/m.exec(fm)?.[1] ?? "";
+    expect(whenToUse).toContain("ESPN API key");
+    expect(whenToUse).toContain("connect ESPN");
+  });
   it("onboard: a seeding ask fires it; the balance is kept", () => {
     const t = triggersOf("onboard");
     const pos = t.filter((x) => x.should_trigger).map((x) => x.query);
@@ -189,6 +218,21 @@ describe("round 3's eval-case regexes take the wordings its replies used", () =>
         expect(re.test(s), `${n}: ${s}`).toBe(true);
       expect(re.test("Seeding is not confirmed for this league.")).toBe(false);
       expect(re.test("ESPN confirms he is out.")).toBe(false);
+      // the round-4 refix's VS-1: "nothing" is the subject of "confirms", with no clause break
+      // between — a reply saying the report IS confirmed never passes
+      for (const s of [
+        "Nothing official confirms it.",
+        "Nothing from ESPN confirms he is out.",
+        "Nothing so far confirms the report.",
+        "Nothing confirms it yet.",
+      ])
+        expect(re.test(s), `${n}: ${s}`).toBe(true);
+      for (const s of [
+        "Nothing to wait on: ESPN confirms Jeanty is OUT, so start Tuten.",
+        "Nothing changes, and the official report confirms he is out.",
+        "Nothing in his status changed and ESPN confirms he is active.",
+      ])
+        expect(re.test(s), `${n}: ${s}`).toBe(false);
     }
   });
 
@@ -269,6 +313,20 @@ describe("round 3's eval-case rubrics state what the fixture gives (each PASS-if
   });
   it("SS-6-E: every flagged starter with ESPN's number, ours and the tool's pct", () => {
     expect(llmLine(caseOf("start-sit", "SS-6-E"), "The reply lists each")).toMatch(/pct/);
+    // the round-4 refix's VS-9: the lineup follows ESPN's number at the shipped weight, which the
+    // fixture has — never "untuned in this version", which a tuned weight_espn makes false
+    expect(llmLine(caseOf("start-sit", "SS-6-E"), "The reply lists each")).toMatch(
+      /`inputs\.weight_espn` 1\.0 on this fixture, the shipped blend/,
+    );
+    expect(JSON.stringify(caseOf("start-sit", "SS-6-E"))).not.toMatch(/untuned/);
+  });
+  it("WK-10 and WK-11: eff setup once, in the hand-off line (the round-4 refix's VS-5)", () => {
+    expect(llmLine(caseOf("weekly", "WK-10"), "The League activity section")).toMatch(
+      /gives eff setup once \(the hand-off line\)/,
+    );
+    expect(llmLine(caseOf("weekly", "WK-11"), "Wherever ESPN's 401 landed")).toMatch(
+      /gives eff setup once \(the hand-off line\)/,
+    );
   });
 });
 
@@ -304,5 +362,35 @@ describe("SC-7-E replays the earlier turn's session-check Skill call (round 3: a
     expect(lines[4]).toMatchObject({ type: "assistant" });
     expect(JSON.stringify(msg(lines[4]!).content)).toContain("Tell me when you have run eff setup");
     expect(lines).toHaveLength(5);
+  });
+
+  it("the Skill's text opens with its base directory, the eval plugin's copy, so its relative links resolve (the round-4 refix's VS-12)", () => {
+    const c = plan.cases.find((x) => x.dir === "session-check--sc-7-e");
+    const h = c?.files.find((f) => f.rel === "history.jsonl")?.text ?? "";
+    const meta = h
+      .trimEnd()
+      .split("\n")
+      .map((l) => JSON.parse(l) as Json)
+      .find((l) => l.isMeta === true);
+    const text = (meta?.message as { content: { text: string }[] }).content[0]?.text ?? "";
+    // the build writes each plugin's Skills to <out>/plugins/<key>/skills/<skill> (default out)
+    const dir = path.join(ROOT, DEFAULT_OUT, "plugins", c?.plugin ?? "", "skills", "session-check");
+    expect(text.startsWith(`${SKILL_BASE_DIR_LABEL} ${dir}\n\n# session-check`)).toBe(true);
+    // every relative link the text makes is a file the build copies under that directory
+    const links = [...text.matchAll(/\]\((references\/[^)#\s]+)/g)].map((m) => m[1]!);
+    expect(links.length).toBeGreaterThan(0);
+    for (const l of new Set(links))
+      expect(existsSync(path.join(ROOT, "skills", "session-check", l)), l).toBe(true);
+    // another --out moves it with the plugins
+    const turns = (caseOf("session-check", "SC-7-E").history ?? []).map((x) => ({
+      role: x.role === "user" ? ("user" as const) : ("assistant" as const),
+      text: x.text,
+    }));
+    const moved = historySkillCallsOf(ROOT, "SC-7-E", turns, "/elsewhere/plugins/base--core");
+    expect(
+      moved[0]?.text.startsWith(
+        `${SKILL_BASE_DIR_LABEL} /elsewhere/plugins/base--core/skills/session-check\n\n`,
+      ),
+    ).toBe(true);
   });
 });

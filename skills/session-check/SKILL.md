@@ -1,7 +1,7 @@
 ---
 name: session-check
 description: Fixes the ESPN session in the user's ESPN league when tools stop working or someone asks to run a setup command or paste its output. Never handles a cookie in chat.
-when_to_use: stopped working, can't see my team, 401, expired, cookie, espn_s2, SWID, ESPN rejected, session valid, how old, eff setup, re-setup, setup command, paste the output
+when_to_use: stopped working, can't see my team, 401, expired, cookie, espn_s2, SWID, ESPN rejected, session valid, how old, eff setup, re-setup, setup command, paste the output, ESPN API key, connect ESPN
 argument-hint: "[nothing]"
 disallowed-tools:
   - mcp__espn-fantasy-football__espn_commit_lineup

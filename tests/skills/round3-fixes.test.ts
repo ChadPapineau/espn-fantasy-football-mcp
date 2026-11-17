@@ -112,7 +112,24 @@ describe("orient's round-3 sentences, in every copy", () => {
     expect(orientRoutingProblems(shared)).toEqual([]);
   });
 
-  it.each(["handOff", "partialKeeps", "seedingRule"] as const)(
+  it("the command is given once, in the hand-off line, which follows the apply line (the round-4 refix's VS-5)", () => {
+    expect(ORIENT_SENTENCES.partialKeeps).toMatch(
+      /gives the command once, in that line: a section that names a session-refusal line points to the hand-off line and never repeats the command\.$/,
+    );
+    expect(shared).toContain(ORIENT_SENTENCES.handOffAfterApply);
+    // the two sentences sit in the hand-off paragraph, after the fixed line itself
+    const para = shared.split("\n").find((l) => l.startsWith("**The hand-off line.**")) ?? "";
+    expect(para).toContain(ORIENT_SENTENCES.handOff);
+    expect(para).toContain(ORIENT_SENTENCES.partialKeeps);
+    expect(para).toContain(ORIENT_SENTENCES.handOffAfterApply);
+    // weekly's League activity section leaves the command to that line
+    const weekly = read("skills/weekly/SKILL.md");
+    expect(weekly).toContain(
+      "give the one command — in a terminal, `eff setup` — only in the hand-off line that ends the briefing",
+    );
+  });
+
+  it.each(["handOff", "partialKeeps", "seedingRule", "handOffAfterApply"] as const)(
     "cutting %s from the shared orient fails every rebuilt copy",
     (k) => {
       const t = fresh();

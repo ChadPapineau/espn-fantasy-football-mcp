@@ -22,6 +22,7 @@ import {
   SKILL_RULES,
   TOOL_OUTPUT_SHEET_PHRASES,
 } from "../../scripts/skills/check-skills.mjs";
+import { ROSTER_AUDIT } from "../../src/domain/analytics/rosterAudit.js";
 import { ROOT } from "./helpers.js";
 
 interface Case {
@@ -1171,6 +1172,46 @@ describe("the round-4c review's grader fixes", () => {
     const re = graderOf(skill, name, lead);
     for (const s of pass) expect(re.test(s), `passes: ${s}`).toBe(true);
     for (const s of fail) expect(re.test(s), `fails: ${s}`).toBe(false);
+  });
+
+  it("WK-1's as_of grader takes the reads' timestamp, never 'as of' in prose (the round-4 refix's VS-11)", () => {
+    const re = graderOf("weekly", "WK-1", "The reply prints the reads' as_of");
+    // the fixture's clock: every read's as_of is at it, and the header prints it in Eastern Time
+    const clock = (JSON.parse(read("fixtures/espn/fx-10h/manifest.json")) as { clock: string })
+      .clock;
+    const et = new Date(clock).toLocaleString("en-US", {
+      timeZone: "America/New_York",
+      month: "short",
+      day: "numeric",
+      hour: "numeric",
+      minute: "2-digit",
+    });
+    for (const s of [
+      `**Week 5 briefing** — data as of ${et} ET`,
+      `as_of ${clock}`,
+      "Reads as of 2026-10-06 21:00 ET",
+      "As of Tue Oct 6, 9 PM ET",
+      "as_of: 10/06 21:00",
+    ])
+      expect(re.test(s), `passes: ${s}`).toBe(true);
+    for (const s of [
+      "Standings as of week 5: you are 3-1.",
+      "As of now, start Vele at FLEX.",
+      "Waivers as of the last run cleared nobody.",
+    ])
+      expect(re.test(s), `fails: ${s}`).toBe(false);
+  });
+
+  it("RA-1 names the phase the tool gives on its fixture, `phase: mid` (the round-4 refix's VS-6)", () => {
+    const c = caseOf("roster-audit", "RA-1");
+    const line = c.expectations.find((x) => x.startsWith("The reply names the phase")) ?? "";
+    // espn_analyze_roster's phase is early | mid | late; `competing` is another field
+    expect(line).toMatch(/\(`phase: mid` on this fixture; the team is competing\)/);
+    expect(line).not.toMatch(/\(competing on this fixture\)/);
+    expect(c.expected_output).toContain("the phase (mid; competing: yes)");
+    // the fixture's week is past the early phase's last week, before the trade deadline
+    const m = JSON.parse(read("fixtures/espn/fx-10h/manifest.json")) as { current_week: number };
+    expect(m.current_week).toBeGreaterThan(ROSTER_AUDIT.earlyLastWeek);
   });
 
   it("SC-11 keeps its no-probe grader and its never-ask-for-a-cookie rubric (R4CS-3)", () => {

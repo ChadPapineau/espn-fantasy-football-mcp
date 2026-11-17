@@ -296,6 +296,19 @@ minor version (plan 04 §4.4; plan 09 K6). One version covers the server, the Sk
   SS-INJ-2's comparison state what the fixture gives; SC-7-E's history replays the earlier turn's
   session-check call. New trigger cases: news-check (a usage jump, a logged claim) and onboard (a
   seeding ask), each Skill's balance kept.
+- **The Skills and the plugin eval's cases, after the round-4 verifier (ruling R11-2).**
+  session-check's `when_to_use` names an ESPN API key and connecting ESPN, and "how do I get an ESPN
+  API key" is its trigger positive; a developer question about keeping an API key out of git takes
+  its place among the negatives. weekly's output contract prints no `P(win)` under the points-only
+  reading, and its points-only mode line gives `maximise_pf`'s reason beside protect's and chase's.
+  start-sit calls our win probability the pre-game number only when it is (`live` null, or under
+  `core`), and says the lineup follows ESPN's number only at the shipped blend (`inputs.weight_espn`
+  1.0). A hand-off to session-check gives `eff setup` once, in the hand-off line, which follows the
+  apply line; weekly's League activity section no longer repeats the command. The eval cases: SS-4,
+  SS-12 and SS-INJ-2 no longer pass a reply that says the report is confirmed; RA-1 names the
+  tool's `phase: mid`; AP-INJ asks for no flag line the server never raises on a player name, and
+  its earlier turn quotes the name as the fixture lists it; WK-1's `as_of` grader needs a date or a
+  time; SC-7-E's replayed Skill text opens with its base directory, the eval plugin's copy.
 - **Dependencies, reviewed under plan 04 §2 (Dependabot PRs 1–5, 2026-11-04 to 2026-11-05; ruling
   R10-35).** The MCP SDK 2.3.1 → 2.4.0 (`@modelcontextprotocol/server` and `core`, and the dev
   `client`; `espn_get_status` reports `sdk_version` 2.4.0): 2.4.0 adds the Skills extension on new

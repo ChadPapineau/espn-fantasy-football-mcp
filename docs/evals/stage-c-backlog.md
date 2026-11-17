@@ -1109,7 +1109,11 @@ round 3's eval-case triage is built.
   it since `63370ef`, but `when_to_use` does not name it, so check-skills refuses the positive ("matches
   none of session-check's when_to_use phrases"). The trigger change is ready: neg-05 becomes pos-09,
   and "How do I keep an API key out of my Node project's git history?" takes neg-05's place. The
-  Skills listing has 63 characters of headroom.
+  Skills listing has 63 characters of headroom. **Closed** by the round-4 refix (VS-2):
+  `when_to_use` names "ESPN API key" and "connect ESPN" (check-skills holds both), the case is
+  pos-09 and the new negative keeps seven; the listing's headroom is 35. The round-3 rewrite also
+  dropped "unauthorized" and "not logged in" from `when_to_use`; no trigger case relies on them, and
+  they stay out for the listing's room.
 - **WV-2's touchdown branch has no candidate.** Plan 09 §3.8's WV-2 flags a candidate with a strongly
   negative `xfp_gap`; on the base pool no detailed candidate carries a usage signal, so the case grades
   the no-signal branch only. A variant with such a candidate would test the flag.

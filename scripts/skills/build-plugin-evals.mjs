@@ -1468,6 +1468,13 @@ export function historyTranscript(turns, seed, skillCalls = []) {
 }
 
 /**
+ * The first line of the meta message Claude Code writes when the Skill tool loads a Skill, before
+ * its text: the Skill's own directory, which its relative links (`references/…`) resolve against
+ * (the round-4 refix's VS-12: SC-7-E's replay carried the text without it).
+ */
+export const SKILL_BASE_DIR_LABEL = "Base directory for this skill:";
+
+/**
  * The Skill text a session holds after the Skill tool ran: its SKILL.md without the frontmatter.
  * @param {string} root
  * @param {string} skill
@@ -1480,13 +1487,16 @@ export function skillTextOf(root, skill) {
 
 /**
  * The Skill calls a case's history replays (HISTORY_SKILL_CALLS), each a call of this plugin's
- * Skill on an assistant turn the history has.
+ * Skill on an assistant turn the history has. The Skill's text opens as a session's does, with its
+ * base directory: the copy of the Skill in the case's eval plugin (`<pluginDir>/skills/<skill>`,
+ * where the build writes SKILL.md and references/), so the text's relative links resolve.
  * @param {string} root
  * @param {string} name the case
  * @param {readonly HistoryTurn[]} history
+ * @param {string} pluginDir the case's eval plugin, absolute (`<out>/plugins/<key>`)
  * @returns {HistorySkillCall[]}
  */
-export function historySkillCallsOf(root, name, history) {
+export function historySkillCallsOf(root, name, history, pluginDir) {
   const table = /** @type {Readonly<Record<string, { turn: number, skill: string }>>} */ (
     HISTORY_SKILL_CALLS
   );
@@ -1497,8 +1507,13 @@ export function historySkillCallsOf(root, name, history) {
       `HISTORY_SKILL_CALLS ${name}: turn ${String(spec?.turn)} is not an assistant turn`,
     );
   const plugin = readManifest(root).plugin;
+  const base = path.join(path.resolve(pluginDir), "skills", spec.skill);
   return [
-    { turn: spec.turn, name: `${plugin}:${spec.skill}`, text: skillTextOf(root, spec.skill) },
+    {
+      turn: spec.turn,
+      name: `${plugin}:${spec.skill}`,
+      text: `${SKILL_BASE_DIR_LABEL} ${base}\n\n${skillTextOf(root, spec.skill)}`,
+    },
   ];
 }
 
@@ -1547,12 +1562,15 @@ export const caseYaml = (name) =>
  * the cases a fixture-mode server cannot grade go to `notTestable` with the reason.
  * Pure (reads the repository, writes nothing).
  * @param {string} root
- * @param {{ heldOut?: Readonly<Record<string, string>> }} [opts] heldOut: the cases held out by
- *   name, with the reason (default HELD_OUT_CASES)
+ * @param {{ heldOut?: Readonly<Record<string, string>>, out?: string }} [opts] heldOut: the cases
+ *   held out by name, with the reason (default HELD_OUT_CASES); out: where the suite is written
+ *   (default <root>/DEFAULT_OUT), which a replayed Skill call's base directory names
  * @returns {{ cases: CaseOut[], plugins: PluginSpec[], notTestable: NotTestable[], errors: string[] }}
  */
 export function planSuite(root, opts = {}) {
   const heldOut = opts.heldOut ?? HELD_OUT_CASES;
+  // where the suite is written: a replayed Skill call names its eval plugin's copy of the Skill
+  const outDir = path.resolve(opts.out ?? path.join(root, DEFAULT_OUT));
   const manifest = readManifest(root);
   const { skills, errors: listErrors } = listSkillDirs(path.join(root, SKILLS_DIR));
   /** @type {string[]} */
@@ -1828,7 +1846,11 @@ export function planSuite(root, opts = {}) {
         files.push({ rel: "case.yaml", text: caseYaml(dir) });
         files.push({
           rel: "history.jsonl",
-          text: historyTranscript(history, dir, historySkillCallsOf(root, name, history)),
+          text: historyTranscript(
+            history,
+            dir,
+            historySkillCallsOf(root, name, history, path.join(outDir, "plugins", key)),
+          ),
         });
       }
       cases.push({
@@ -2010,6 +2032,7 @@ export function buildPluginEvals(opts = {}) {
   try {
     plan = planSuite(root, {
       heldOut: { ...HELD_OUT_CASES, ...datasetHeldOut(opts.datasets ?? true) },
+      out,
     });
   } catch (e) {
     errors.push(errMsg(e));
