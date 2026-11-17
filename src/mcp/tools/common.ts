@@ -1218,6 +1218,36 @@ export function isOptionalReadFailure(e: unknown): boolean {
 }
 
 /**
+ * An optional read's catch (changelog §R11, R11-4; E13's house pattern, `8f41601`): null for what an
+ * optional read may lose (isOptionalReadFailure: an outage, a session refusal — said by the call's
+ * session line, refusals.ts — or fixture mode's `fixture_missing`), else the error rethrown, so a
+ * bug answers INTERNAL and is never read as "unavailable".
+ */
+export function optionalOrThrow(e: unknown): null {
+  if (isOptionalReadFailure(e)) return null;
+  throw e;
+}
+
+/**
+ * The same for an optional read of a dataset (the pro schedule) that absorbed every error before:
+ * also a dataset past its hard limit (STALE_ONLY), which such a read degrades as before, as E13's
+ * schedule read does (reclog.ts retroReadAbsorbed). A bug propagates.
+ */
+export function optionalDatasetOrThrow(e: unknown): null {
+  if ((e as { effCode?: unknown } | null)?.effCode === "STALE_ONLY") return null;
+  return optionalOrThrow(e);
+}
+
+/**
+ * A fallback's fixed line (changelog §R11, R11-4): `<view> unavailable: <rest>` on an outage; on a
+ * session refusal — which the call's session line says (refusals.ts), never read as data
+ * unavailable — `<view> not read: <rest>`, what the answer is served from instead.
+ */
+export function fallbackWarning(e: unknown, view: string, rest: string): string {
+  return `${view} ${refusalOf(e) === null ? "unavailable" : "not read"}: ${rest}`;
+}
+
+/**
  * Players per read of nflverse's weekly stat lines (F1, round 4d). A season's eighteen weeks for a
  * matchup's two rosters (~30 players, ~500 rows of every stat column) were one synchronous
  * statement, translation and freeze of every row: on the Linux CI runner that one step held the

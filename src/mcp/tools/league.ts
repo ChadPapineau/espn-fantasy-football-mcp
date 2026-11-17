@@ -93,6 +93,9 @@ import {
   turn,
   weekOf,
   withinBudget,
+  optionalOrThrow,
+  optionalDatasetOrThrow,
+  fallbackWarning,
 } from "./common.js";
 import {
   canonical,
@@ -434,8 +437,12 @@ async function evidenceOf(
     warnings,
   ).catch((e: unknown) => {
     rememberAbsentSeason(ctx, prev, e);
+    if (isLeagueNotFound(e)) return ABSENT;
+    // an outage or a refusal falls back to the standings-only comparison; a bug is INTERNAL, never
+    // "could not be read" (changelog §R11, R11-4)
+    optionalOrThrow(e);
     if (sessionRefusalOf(e) !== null) refused = true;
-    return isLeagueNotFound(e) ? ABSENT : null;
+    return null;
   });
   // no league that season: its standings would 404 too — no further request
   if (read === ABSENT) {
@@ -456,12 +463,14 @@ async function evidenceOf(
     // a session refusal is said by the call's session line (last season's standings were not
     // read, why, `eff setup`), never as unavailable (refusals.ts; the round-4c E13 defect's class)
     if (isLeagueNotFound(e)) warnings.push(NO_PREVIOUS_SEASON_WARNING);
-    else
+    else {
+      optionalOrThrow(e);
       unavailableUnlessRefused(
         e,
         warnings,
         "seeding evidence unavailable: last season could not be read",
       );
+    }
     return null;
   }
   if (rules !== null) {
@@ -477,7 +486,7 @@ async function evidenceOf(
         const lg = await withinBudget(
           () => ctx.services.platform.getLeague(ref, readOpts(ctx)),
           warnings,
-        ).catch(() => null);
+        ).catch(optionalOrThrow);
         const league = lg === null ? null : take(ctx, lg, inputs);
         const reproduction = reproduceSeason(
           reproductionInputFrom({
@@ -495,7 +504,9 @@ async function evidenceOf(
         );
       }
     } catch (e) {
-      // fall through to the standings-only comparison, said
+      // fall through to the standings-only comparison, said — on an outage or a refusal only: a bug
+      // is INTERNAL (changelog §R11, R11-4)
+      optionalOrThrow(e);
       if (sessionRefusalOf(e) !== null) refused = true;
     }
   }
@@ -591,7 +602,7 @@ export async function leagueDigest(
     let final = false;
     let window = true;
     const sched = await withinBudget(() => scheduleOf(ctx, seasonY, inputs), warnings).catch(
-      () => null,
+      optionalDatasetOrThrow,
     );
     if (sched !== null) {
       const st = weekGameState(sched.schedule, clockWeek(league.clock), ctx.nowMs);
@@ -769,7 +780,7 @@ async function periodFlags(
   warnings: string[],
 ): Promise<{ provisional: boolean; corrections: boolean }> {
   const sched = await withinBudget(() => scheduleOf(ctx, seasonY, inputs), warnings).catch(
-    () => null,
+    optionalDatasetOrThrow,
   );
   if (sched === null) return { provisional: true, corrections: true };
   let provisional = false;
@@ -973,14 +984,16 @@ export const getLiveScoreboard = defineTool({
       );
       matchups = take(ctx, got, inputs);
     } catch (e) {
-      if (!isDegradable(e)) throw e;
+      // an outage or a session refusal (said by the session line) falls back; a bug is INTERNAL
+      // (changelog §R11, R11-4)
+      if (!isOptionalReadFailure(e)) throw e;
       const rules = await rulesOf(ctx, inputs);
       const mp = matchupPeriodOfWeek(rules.playoffs, w);
       const got = await ctx.services.platform.getMatchups(leagueRef(ctx), readOpts(ctx));
       matchups = take(ctx, got, inputs)
         .filter((m) => m.matchup_period === mp)
         .map(asLive);
-      warnings.push("live totals and win probability unavailable: season results only");
+      warnings.push(fallbackWarning(e, "live totals and win probability", "season results only"));
     }
     if (args.team_id !== undefined) {
       const t = args.team_id;
@@ -990,7 +1003,7 @@ export const getLiveScoreboard = defineTool({
     const sched = await withinBudget(
       () => scheduleOf(ctx, league.ref.season, inputs),
       warnings,
-    ).catch(() => null);
+    ).catch(optionalDatasetOrThrow);
     const st = sched === null ? null : weekGameState(sched.schedule, w, ctx.nowMs);
     if (st === null) warnings.push("pro schedule unavailable: game window unknown");
     // each side's starters by game state (plan 07 A4 `players`), from the week's rosters and the same
@@ -1254,7 +1267,7 @@ export const getBoxScore = defineTool({
     const sched = await withinBudget(
       () => scheduleOf(ctx, league.ref.season, inputs, args.allow_stale === true),
       warnings,
-    ).catch(() => null);
+    ).catch(optionalDatasetOrThrow);
     const states = boxGameStates(chosen, sched?.schedule ?? null, args.week, ctx.nowMs);
     const matchups = chosen.map((m) => ({
       matchup_id: m.matchup_id,
@@ -1434,10 +1447,16 @@ export const listTransactions = defineTool({
       espnTxns = page.items;
       total = page.total;
     } catch (e) {
-      if (!isDegradable(e)) throw e;
+      // an outage or a session refusal (said by the session line) serves the history; a bug is
+      // INTERNAL (changelog §R11, R11-4)
+      if (!isOptionalReadFailure(e)) throw e;
       fromHistory = true;
       warnings.push(
-        "espn:mTransactions2 unavailable: served from the server's persisted history (stale)",
+        fallbackWarning(
+          e,
+          "espn:mTransactions2",
+          "served from the server's persisted history (stale)",
+        ),
       );
     }
     // the configured league-season's stored rows only: transactions_seen keeps every season the

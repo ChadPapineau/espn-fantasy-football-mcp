@@ -119,6 +119,8 @@ import {
   activityLeagueReadsWarning,
   feedCutWarning,
   ACTIVITY_READ_LABEL,
+  isOptionalReadFailure,
+  unavailableUnlessRefused,
   type ActivityLeagueRead,
   take,
   teamOf,
@@ -196,17 +198,25 @@ export function tradePlayerOf(
   };
 }
 
+/**
+ * Whether an optional read's caller says a session refusal in its own fixed line (E11: `propagate`,
+ * its `orRefused`), or leaves it to the call's session line (`absorb`; changelog §R11, R11-4).
+ */
+type RefusalSaid = "absorb" | "propagate";
+
 /** The standings when this call can read them. */
 async function standingsOrNull(
   ctx: ToolContext,
   inputs: InputStamp[],
   warnings: string[],
+  refusal: RefusalSaid = "absorb",
 ): Promise<Standings | null> {
   const got = await withinBudget(
     () => ctx.services.platform.getStandings(leagueRef(ctx), readOpts(ctx)),
     warnings,
   ).catch((e: unknown) => {
-    if (!isDegradable(e)) throw e;
+    if (refusal === "propagate" && sessionRefusalOf(e) !== null) throw e;
+    if (!isOptionalReadFailure(e)) throw e;
     return null;
   });
   return got === null ? null : take(ctx, got, inputs);
@@ -219,6 +229,7 @@ async function poolOf(
   inputs: InputStamp[],
   warnings: string[],
   limit = 50,
+  refusal: RefusalSaid = "absorb",
 ): Promise<readonly PlatformPlayer[]> {
   const got = await withinBudget(
     () =>
@@ -230,9 +241,14 @@ async function poolOf(
       ),
     warnings,
   ).catch((e: unknown) => {
-    if (!isDegradable(e)) throw e;
+    if (refusal === "propagate" && sessionRefusalOf(e) !== null) throw e;
+    if (!isOptionalReadFailure(e)) throw e;
     // never silent: the answer goes without the free-agent pool, so it is partial (plan 07 §2)
-    warnings.push("partial: espn:kona_player_info unavailable: no free-agent pool");
+    unavailableUnlessRefused(
+      e,
+      warnings,
+      "partial: espn:kona_player_info unavailable: no free-agent pool",
+    );
     return null;
   });
   return got === null ? [] : take(ctx, got, inputs).items.filter((p) => p.status !== "ONTEAM");
@@ -605,7 +621,7 @@ export const analyzeTradeTool = defineTool({
       () => ctx.services.platform.getMatchups(leagueRef(ctx), readOpts(ctx, args)),
       warnings,
     ).catch((e: unknown) => {
-      if (!isDegradable(e)) throw e;
+      if (!isOptionalReadFailure(e)) throw e;
       return null;
     });
     const standings = await standingsOrNull(ctx, inputs, warnings);
@@ -1188,11 +1204,14 @@ export const analyzeInjuryCascadeTool = defineTool({
       };
     });
     const myTeam = b.league.my_team?.team_id ?? null;
+    const rostersRead = { refused: false };
     const rosters = await withinBudget(
       () => rostersOf(ctx, b.w, inputs, warnings, args, myTeam),
       warnings,
     ).catch((e: unknown) => {
-      if (!isDegradable(e)) throw e;
+      if (!isOptionalReadFailure(e)) throw e;
+      // a refusal is said by the call's session line, never as unavailable (changelog §R11, R11-4)
+      rostersRead.refused = sessionRefusalOf(e) !== null;
       return null;
     });
     const mine = rosters?.find((r) => r.team.team_id === myTeam) ?? null;
@@ -1261,7 +1280,8 @@ export const analyzeInjuryCascadeTool = defineTool({
       clock: ctx.services.clock,
       inputs: toDataInputs(inputs, ctx.nowMs),
     });
-    if (mine === null) warnings.push("my roster unavailable: claim/pass verdicts are null");
+    if (mine === null && !rostersRead.refused)
+      warnings.push("my roster unavailable: claim/pass verdicts are null");
     if (rzByWeek.size === 0)
       warnings.push("nflverse:pbp does not cover these weeks: the red-zone components are 0");
     return {
@@ -1644,7 +1664,7 @@ export const analyzeEvidenceTool = defineTool({
         () => rostersOf(ctx, b.w, inputs, warnings, args, myTeam),
         warnings,
       ).catch((e: unknown) => {
-        if (!isDegradable(e)) throw e;
+        if (!isOptionalReadFailure(e)) throw e;
         return null;
       });
       const e = rosters?.flatMap((r) => r.entries).find((x) => x.player.ref.id === p.ref.id);
@@ -1701,8 +1721,12 @@ export const analyzeEvidenceTool = defineTool({
       () => ctx.services.platform.getPlayerOutlooks(leagueRef(ctx), [p.ref], [b.w], readOpts(ctx)),
       warnings,
     ).catch((e: unknown) => {
-      if (!isDegradable(e)) throw e;
-      warnings.push("partial: espn:kona_player_info unavailable: no ESPN outlook in the evidence");
+      if (!isOptionalReadFailure(e)) throw e;
+      unavailableUnlessRefused(
+        e,
+        warnings,
+        "partial: espn:kona_player_info unavailable: no ESPN outlook in the evidence",
+      );
       return null;
     });
     // the subject's name keys and the players around him (teammates, the week's opponent): in a
@@ -2136,7 +2160,10 @@ export const analyzeLeagueActivityTool = defineTool({
         refused.set(what, refusal);
         return null;
       };
-    const standings = await standingsOrNull(ctx, inputs, warnings).catch(orRefused("standings"));
+    // E11 says its reads' refusals in its own lines (orRefused): they propagate to it
+    const standings = await standingsOrNull(ctx, inputs, warnings, "propagate").catch(
+      orRefused("standings"),
+    );
     const { transactions: txns, feedWeeks } = await transactionsOf(
       ctx,
       b.w,
@@ -2164,7 +2191,9 @@ export const analyzeLeagueActivityTool = defineTool({
       args.allow_stale === true,
     );
     const pool = args.include_rival_needs
-      ? ((await poolOf(ctx, b.w, inputs, warnings, 25).catch(orRefused("free-agent pool"))) ?? [])
+      ? ((await poolOf(ctx, b.w, inputs, warnings, 25, "propagate").catch(
+          orRefused("free-agent pool"),
+        )) ?? [])
       : [];
     if (refused.size > 0) {
       // one line for the call, with the stronger reason (a rejection outranks nothing stored); it

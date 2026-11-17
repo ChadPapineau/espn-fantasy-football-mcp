@@ -102,6 +102,8 @@ import {
   turn,
   weekOf,
   withinBudget,
+  optionalOrThrow,
+  optionalDatasetOrThrow,
   type RosReading,
 } from "./common.js";
 import { rostersOf } from "./roster.js";
@@ -1265,7 +1267,7 @@ export const analyzeLineupTool = defineTool({
         : await withinBudget(
             () => ctx.services.platform.getStandings(leagueRef(ctx), readOpts(ctx)),
             warnings,
-          ).catch(() => null);
+          ).catch(optionalOrThrow);
     const standings = stGot === null ? null : take(ctx, stGot, inputs);
     const reading =
       args.seeding_mode === "config"
@@ -1881,7 +1883,9 @@ export async function leaguePremiumFit(
     const sched =
       logged.length === 0
         ? null
-        : await withinBudget(() => scheduleOf(ctx, season, [], true), []).catch(() => null);
+        : await withinBudget(() => scheduleOf(ctx, season, [], true), []).catch(
+            optionalDatasetOrThrow,
+          );
     const runs = weeklyRunFeed(logged, sched?.schedule ?? null);
     const evidence = feeds.filter((f) => f.outcomes.length > 0 || f.claim_runs > 0);
     if (evidence.length === 0 && runs.length === 0) return null;
@@ -2222,7 +2226,12 @@ export const analyzeWaiversTool = defineTool({
             warnings,
           );
           sims.partial = alive.partial;
-          if (alive.alive === null && weeks.some((x) => rules.playoffs.playoff_weeks.includes(x)))
+          // a refused matchups read is said by the call's session line (changelog §R11, R11-4)
+          if (
+            alive.alive === null &&
+            !alive.refused &&
+            weeks.some((x) => rules.playoffs.playoff_weeks.includes(x))
+          )
             warnings.push(
               "season simulation unavailable: playoff weeks weighted 1 (P(alive) unknown)",
             );

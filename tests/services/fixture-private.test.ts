@@ -267,8 +267,13 @@ describe("private-league as committed: rejected, its one espn_check_auth accepts
       );
       expect((body.warnings ?? []).filter((w) => w.includes("budget"))).toEqual([]);
       // the feed and pending claims refused the same way; a P1 analytics tool fails as every tool
+      // (the feed: the stored history, partial, said by the session line — changelog §R11, R11-4)
       const feed = await call(c.client, "espn_list_transactions", { count: 20 });
-      expect(codeOf(feed.body)).toBe("ESPN_AUTH_REJECTED");
+      expect(feed.isError, JSON.stringify(feed.body).slice(0, 300)).toBe(false);
+      expect((feed.body as Body).partial).toBe(true);
+      expect(
+        ((feed.body as Body).warnings ?? []).some((w) => w.endsWith("in a terminal to replace it")),
+      ).toBe(true);
       const sched = await call(c.client, "espn_analyze_schedule", {});
       expect(codeOf(sched.body)).toBe("ESPN_AUTH_REJECTED");
       // zero requests from the rejected server: everything it answered came from the store

@@ -29,8 +29,14 @@ function withHistory(block?: (url: URL) => boolean): (inner: FetchLike) => Fetch
     const u = new URL(url);
     if (!u.pathname.includes(`/seasons/${String(SEASON - 1)}/`)) return inner(url, init);
     if (block?.(u) === true)
+      // fixture mode's missing fixture, as the fixture transport throws it: an optional read's
+      // failure (isOptionalReadFailure; changelog §R11, R11-4 — any other error is INTERNAL)
       return Promise.reject(
-        Object.assign(new Error("fixture mode: fixture_missing"), { effCode: "INTERNAL" }),
+        Object.assign(new Error("fixture mode: fixture_missing"), {
+          name: "FixtureError",
+          effCode: "INTERNAL",
+          effDetails: { reason: "fixture_missing" },
+        }),
       );
     return history(url, init);
   };

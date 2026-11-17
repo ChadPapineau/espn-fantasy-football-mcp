@@ -80,7 +80,6 @@ import {
 import {
   bankedPoints,
   crosswalkOf,
-  isDegradable,
   leagueRef,
   readOpts,
   rosReadingFrom,
@@ -91,6 +90,9 @@ import {
   turn,
   weekGames,
   withinBudget,
+  isOptionalReadFailure,
+  unavailableUnlessRefused,
+  sessionRefusalOf,
   type RosReading,
 } from "./common.js";
 import {
@@ -153,7 +155,7 @@ async function scheduleOrEmpty(
 ): Promise<ProSchedule> {
   const s = await withinBudget(() => scheduleOf(ctx, season, inputs, allowStale), warnings).catch(
     (e: unknown) => {
-      if (!isDegradable(e)) throw e;
+      if (!isOptionalReadFailure(e)) throw e;
       return null;
     },
   );
@@ -392,14 +394,19 @@ async function standingsOrNull(
   ctx: ToolContext,
   inputs: InputStamp[],
   warnings: string[],
+  unavailable: string | null = null,
 ): Promise<Standings | null> {
+  const read = { refused: false };
   const got = await withinBudget(
     () => ctx.services.platform.getStandings(leagueRef(ctx), readOpts(ctx)),
     warnings,
   ).catch((e: unknown) => {
-    if (!isDegradable(e)) throw e;
+    if (!isOptionalReadFailure(e)) throw e;
+    // a refusal is said by the call's session line, never as unavailable (changelog §R11, R11-4)
+    read.refused = sessionRefusalOf(e) !== null;
     return null;
   });
+  if (got === null && unavailable !== null && !read.refused) warnings.push(unavailable);
   return got === null ? null : take(ctx, got, inputs);
 }
 
@@ -438,16 +445,22 @@ export const analyzeMatchupTool = defineTool({
     );
     if (args.mode === "season") {
       const matchups = await matchupsOf(ctx, inputs, args);
-      const standings = await standingsOrNull(ctx, inputs, warnings);
-      if (standings === null)
-        warnings.push("standings unavailable: the season read from the results");
+      const standings = await standingsOrNull(
+        ctx,
+        inputs,
+        warnings,
+        "standings unavailable: the season read from the results",
+      );
       // E1-fitted team weeks when every roster is readable this call (plan 10 B9), else cold start
       let projections: Map<number, TeamWeekProjection[]> | null = null;
+      const rostersRead = { refused: false };
       const rosters = await withinBudget(
         () => rostersOf(ctx, b.w, inputs, warnings, args, null),
         warnings,
       ).catch((e: unknown) => {
-        if (!isDegradable(e)) throw e;
+        if (!isOptionalReadFailure(e)) throw e;
+        // a refusal is said by the call's session line, never as unavailable (R11-4)
+        rostersRead.refused = sessionRefusalOf(e) !== null;
         return null;
       });
       const schedule = await scheduleOrEmpty(
@@ -510,7 +523,8 @@ export const analyzeMatchupTool = defineTool({
           projections.set(r.team.team_id, weeks);
           await turn();
         }
-      } else warnings.push("rosters unavailable: the season uses the cold-start weekly model");
+      } else if (!rostersRead.refused)
+        warnings.push("rosters unavailable: the season uses the cold-start weekly model");
       await turn();
       const playoffPct = standings?.teams.find((t) => t.team_id === team)?.playoff_pct_espn ?? null;
       const out = await runSeason(ctx, {
@@ -563,12 +577,18 @@ export const analyzeMatchupTool = defineTool({
     const liveUnread: string[] = [];
     let oppId: number | null | undefined;
     if (args.mode === "live") {
+      const boxRead = { refused: false };
       const box = await withinBudget(
         () => ctx.services.platform.getBoxScores(leagueRef(ctx), b.w, readOpts(ctx, args)),
         warnings,
       ).catch((e: unknown) => {
-        if (!isDegradable(e)) throw e;
-        warnings.push("espn:mBoxscore unavailable: points so far unknown (nothing conditioned)");
+        if (!isOptionalReadFailure(e)) throw e;
+        boxRead.refused = sessionRefusalOf(e) !== null;
+        unavailableUnlessRefused(
+          e,
+          warnings,
+          "espn:mBoxscore unavailable: points so far unknown (nothing conditioned)",
+        );
         return null;
       });
       const boxRows = box === null ? [] : take(ctx, box, inputs);
@@ -576,7 +596,9 @@ export const analyzeMatchupTool = defineTool({
         for (const side of [m.home, m.away])
           for (const e of side?.entries ?? [])
             actual.set(e.player.ref.id, e.actual?.applied_total ?? null);
-      if (box === null) liveUnread.push("the box score's points so far (espn:mBoxscore)");
+      // a refused read is said by the call's session line, never as unavailable (R11-4)
+      if (box === null && !boxRead.refused)
+        liveUnread.push("the box score's points so far (espn:mBoxscore)");
       const pair = boxRows.find((m) => m.home.team_id === team || m.away?.team_id === team);
       if (pair !== undefined)
         oppId =
@@ -610,7 +632,7 @@ export const analyzeMatchupTool = defineTool({
         () => ctx.services.platform.getMatchups(leagueRef(ctx), readOpts(ctx, args)),
         warnings,
       ).catch((e: unknown) => {
-        if (!isDegradable(e)) throw e;
+        if (!isOptionalReadFailure(e)) throw e;
         return null;
       });
       const held = ms === null ? null : bankedPoints(take(ctx, ms, inputs), b.rules, b.w, team);
@@ -654,11 +676,14 @@ export const analyzeMatchupTool = defineTool({
         ),
       );
     };
+    const liveRead = { refused: false };
     const liveGot = await withinBudget(
       () => ctx.services.platform.getLiveMatchups(leagueRef(ctx), b.w, readOpts(ctx, args)),
       warnings,
     ).catch((e: unknown) => {
-      if (!isDegradable(e)) throw e;
+      if (!isOptionalReadFailure(e)) throw e;
+      // a refusal is said by the call's session line, never as unavailable (changelog §R11, R11-4)
+      liveRead.refused = sessionRefusalOf(e) !== null;
       return null;
     });
     const liveRows: readonly LiveMatchup[] = liveGot === null ? [] : take(ctx, liveGot, inputs);
@@ -675,7 +700,8 @@ export const analyzeMatchupTool = defineTool({
               opp: oppSide?.projected_live_espn ?? null,
             },
           };
-    if (cross === null) warnings.push("espn:mMatchupScore unavailable: espn_cross_check is null");
+    if (cross === null && !liveRead.refused)
+      warnings.push("espn:mMatchupScore unavailable: espn_cross_check is null");
     await turn();
     const out = await analyzeMatchupWin({
       mode: args.mode,
@@ -774,10 +800,12 @@ async function poolOf(
       ),
     warnings,
   ).catch((e: unknown) => {
-    if (!isDegradable(e)) throw e;
+    if (!isOptionalReadFailure(e)) throw e;
     // an analytics tool that loses an input answers `partial: true` (plan 07 §2 Degradation; Stage C
     // finding `envelope-partial-missing-view-e4-e12`): the "partial:" line, which every caller's flag reads
-    warnings.push(
+    unavailableUnlessRefused(
+      e,
+      warnings,
       "partial: espn:kona_player_info unavailable: no free-agent pool (stream baselines proxied)",
     );
     return null;
@@ -1217,11 +1245,14 @@ export const analyzeScheduleTool = defineTool({
     const reading = readingOf(ctx, "config");
     let alive: { week: Week; p: number }[] | null = null;
     let simPartial = false;
+    const mRead = { refused: false };
     const mGot = await withinBudget(
       () => ctx.services.platform.getMatchups(leagueRef(ctx), readOpts(ctx, args)),
       warnings,
     ).catch((e: unknown) => {
-      if (!isDegradable(e)) throw e;
+      if (!isOptionalReadFailure(e)) throw e;
+      // a refusal is said by the call's session line, never as unavailable (changelog §R11, R11-4)
+      mRead.refused = sessionRefusalOf(e) !== null;
       return null;
     });
     if (mGot !== null) {
@@ -1249,7 +1280,7 @@ export const analyzeScheduleTool = defineTool({
       simPartial = carryOutcome(sim, warnings);
       alive = sim?.data.readings[0]?.p_alive_by_week.map((x) => ({ week: x.week, p: x.p })) ?? null;
     }
-    if (alive === null)
+    if (alive === null && !mRead.refused)
       warnings.push("season simulation unavailable: every week weighted 1 (P(alive) unknown)");
     // the (weak) playoff matchup term: D5's shrunk multipliers for my players' games in the
     // league's playoff weeks still ahead (the block lists them whatever `weeks` analyses)
@@ -1512,12 +1543,15 @@ export const analyzeRosterTool = defineTool({
       p_alive_by_week: { week: Week; p: number }[];
     } | null = null;
     let simPartial = false;
+    const mRead = { refused: false };
     if (args.competing === "auto") {
       const mGot = await withinBudget(
         () => ctx.services.platform.getMatchups(leagueRef(ctx), readOpts(ctx, args)),
         warnings,
       ).catch((e: unknown) => {
-        if (!isDegradable(e)) throw e;
+        if (!isOptionalReadFailure(e)) throw e;
+        // a refusal is said by the call's session line, never as unavailable (R11-4)
+        mRead.refused = sessionRefusalOf(e) !== null;
         return null;
       });
       if (mGot !== null) {
@@ -1544,7 +1578,8 @@ export const analyzeRosterTool = defineTool({
             p_alive_by_week: r0.p_alive_by_week.map((x) => ({ week: x.week, p: x.p })),
           };
       }
-      if (season === null) warnings.push("season simulation unavailable: competing read as yes");
+      if (season === null && !mRead.refused)
+        warnings.push("season simulation unavailable: competing read as yes");
     }
     const deadline = tradeDeadlineWeeks(b.rules.trade, schedule).first_week_after;
     const players: AuditPlayer[] = mine.entries.map((e) => {

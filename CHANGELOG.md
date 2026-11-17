@@ -331,6 +331,21 @@ minor version (plan 04 §4.4; plan 09 K6). One version covers the server, the Sk
 
 ### Fixed
 
+- **Optional reads hid a bug as "unavailable", or failed the call on a session refusal (ruling
+  R11-4; `docs/plan/changelog.md` §R11).** The reads that turned every error into "unavailable" —
+  the seeding evidence's last-season settings, standings, schedule and league; the pro schedule
+  beside the league clock, the scoreboard, the live scoreboard, the box score, the player list and
+  the injuries; the player list's team names; `espn_analyze_lineup`'s standings — now absorb only
+  an outage, a session refusal or a missing fixture (and, as before, a pro schedule past its hard
+  limit); anything else answers `INTERNAL`. The reads that absorbed only an outage — in
+  `espn_analyze_matchup`, `espn_analyze_replacement`, `espn_analyze_waivers`,
+  `espn_analyze_trade`, `espn_analyze_injury_cascade`, `espn_analyze_schedule`,
+  `espn_analyze_roster`, `espn_analyze_evidence`, `espn_get_player_usage`,
+  `espn_get_projections`, `espn_get_player_outlook`, `espn_get_live_scoreboard`'s live view,
+  `espn_list_transactions`' feed and `espn_search_players`' player cards — now also absorb a
+  session refusal, which the call's session line says (`partial: true`, `eff setup`) where the
+  call failed before; a fallback a refusal reaches says what it is served from with "not read",
+  never "unavailable".
 - **`espn_analyze_lineup` flagged a change that cannot gain a coin flip (ruling R11-5;
   `docs/plan/changelog.md` §R11).** A swap whose Δ interval's upper bound is at or below 0 (a
   `[−3, 0]` pair with a ruled-out entrant) read `coin_flip: true` against this week's opponent when

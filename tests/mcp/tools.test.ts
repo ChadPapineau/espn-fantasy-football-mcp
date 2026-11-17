@@ -194,12 +194,21 @@ describe("A4 espn_get_live_scoreboard", () => {
     await c.close();
   });
 
-  it("an outage that is not degradable is the coded error", async () => {
+  it("an error that is neither an outage nor a refusal is the coded error", async () => {
+    const s = faulty(world.services, { getLiveMatchups: coded("VALIDATION") });
+    const c = await connect(world, { services: s });
+    expect((await err("espn_get_live_scoreboard", { week: 3 }, c.client)).code).toBe("VALIDATION");
+    await c.close();
+  });
+
+  it("changelog §R11, R11-4: a refused live view falls back to the season results, said by the session line", async () => {
     const s = faulty(world.services, { getLiveMatchups: coded("ESPN_AUTH_REJECTED") });
     const c = await connect(world, { services: s });
-    expect((await err("espn_get_live_scoreboard", { week: 3 }, c.client)).code).toBe(
-      "ESPN_AUTH_REJECTED",
-    );
+    const e = await ok("espn_get_live_scoreboard", { week: 3 }, c.client);
+    expect(e.partial).toBe(true);
+    expect(e.warnings).toContain("live totals and win probability not read: season results only");
+    expect(e.warnings.some((w) => w.endsWith("in a terminal to replace it"))).toBe(true);
+    expect(e.warnings.some((w) => w.includes("unavailable: season results only"))).toBe(false);
     await c.close();
   });
 });
@@ -333,10 +342,15 @@ describe("A6 espn_list_transactions", () => {
     await c.close();
   });
 
-  it("cookies required on a private league with none stored: the coded error", async () => {
+  it("cookies required on a private league with none stored: the stored history, said by the session line (R11-4)", async () => {
     const s = faulty(world.services, { listTransactions: coded("ESPN_REQUIRES_COOKIES") });
     const c = await connect(world, { services: s });
-    expect((await err("espn_list_transactions", {}, c.client)).code).toBe("ESPN_REQUIRES_COOKIES");
+    const e = await ok("espn_list_transactions", {}, c.client);
+    expect(e.partial).toBe(true);
+    expect(e.warnings).toContain(
+      "espn:mTransactions2 not read: served from the server's persisted history (stale)",
+    );
+    expect(e.warnings.some((w) => w.endsWith("in a terminal to add one"))).toBe(true);
     await c.close();
   });
 

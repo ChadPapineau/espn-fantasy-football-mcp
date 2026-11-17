@@ -46,7 +46,6 @@ import {
   canonicalPosition,
   crosswalkOf,
   datasetInput,
-  isDegradable,
   isOptionalReadFailure,
   leagueOf,
   leagueRef,
@@ -60,6 +59,9 @@ import {
   weekOf,
   withinBudget,
   jerseyOf,
+  optionalOrThrow,
+  optionalDatasetOrThrow,
+  fallbackWarning,
 } from "./common.js";
 import { isoNull, playerSearchRow, week } from "./schemas.js";
 
@@ -79,7 +81,10 @@ async function teamNames(
     if (got === null) return new Map();
     const st = take(ctx, got, inputs);
     return new Map(st.teams.map((t) => [t.team_id, t.name]));
-  } catch {
+  } catch (e) {
+    // the names are an extra: an outage or a refusal goes without them; a bug is INTERNAL
+    // (changelog §R11, R11-4)
+    optionalOrThrow(e);
     return new Map();
   }
 }
@@ -283,8 +288,10 @@ export const searchPlayers = defineTool({
         return searchRow(ctx, p, p.on_team_id === null ? null : (names.get(p.on_team_id) ?? null));
       });
     } catch (e) {
-      if (!isDegradable(e)) throw e;
-      warnings.push("espn:kona_player_info unavailable: identity only (status null)");
+      // an outage or a session refusal (said by the session line) falls back; a bug is INTERNAL
+      // (changelog §R11, R11-4)
+      if (!isOptionalReadFailure(e)) throw e;
+      warnings.push(fallbackWarning(e, "espn:kona_player_info", "identity only (status null)"));
       rows = hits.map((h) => identityRow(ctx, h));
     }
     return {
@@ -458,7 +465,9 @@ export const listPlayers = defineTool({
         next_offset: v.next_offset,
       };
     } catch (e) {
-      if (!isDegradable(e)) throw e;
+      // an outage or a session refusal (said by the session line) falls back to the snapshot; a bug
+      // is INTERNAL (changelog §R11, R11-4)
+      if (!isOptionalReadFailure(e)) throw e;
       const snap = ctx.services.poolSnapshots.latestTwo()[0];
       // the week asked and younger than a scoring period (never a previous season's pool), and
       // past the in-week pool's 24 h hard limit only as the cache path serves an expired entry
@@ -491,7 +500,11 @@ export const listPlayers = defineTool({
       };
       inputs.push(input);
       warnings.push(
-        `espn:kona_player_info unavailable: served from the week ${String(w)} pool snapshot taken ${snap.taken_at} (stale)`,
+        fallbackWarning(
+          e,
+          "espn:kona_player_info",
+          `served from the week ${String(w)} pool snapshot taken ${snap.taken_at} (stale)`,
+        ),
       );
     }
     if (args.sort === "name") warnings.push(PLAYER_LIST_WARNINGS.name_sort_page_only);
@@ -500,7 +513,7 @@ export const listPlayers = defineTool({
     const sched = await withinBudget(
       () => scheduleOf(ctx, league.ref.season, inputs),
       warnings,
-    ).catch(() => null);
+    ).catch(optionalDatasetOrThrow);
     const names = players.some((p) => p.on_team_id !== null)
       ? await teamNames(ctx, inputs, warnings)
       : new Map<number, UntrustedText>();

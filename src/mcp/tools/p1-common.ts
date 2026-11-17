@@ -61,7 +61,6 @@ import {
   type Subject,
 } from "./analytics.js";
 import {
-  isDegradable,
   leagueOf,
   leagueRef,
   optionalDataset,
@@ -74,6 +73,8 @@ import {
   take,
   weekOf,
   withinBudget,
+  isOptionalReadFailure,
+  sessionRefusalOf,
   type RosReading,
 } from "./common.js";
 import { V2_BULK_SIMS } from "./projection-v2.js";
@@ -502,15 +503,23 @@ export async function playoffAliveOf(
   },
   inputs: InputStamp[],
   warnings: string[],
-): Promise<{ readonly alive: Readonly<Record<string, number>> | null; readonly partial: boolean }> {
+): Promise<{
+  readonly alive: Readonly<Record<string, number>> | null;
+  readonly partial: boolean;
+  /** The matchups read was one the session refused: the call's session line says it (R11-4). */
+  readonly refused: boolean;
+}> {
+  let refused = false;
   const mGot = await withinBudget(
     () => ctx.services.platform.getMatchups(leagueRef(ctx), readOpts(ctx, o.args ?? {})),
     warnings,
   ).catch((e: unknown) => {
-    if (!isDegradable(e)) throw e;
+    // an outage, or a refusal the session line says; a bug is INTERNAL (changelog §R11, R11-4)
+    if (!isOptionalReadFailure(e)) throw e;
+    refused = sessionRefusalOf(e) !== null;
     return null;
   });
-  if (mGot === null) return { alive: null, partial: false };
+  if (mGot === null) return { alive: null, partial: false, refused };
   const sim = await runSeason(ctx, {
     league: o.league,
     rules: o.rules,
@@ -529,7 +538,7 @@ export async function playoffAliveOf(
   const alive: Record<string, number> = {};
   for (const x of sim?.data.readings[0]?.p_alive_by_week ?? [])
     if (playoff.has(x.week)) alive[String(x.week)] = x.p;
-  return { alive: Object.keys(alive).length === 0 ? null : alive, partial };
+  return { alive: Object.keys(alive).length === 0 ? null : alive, partial, refused };
 }
 
 // --- NFL team spellings ----------------------------------------------------------------------------

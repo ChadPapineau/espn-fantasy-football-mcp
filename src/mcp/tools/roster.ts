@@ -32,7 +32,6 @@ import { EffError } from "../errors.js";
 import { defineTool, type ToolContext } from "../define.js";
 import {
   crosswalkOf,
-  isDegradable,
   isOptionalReadFailure,
   leagueOf,
   leagueRef,
@@ -48,6 +47,7 @@ import {
   teamOf,
   weekOf,
   withinBudget,
+  fallbackWarning,
 } from "./common.js";
 import {
   count,
@@ -284,7 +284,9 @@ export async function rostersOf(
     const got = await ctx.services.platform.getRosters(leagueRef(ctx), w, readOpts(ctx, args));
     return take(ctx, got, inputs);
   } catch (e) {
-    if (!isDegradable(e) || fallbackTeam === null) throw e;
+    // an outage or a session refusal (said by the session line) falls back to the snapshot; a bug
+    // is INTERNAL (changelog §R11, R11-4)
+    if (!isOptionalReadFailure(e) || fallbackTeam === null) throw e;
     const snap = ctx.services.rosterSnapshots.latestTwo(fallbackTeam)[0];
     // the week it names and younger than a scoring period (never another season's week w), and
     // past mRoster's hard limit only as the cache path serves an expired entry (Stage C finding
@@ -296,7 +298,11 @@ export async function rostersOf(
     if (input === null || snap === undefined) throw e;
     inputs.push(input);
     warnings.push(
-      `espn:mRoster unavailable: served from the week ${String(w)} roster snapshot taken ${snap.taken_at} (stale)`,
+      fallbackWarning(
+        e,
+        "espn:mRoster",
+        `served from the week ${String(w)} roster snapshot taken ${snap.taken_at} (stale)`,
+      ),
     );
     return [snap.roster];
   }
@@ -396,7 +402,7 @@ export const getRoster = defineTool({
       () => scheduleOf(ctx, league.ref.season, inputs, args.allow_stale === true),
       warnings,
     ).catch((e: unknown) => {
-      if (!isDegradable(e)) throw e;
+      if (!isOptionalReadFailure(e)) throw e;
       return null;
     });
     if (sched === null) warnings.push("pro schedule unavailable: kickoffs and lock times unknown");

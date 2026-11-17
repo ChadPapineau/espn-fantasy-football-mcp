@@ -40,7 +40,6 @@ import { EffError } from "../errors.js";
 import { defineTool, type ToolContext } from "../define.js";
 import {
   crosswalkOf,
-  isDegradable,
   isOptionalReadFailure,
   sessionRefusalOf,
   leagueOf,
@@ -53,6 +52,8 @@ import {
   take,
   weekOf,
   withinBudget,
+  fallbackWarning,
+  unavailableUnlessRefused,
 } from "./common.js";
 import { rostersOf } from "./roster.js";
 import {
@@ -416,8 +417,12 @@ export const getProjections = defineTool({
       );
       native = got === null ? null : take(ctx, got, inputs);
     } catch (e) {
-      if (!isDegradable(e)) throw e;
-      warnings.push("espn:kona_player_info unavailable: the last espn_projection snapshot (stale)");
+      // an outage or a session refusal (said by the session line) falls back to the snapshots; a
+      // bug is INTERNAL (changelog §R11, R11-4)
+      if (!isOptionalReadFailure(e)) throw e;
+      warnings.push(
+        fallbackWarning(e, "espn:kona_player_info", "the last espn_projection snapshot (stale)"),
+      );
     }
     const split = args.horizon === "week" ? "weekly" : args.horizon;
     // the snapshots of this horizon: a weekly split is filed under its week, a ROS or preseason
@@ -622,10 +627,14 @@ export const getPlayerOutlook = defineTool({
       );
       if (got !== null) outlooks = take(ctx, got, inputs);
     } catch (e) {
-      if (!isDegradable(e)) throw e;
+      // an outage, or a refusal the session line says (partial, never "unavailable"); a bug is
+      // INTERNAL (changelog §R11, R11-4)
+      if (!isOptionalReadFailure(e)) throw e;
       // the paragraphs ARE the answer: their absence makes it partial (Stage C finding
       // `envelope-partial-missing-view-e4-e12`; the "partial:" line convention of plan 07 §2)
-      warnings.push(
+      unavailableUnlessRefused(
+        e,
+        warnings,
         "partial: espn:kona_player_info unavailable: the ESPN outlook paragraphs are missing (espn_get_news has headlines)",
       );
     }

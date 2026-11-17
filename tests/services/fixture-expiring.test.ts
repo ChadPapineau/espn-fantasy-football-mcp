@@ -81,6 +81,24 @@ const credOf = async (c: Client) => {
 };
 
 /**
+ * espn_list_transactions with its feed refused (changelog §R11, R11-4: an outage-only fallback read
+ * gained the refusal branch): the stored history, `partial: true`, the refusal said by the call's
+ * session line — never the call's error.
+ */
+function historyServed(
+  r: { isError?: boolean; body: Record<string, unknown> },
+  label: string,
+): void {
+  expect(r.isError, `${label} ${JSON.stringify(r.body).slice(0, 200)}`).toBe(false);
+  const b = r.body as { partial?: boolean; warnings?: string[] };
+  expect(b.partial, label).toBe(true);
+  expect(
+    (b.warnings ?? []).some((w) => w.endsWith("in a terminal to replace it")),
+    `${label} ${JSON.stringify(b.warnings)}`,
+  ).toBe(true);
+}
+
+/**
  * One world (store) for a variant, and its first server: with `seed`, the seed's process, started
  * as build-plugin-evals starts it (EFF_FIXTURE_SEED=1, changelog §R10, R10-33); without, a run's.
  */
@@ -357,6 +375,10 @@ describe("R10-28 over stdio: status stored → a cached read served → the firs
         ["espn_analyze_schedule", {}],
       ] as const) {
         const r = await call(run.client, tool, args);
+        if (tool === "espn_list_transactions") {
+          historyServed(r, tool);
+          continue;
+        }
         expect(r.isError, `${tool} ${JSON.stringify(r.body).slice(0, 200)}`).toBe(true);
         expect(codeOf(r.body), tool).toBe("ESPN_AUTH_REJECTED");
         expect(errOf(r.body).reason, tool).toBe("short_circuit");
@@ -415,7 +437,13 @@ describe("R10-33 over stdio: on the eval run's server an accepting espn_check_au
     await s.close();
   });
 
-  const rejectedAfter = async (c: Client, label: string): Promise<void> => {
+  // `settingsCached`: the league settings are fresh in the store, so espn_list_transactions' first
+  // refused read is its feed (the history served, R11-4); else its settings read short-circuits
+  const rejectedAfter = async (
+    c: Client,
+    label: string,
+    settingsCached: boolean,
+  ): Promise<void> => {
     const cred = await credOf(c);
     expect(cred.state, label).toBe("rejected");
     expect(cred.last_rejected_at, label).not.toBeNull();
@@ -426,6 +454,10 @@ describe("R10-33 over stdio: on the eval run's server an accepting espn_check_au
       ["espn_get_roster", { week: 5 }],
     ] as const) {
       const r = await call(c, tool, args);
+      if (tool === "espn_list_transactions" && settingsCached) {
+        historyServed(r, `${label} ${tool}`);
+        continue;
+      }
       expect(r.isError, `${label} ${tool} ${JSON.stringify(r.body).slice(0, 200)}`).toBe(true);
       expect(codeOf(r.body), `${label} ${tool}`).toBe("ESPN_AUTH_REJECTED");
       expect(errOf(r.body).reason, `${label} ${tool}`).toBe("short_circuit");
@@ -445,7 +477,7 @@ describe("R10-33 over stdio: on the eval run's server an accepting espn_check_au
     expect(codeOf(lg.body)).toBe("ESPN_AUTH_REJECTED");
     expect(errOf(lg.body).upstream_status).toBe(401);
     expect(errOf(lg.body).reason).toBeUndefined();
-    await rejectedAfter(s.client, "unseeded run");
+    await rejectedAfter(s.client, "unseeded run", false);
     expect(s.requests()).toBe(0);
     expect(JSON.stringify(lg.body)).not.toMatch(COOKIE_WORDS);
   });
@@ -477,7 +509,7 @@ describe("R10-33 over stdio: on the eval run's server an accepting espn_check_au
       expect(st.isError, JSON.stringify(st.body).slice(0, 300)).toBe(true);
       expect(codeOf(st.body)).toBe("ESPN_AUTH_REJECTED");
       expect(errOf(st.body).upstream_status).toBe(401);
-      await rejectedAfter(run.client, "seeded run");
+      await rejectedAfter(run.client, "seeded run", true);
       // the settings stay fresh: still served under the rejected label; nothing was sent
       expect((await call(run.client, "espn_get_league", {})).isError).toBe(false);
       expect(s.requests()).toBe(n);
@@ -531,11 +563,10 @@ describe("R10-33 over stdio: the seed's path (EFF_FIXTURE_SEED=1) — reads serv
       }
       expect((await credOf(run.client)).state).toBe("stored");
       expect(s.requests()).toBe(n);
-      // and its 401 is armed: the first read the cache does not serve
+      // and its 401 is armed: the first read the cache does not serve (the feed: met as ESPN's 401,
+      // the stored history served, said by the session line — R11-4), the label rejected after it
       const tx = await call(run.client, "espn_list_transactions", { count: 20 });
-      expect(tx.isError, JSON.stringify(tx.body).slice(0, 300)).toBe(true);
-      expect(codeOf(tx.body)).toBe("ESPN_AUTH_REJECTED");
-      expect(errOf(tx.body).upstream_status).toBe(401);
+      historyServed(tx, "espn_list_transactions");
       expect((await credOf(run.client)).state).toBe("rejected");
       expect(s.requests()).toBe(n);
     } finally {

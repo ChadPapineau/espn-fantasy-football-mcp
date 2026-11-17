@@ -52,7 +52,6 @@ import {
   crosswalkOf,
   espnIdOfGsis,
   espnIdOfGsisSelector,
-  isDegradable,
   isOptionalReadFailure,
   unavailableUnlessRefused,
   leagueOf,
@@ -253,8 +252,13 @@ export const getPlayerUsage = defineTool({
     const league = await leagueOf(ctx, inputs, args);
     const w = weekOf(league, undefined);
     const settings = await settingsOf(ctx, inputs).catch((e: unknown) => {
-      if (!isDegradable(e)) throw e;
-      warnings.push("scoring settings unavailable: points_league, xfp_ep and xfp_gap are null");
+      // an outage, or a refusal the session line says; a bug is INTERNAL (changelog §R11, R11-4)
+      if (!isOptionalReadFailure(e)) throw e;
+      unavailableUnlessRefused(
+        e,
+        warnings,
+        "scoring settings unavailable: points_league, xfp_ep and xfp_gap are null",
+      );
       return null;
     });
     const sel = await selectPlayers(
