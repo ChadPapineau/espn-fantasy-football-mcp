@@ -95,6 +95,17 @@ export const SYNTHETIC_OUTLOOKS = Object.freeze({
 export const SUNDAY_LIVE_WIN_PROBABILITY_ESPN = 0.75;
 
 /**
+ * td-inflated's player (plan 09 §3.8 WV-2: a touchdown-inflated candidate, a strongly negative
+ * `xfp_gap`; the round-4 refix's VS-8): Jakobi Meyers, Team 05's bench WR, whose weeks 1–3 points
+ * under the league's scoring ran 13.48 ahead of ffopportunity's expected points (`xfp_gap_sum`
+ * −13.483 over 3 games in the committed usage excerpts: touchdown luck, the mirror of E5's
+ * +2-a-game `xfp_gap` signal). The variant drops him into the week-5 waiver pool, where his recent
+ * points top every candidate with usage while his rest-of-season value does not: a reply that
+ * ranks by recent points makes him the top target (tests/skills/wv2-td-inflated.test.ts).
+ */
+export const TD_INFLATED = Object.freeze({ playerId: 3916433, teamId: 5 });
+
+/**
  * How long after its kickoff a game of the variant clock counts as final (statsOfficial): a game
  * runs about three and a half hours, so the 09:30 ET London game is over at sunday-live's 14:05 ET
  * while the 13:00 ET games are under way (round 2's eval-case triage: no game was final on
@@ -635,6 +646,28 @@ export const VARIANTS: readonly Variant[] = [
       const s = pick(starters(m), (x) => positionOf(m, x.playerId) === 2, "Team 02's RB");
       m.weeklyOutlook.set(s.playerId, { [String(CURRENT_WEEK)]: SYNTHETIC_OUTLOOKS.moreWork });
       m.notes.push(`player ${String(s.playerId)}: a synthetic week-5 outlook (role: more work)`);
+    },
+  },
+  {
+    name: "td-inflated",
+    describes:
+      "plan 09 §3.8 WV-2: Team 05 drops a bench WR whose weeks 1–3 points ran ahead of his expected points (touchdown luck, a strongly negative xfp_gap) into the week-5 waiver pool",
+    mutate: (m) => {
+      const { playerId, teamId }: { playerId: number; teamId: number } = TD_INFLATED;
+      if (teamId === MY_TEAM_ID)
+        throw new FixtureGenError("fx-10h: td-inflated's player must be another team's");
+      const seats = m.rosters.get(CURRENT_WEEK)?.get(teamId);
+      const at = seats?.findIndex((s) => s.playerId === playerId) ?? -1;
+      if (seats === undefined || at < 0 || seats[at]?.lineupSlotId !== SLOT.BE)
+        throw new FixtureGenError(
+          `fx-10h: player ${String(playerId)} is not on Team ${String(teamId)}'s week-5 bench`,
+        );
+      if (!eligible(m.players, playerId).includes(SLOT.FLEX))
+        throw new FixtureGenError(`fx-10h: player ${String(playerId)} is not FLEX-eligible`);
+      seats.splice(at, 1);
+      m.notes.push(
+        `player ${String(playerId)}: dropped from Team ${String(teamId).padStart(2, "0")}'s week-5 bench into the waiver pool (${m.poolStatus})`,
+      );
     },
   },
   {

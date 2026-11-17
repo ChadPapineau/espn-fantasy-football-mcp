@@ -59,7 +59,7 @@ Run Step 0 of [orient](references/orient.md). Note `rules.waiver.uses_budget`, `
 
 ## Output additions (the usage branch and FAAB — P1, under `full`)
 - **P1:** each candidate's `signals[]` — `snap_jump`, `target_share_jump`, `xfp_gap`, `rz_shift`, `depth_chart`, `injury_cascade`, `implied_total` — each with its numeric `evidence`, strongest first. `percent_change` is never a signal: it says who else will claim, not who is good.
-- **P1:** a candidate whose points ran ahead of his expected points (`xfp_gap` strongly negative — touchdown luck) is flagged and never the top target on points alone; one whose expected points run ahead of his scoring is the opposite case.
+- **P1:** a candidate whose points ran ahead of his expected points (`xfp_gap` strongly negative: his points 2 or more a game above his expected points over the usage window, from `espn_get_player_usage` — the mirror of E5's `xfp_gap` signal, which `signals[]` never carries — touchdown luck) is flagged with that number and never the top target on points alone; one whose expected points run ahead of his scoring is the opposite case.
 - **P1:** the **Value basis** line reads "this server's usage-based ensemble, ESPN's projection beside it" while `value_basis` is `ensemble` — the `Π` rule and the band are unchanged.
 - **P1:** in a FAAB league (`mode_used: faab`): the bid curve — `faab.b_star` (the bid), `p_win_curve[]` (the chance each bid wins), `lambda` (the value of a dollar kept) and `dollars_per_point` with its sample size — the reserve question only when `lambda` is near zero, and no premium or claim-order language (that is the priority league's).
 

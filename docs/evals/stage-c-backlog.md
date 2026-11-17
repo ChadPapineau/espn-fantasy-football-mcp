@@ -1116,7 +1116,12 @@ round 3's eval-case triage is built.
   they stay out for the listing's room.
 - **WV-2's touchdown branch has no candidate.** Plan 09 §3.8's WV-2 flags a candidate with a strongly
   negative `xfp_gap`; on the base pool no detailed candidate carries a usage signal, so the case grades
-  the no-signal branch only. A variant with such a candidate would test the flag.
+  the no-signal branch only. A variant with such a candidate would test the flag. **Closed** by the
+  round-4 refix (VS-8): the variant `td-inflated` drops a rival's bench WR (`xfp_gap_sum` −13.48
+  over 3 games, the most recent points of any candidate with usage) into the waiver pool, below the
+  waivers tool's top by surplus; WV-2 runs on it with plan 09's line (flagged, not the top target),
+  WV-8 keeps the no-signal branch on the base pool, and `tests/skills/wv2-td-inflated.test.ts`
+  holds the fixture to both through the tools.
 - **NC-3's and NC-4-E's flags.** Plan 09 §3.13 names `quiet_role_change` (NC-3) and
   `unconfirmed_narrative` (NC-4-E). On the fixture NC-3 reads `no_claim`, and NC-4-E's expected
   output names no flag, so neither PASS-if line names one.

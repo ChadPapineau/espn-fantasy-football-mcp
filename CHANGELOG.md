@@ -309,6 +309,14 @@ minor version (plan 04 §4.4; plan 09 K6). One version covers the server, the Sk
   tool's `phase: mid`; AP-INJ asks for no flag line the server never raises on a player name, and
   its earlier turn quotes the name as the fixture lists it; WK-1's `as_of` grader needs a date or a
   time; SC-7-E's replayed Skill text opens with its base directory, the eval plugin's copy.
+- **WV-2 on a touchdown-inflated candidate (plan 09 §3.8; ruling R11-3).** A new `fx-10h` variant,
+  `td-inflated`, drops a rival's bench WR whose weeks 1–3 points ran 13.48 ahead of his expected
+  points into the week-5 waiver pool: his recent points top every candidate with usage, while the
+  waivers tool ranks him below its detailed candidates. WV-2 runs on it (the reply flags him with
+  his `xfp_gap` and does not make him the top target), and a new case, WV-8, keeps the no-signal
+  branch on the base pool. waivers gives a strongly negative `xfp_gap` its size: 2 or more points a
+  game over the usage window, read from `espn_get_player_usage`, since `signals[]` carries only the
+  positive gap.
 - **Dependencies, reviewed under plan 04 §2 (Dependabot PRs 1–5, 2026-11-04 to 2026-11-05; ruling
   R10-35).** The MCP SDK 2.3.1 → 2.4.0 (`@modelcontextprotocol/server` and `core`, and the dev
   `client`; `espn_get_status` reports `sdk_version` 2.4.0): 2.4.0 adds the Skills extension on new

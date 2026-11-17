@@ -283,8 +283,9 @@ describe("round 3's eval-case rubrics state what the fixture gives (each PASS-if
     expect(c.expected_output).not.toMatch(/carries no flag/);
     expect(llmLine(c, "The reply quotes the outlook")).toMatch(/espn\.player\.season_outlook/);
   });
-  it("WV-2: the one branch this pool gives", () => {
-    const c = caseOf("waivers", "WV-2");
+  it("WV-8: WV-2's no-signal branch, on the base pool (WV-2 itself is on td-inflated: VS-8)", () => {
+    const c = caseOf("waivers", "WV-8");
+    expect(c.files).toEqual(["evals/fixtures/fx-10h"]);
     const line = c.expectations.find(
       (x) => x.includes("usage branch found none") && x.includes("(llm)"),
     );

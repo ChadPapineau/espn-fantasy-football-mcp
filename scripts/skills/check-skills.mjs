@@ -766,6 +766,11 @@ export const ROUND3_FIXED = Object.freeze({
       // WV-4-E: the scramble list also when every candidate is a claim
       scrambleAlways:
         "printed always — also when every candidate is a claim, since a claim can fail",
+      // WV-2 and WV-8 (the round-4 refix's VS-8): "strongly negative" has a size, E5's xfp_gap
+      // signal mirrored, read from the usage tool — the waivers tool's signals[] carry only the
+      // positive gap
+      tdInflated:
+        "a candidate whose points ran ahead of his expected points (`xfp_gap` strongly negative: his points 2 or more a game above his expected points over the usage window, from `espn_get_player_usage` — the mirror of E5's `xfp_gap` signal, which `signals[]` never carries — touchdown luck) is flagged with that number and never the top target on points alone",
     },
   },
   "injury-cascade": {
@@ -1490,8 +1495,20 @@ export const SKILL_RULES = /** @type {Readonly<Record<string, SkillRule>>} */ (
       prefix: "WV",
       kinds: ["waiver"],
       records: true,
-      requiredCases: ["WV-1", "WV-2", "WV-3-E", "WV-4-E", "WV-5-E", "WV-6-E", "WV-7-E", "WV-INJ"],
-      p1Cases: ["WV-2", "WV-3-E"],
+      // WV-8: WV-2's no-signal branch on the base pool, WV-2 itself on td-inflated (the round-4
+      // refix's VS-8: plan 09 §3.8's touchdown-inflated candidate)
+      requiredCases: [
+        "WV-1",
+        "WV-2",
+        "WV-3-E",
+        "WV-4-E",
+        "WV-5-E",
+        "WV-6-E",
+        "WV-7-E",
+        "WV-8",
+        "WV-INJ",
+      ],
+      p1Cases: ["WV-2", "WV-3-E", "WV-8"],
       body: [
         /marginal/,
         /premium_band/,

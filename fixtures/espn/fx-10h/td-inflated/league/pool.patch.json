@@ -1,0 +1,4 @@
+[
+  { "op": "replace", "path": ["entries", 97, "onTeamId"], "value": 0 },
+  { "op": "replace", "path": ["entries", 97, "status"], "value": "WAIVERS" }
+]
