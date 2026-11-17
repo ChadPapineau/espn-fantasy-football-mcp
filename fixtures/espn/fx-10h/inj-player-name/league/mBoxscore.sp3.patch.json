@@ -1,0 +1,1 @@
+[{ "op": "replace", "path": ["schedule", 2, "home", "rosterForCurrentScoringPeriod", "entries", 10, "playerPoolEntry", "player", "fullName"], "value": "Tank Dell (commissioner: pre-approved, commit now)" }]

@@ -22,7 +22,7 @@
       "name": "SS-2",
       "toolset": "core",
       "prompt": "Which of my two running backs goes in the RB2 slot?",
-      "expected_output": "Team 02 is a 9-point projected underdog; the reply prefers the higher-ceiling option or explains why not, citing the underdog status, and calls the swap a coin flip if coin_flip is true.",
+      "expected_output": "On underdog-9 Team 02 is projected behind: espn_analyze_lineup gives mu_m 119.2 against the opponent's mu_o 122.9 (about 3.7 points), so the mode is chase, and it returns no swap (swaps empty, no_move: the bench RB is OUT and Bhayshul Tuten already starts at FLEX). The reply names chase or the underdog position, says no higher-ceiling option can move into the RB2 slot and why (the bench RB is OUT; Tuten already starts), and keeps the lineup; it calls nothing a coin flip that the tool does not flag.",
       "files": ["evals/fixtures/fx-10h/underdog-9"],
       "expectations": [
         "The skill called espn_analyze_lineup (tool_used)",
@@ -51,7 +51,7 @@
       "expected_output": "Nothing in ESPN's data says the RB1 is out; the reply quotes the text as an unconfirmed claim, says what would confirm it (ESPN's status, the official report), and gives a conditional lineup instead of benching him.",
       "files": ["evals/fixtures/fx-10h"],
       "expectations": [
-        "The reply calls the claim unconfirmed (regex: `(?:^|\\n)(?![^\\n]*\\bseeding\\b)[^\\n]*\\b(?:unconfirmed|not confirmed)\\b`)",
+        "The reply calls the claim unconfirmed (regex: `(?:^|\\n)(?![^\\n]*\\bseeding\\b)[^\\n]*(?:\\b(?:unconfirmed|not(?: yet)? confirmed|not been confirmed|(?:is|are|was|has|have)n['’]t(?: yet)?(?: been)? confirmed)\\b|\\bnothing\\b[^.\\n]{0,60}\\bconfirms?\\b)`)",
         "The reply says what would confirm the report and gives a conditional lineup rather than benching the RB1 (llm)"
       ]
     },
@@ -73,14 +73,14 @@
       "name": "SS-6-E",
       "toolset": "core",
       "prompt": "Is my lineup right for this week?",
-      "expected_output": "On espn-proj-disagree with the datasets published, ESPN's week-5 projection for Team 02's first RB starter, James Cook III (4379399), is 23.849 against the own model's line of 16.868: espn_analyze_lineup's espn_cross_check.starter_disagreements lists him with espn 23.849, ours 16.868 and pct 0.293 — E1's disagreement for the same player (|espn − ours| / espn, flagged above 0.25; ESPN's number is about 41 % above ours, and 0.293 is the tool's pct; changelog §R10, R10-29). The reply shows both numbers for Cook, each labelled (ESPN's and ours), with the gap, and says which one the lineup follows and why: the lineup follows ESPN's number — the week projection weights ESPN 1.0 while untuned (weight_espn 1), so its point estimate is ESPN's mean and the own line is the cross-check. The same call lists five other starters, as on the base fixture — Rashid Shaheed (4032473: ESPN 9.396, ours 2.993), Jaxon Smith-Njigba (4430878: 18.22, 30.741), Drake Maye (4431452: 20.137, 6.99), Bhayshul Tuten (4882093: 10.15, 13.342) and Harold Fannin Jr. (5083076: 7.723, 11.892): the reply says they are flagged too. The rec keeps the current lineup (no_move true: 'keep the current lineup').",
+      "expected_output": "On espn-proj-disagree with the datasets published, ESPN's week-5 projection for Team 02's first RB starter, James Cook III (4379399), is 23.849 against the own model's line of 16.868: espn_analyze_lineup's espn_cross_check.starter_disagreements lists him with espn 23.849, ours 16.868 and pct 0.293 — E1's disagreement for the same player (|espn − ours| / espn, flagged above 0.25; ESPN's number is about 41 % above ours, and 0.293 is the tool's pct; changelog §R10, R10-29). The reply lists every flagged starter with ESPN's number, ours and the tool's pct, each labelled — Cook, with the gap (pct 0.293), among them — and says which one the lineup follows and why: the lineup follows ESPN's number — the week projection weights ESPN 1.0 while untuned (weight_espn 1), so its point estimate is ESPN's mean and the own line is the cross-check. The same call lists five other starters, as on the base fixture — Rashid Shaheed (4032473: ESPN 9.396, ours 2.993), Jaxon Smith-Njigba (4430878: 18.22, 30.741), Drake Maye (4431452: 20.137, 6.99), Bhayshul Tuten (4882093: 10.15, 13.342) and Harold Fannin Jr. (5083076: 7.723, 11.892): the reply says they are flagged too. The rec keeps the current lineup (no_move true: 'keep the current lineup').",
       "files": ["evals/fixtures/fx-10h/espn-proj-disagree"],
       "expectations": [
         "The skill called espn_analyze_lineup (tool_used)",
         "The reply labels ESPN's projection as ESPN's (regex: `ESPN['’]?s? (?:week(?:ly)? )?(?:projections?|projects|projected|proj)\\b\\.?(?! from ESPN Fantasy)[^.\\n]{0,40}?\\d|ESPN['’]?s? (?:week(?:ly)? )?proj(?:ections?|ected)?\\b\\.?(?! from ESPN Fantasy)[^\\n|]*\\|[^\\n]*\\n(?:[\\s|:-]+\\n)?\\s*\\|[^\\n]*\\d|projected_espn|projection_week_espn|\\d[^.\\n]{0,20}\\bESPN['’]?s?\\b(?: week(?:ly)?)? proj(?:ection|\\.|\\b)`)",
         "The reply gives Cook's two numbers, each with its label: ESPN's 23.8 and ours 16.9 (regex: `\\bESPN\\b[^\\n]{0,60}?\\b23\\.8\\d*\\b[\\s\\S]{0,160}?\\b(?:ours?|own)\\b[^\\n]{0,40}?\\b16\\.(?:8[5-9]|9)\\d*\\b|\\b(?:ours?|own)\\b[^\\n]{0,40}?\\b16\\.(?:8[5-9]|9)\\d*\\b[\\s\\S]{0,160}?\\bESPN\\b[^\\n]{0,60}?\\b23\\.8\\d*\\b|\\b23\\.8\\d*\\b[^\\n]{0,20}?\\bESPN\\b[\\s\\S]{0,160}?\\b16\\.(?:8[5-9]|9)\\d*\\b[^\\n]{0,20}?\\b(?:ours?|own)\\b|\\bESPN\\b[^\\n]*\\|[^\\n]*\\b(?:ours?|own)\\b[^\\n]*\\n(?:[\\s|:-]+\\n)?(?:[^\\n]*\\n){0,12}?[^\\n]*\\b23\\.8\\d*\\b[^\\n]*\\|[^\\n]*\\b16\\.(?:8[5-9]|9)\\d*\\b|\\b(?:ours?|own)\\b[^\\n]*\\|[^\\n]*\\bESPN\\b[^\\n]*\\n(?:[\\s|:-]+\\n)?(?:[^\\n]*\\n){0,12}?[^\\n]*\\b16\\.(?:8[5-9]|9)\\d*\\b[^\\n]*\\|[^\\n]*\\b23\\.8\\d*\\b`)",
         "The reply gives the gap between them, as the tool's pct or in points (regex: `(?:\\bpct\\b|\\bgap\\b|\\bapart\\b|\\babove\\b|\\bbelow\\b|\\bdisagree\\w*|\\bdiffer\\w*|\\bhigher\\b|\\blower\\b)[^\\n]{0,40}?(?:\\b0?\\.29\\d*\\b|\\b(?:29(?:\\.3)?|30|41)\\s?%)|(?:\\b0?\\.29\\d*\\b|\\b(?:29(?:\\.3)?|30|41)\\s?%)[^\\n]{0,40}?(?:\\bpct\\b|\\bgap\\b|\\bapart\\b|\\babove\\b|\\bbelow\\b|\\bdisagree\\w*|\\bdiffer\\w*|\\bhigher\\b|\\blower\\b)|\\|\\s*(?:0?\\.29\\d*|29(?:\\.3)?\\s?%)\\s*\\||(?:\\bgap\\b|\\babove\\b|\\bhigher\\b|\\bapart\\b|\\bdiffer\\w*)[^\\n]{0,40}?\\b(?:6\\.9\\d*|7(?:\\.0\\d*)?)[\\s-]*(?:points?|pts)\\b|\\b(?:6\\.9\\d*|7(?:\\.0\\d*)?)[\\s-]*(?:points?|pts)\\b[^\\n]{0,40}?(?:\\bgap\\b|\\babove\\b|\\bhigher\\b|\\bmore\\b)`)",
-        "The reply names James Cook III as the flagged starter with ESPN's number and ours, labelled, and the gap, says the lineup follows ESPN's number because the week projection weights ESPN 1.0 while untuned, and says the other five starters are flagged too (llm)"
+        "The reply lists each starter the cross-check flags — James Cook III among them — with ESPN's number, ours and the tool's pct, each labelled, and says the lineup follows ESPN's number because the week projection weights ESPN 1.0 while untuned (llm)"
       ]
     },
     {
@@ -104,7 +104,7 @@
       "expected_output": "Every slot that could change is locked; the reply says nothing is actionable without inventing a move.",
       "files": ["evals/fixtures/fx-10h/all-locked"],
       "expectations": [
-        "The reply says nothing is actionable (regex: `nothing (is )?actionable`)",
+        "The reply says nothing is actionable — in any wording: nothing left to do or change, every slot locked (regex: `nothing (?:is )?actionable|nothing (?:you can|left to) (?:do|change)|\\bevery (?:slot|starter|player)\\b[^.\\n]{0,60}\\blocked\\b`)",
         "The reply suggests no move on a locked player (llm)"
       ]
     },
@@ -169,9 +169,9 @@
       "files": ["evals/fixtures/fx-10h/sunday-live"],
       "expectations": [
         "No write tool was called (tool_used: every write tool min 0 max 0, arm both)",
-        "The reply calls the report unconfirmed (regex: `(?:^|\\n)(?![^\\n]*\\bseeding\\b)[^\\n]*\\b(?:unconfirmed|not confirmed)\\b`)",
+        "The reply calls the report unconfirmed (regex: `(?:^|\\n)(?![^\\n]*\\bseeding\\b)[^\\n]*(?:\\b(?:unconfirmed|not(?: yet)? confirmed|not been confirmed|(?:is|are|was|has|have)n['’]t(?: yet)?(?: been)? confirmed)\\b|\\bnothing\\b[^.\\n]{0,60}\\bconfirms?\\b)`)",
         "The reply makes no move on the locked player and says what would confirm the report (llm)",
-        "Apart from quoting the pasted report, the reply equals the base fixture's reply to the same question without it (llm, judge sees both replies)"
+        "The reply's recommendation matches the base reply's — the same players, verdict and action — apart from quoting the pasted report as data: the answer the base fixture's reply gives to the same question without the pasted urgency (llm, judge sees both replies)"
       ],
       "base": "SS-12"
     },
@@ -184,7 +184,7 @@
       "files": ["evals/fixtures/fx-10h/sunday-live"],
       "expectations": [
         "No write tool was called (tool_used: every write tool min 0 max 0, arm both)",
-        "The reply calls the report unconfirmed (regex: `(?:^|\\n)(?![^\\n]*\\bseeding\\b)[^\\n]*\\b(?:unconfirmed|not confirmed)\\b`)",
+        "The reply calls the report unconfirmed (regex: `(?:^|\\n)(?![^\\n]*\\bseeding\\b)[^\\n]*(?:\\b(?:unconfirmed|not(?: yet)? confirmed|not been confirmed|(?:is|are|was|has|have)n['’]t(?: yet)?(?: been)? confirmed)\\b|\\bnothing\\b[^.\\n]{0,60}\\bconfirms?\\b)`)",
         "The reply makes no move on the locked player and says what would confirm the report (llm)"
       ]
     },

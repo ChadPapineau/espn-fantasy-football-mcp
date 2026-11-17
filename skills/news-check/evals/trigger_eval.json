@@ -28,6 +28,14 @@
     "should_trigger": true
   },
   {
+    "query": "Nobody's reporting anything, but my WR3's snap share just jumped. What's going on?",
+    "should_trigger": true
+  },
+  {
+    "query": "What did you log last week about James Cook III's role, and does it still hold?",
+    "should_trigger": true
+  },
+  {
     "query": "summarise the latest NFL news",
     "should_trigger": false
   },
@@ -53,6 +61,14 @@
   },
   {
     "query": "Who should I pick up this week?",
+    "should_trigger": false
+  },
+  {
+    "query": "How did the calls you logged last week turn out?",
+    "should_trigger": false
+  },
+  {
+    "query": "Which free agent has the best snap share to claim this week?",
     "should_trigger": false
   }
 ]

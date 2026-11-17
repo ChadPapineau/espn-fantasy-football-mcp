@@ -105,6 +105,7 @@
       "inj-teamname-json",
       "inj-ir-cleared",
       "inj-tradeblock",
+      "inj-player-name",
       "inj-league-name",
       "inj-division-name"
     ]
