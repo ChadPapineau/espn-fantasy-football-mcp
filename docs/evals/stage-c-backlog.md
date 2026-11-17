@@ -781,7 +781,10 @@ entry. Everything else they raised is fixed, or ruled in `docs/plan/changelog.md
   refusal sweep before it narrows. **Closed** (ruling R11-4, `b0bb780`): every site, re-derived at
   source, follows the house pattern — the absorb-all reads rethrow a bug (INTERNAL) and the
   outage-only reads also absorb a refusal, said by the session line; the 135-case refusal sweep and
-  `tests/mcp/optional-read-faults.test.ts` hold it.
+  `tests/mcp/optional-read-faults.test.ts` hold it. The refix verifier's F1–F3: the absorb-all
+  ESPN reads also absorb `STALE_ONLY` again (one `optionalOrThrow`, as E13's
+  `retroReadAbsorbed`), the injuries' pro schedule is read within the budget, and
+  `espn_get_roster`'s pro-schedule read is pinned (a bug, an outage, a refusal).
 - **A pair that cannot gain, flagged a coin flip by ΔP(win)** (the follow-up verifier's F1,
   2026-11-05). F12 made the interval rule strict, so `[−p90, 0]` is no coin flip by its interval,
   but E2's ΔP(win) branch still flags such a pair `coin_flip: true` when the win-chance move is

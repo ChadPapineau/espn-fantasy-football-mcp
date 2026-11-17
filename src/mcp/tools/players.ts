@@ -60,7 +60,6 @@ import {
   withinBudget,
   jerseyOf,
   optionalOrThrow,
-  optionalDatasetOrThrow,
   fallbackWarning,
 } from "./common.js";
 import { isoNull, playerSearchRow, week } from "./schemas.js";
@@ -513,7 +512,7 @@ export const listPlayers = defineTool({
     const sched = await withinBudget(
       () => scheduleOf(ctx, league.ref.season, inputs),
       warnings,
-    ).catch(optionalDatasetOrThrow);
+    ).catch(optionalOrThrow);
     const names = players.some((p) => p.on_team_id !== null)
       ? await teamNames(ctx, inputs, warnings)
       : new Map<number, UntrustedText>();

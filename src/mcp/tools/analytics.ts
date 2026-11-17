@@ -103,7 +103,6 @@ import {
   weekOf,
   withinBudget,
   optionalOrThrow,
-  optionalDatasetOrThrow,
   type RosReading,
 } from "./common.js";
 import { rostersOf } from "./roster.js";
@@ -1883,9 +1882,7 @@ export async function leaguePremiumFit(
     const sched =
       logged.length === 0
         ? null
-        : await withinBudget(() => scheduleOf(ctx, season, [], true), []).catch(
-            optionalDatasetOrThrow,
-          );
+        : await withinBudget(() => scheduleOf(ctx, season, [], true), []).catch(optionalOrThrow);
     const runs = weeklyRunFeed(logged, sched?.schedule ?? null);
     const evidence = feeds.filter((f) => f.outcomes.length > 0 || f.claim_runs > 0);
     if (evidence.length === 0 && runs.length === 0) return null;

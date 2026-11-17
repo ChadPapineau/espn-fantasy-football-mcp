@@ -12,11 +12,8 @@ import type { Client } from "@modelcontextprotocol/client";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import { EffError } from "../../src/mcp/errors.js";
 import type { McpServices } from "../../src/mcp/services.js";
-import {
-  fallbackWarning,
-  optionalDatasetOrThrow,
-  optionalOrThrow,
-} from "../../src/mcp/tools/common.js";
+import { fallbackWarning, optionalOrThrow } from "../../src/mcp/tools/common.js";
+import { UpstreamBudgetExhausted, partialWarning } from "../../src/providers/platform.js";
 import { coded, faulty, type Fault } from "./helpers/faults.js";
 import { ESPN_FIXTURES, call, connect, makeWorld, type World } from "./helpers/world.js";
 
@@ -74,6 +71,25 @@ function scheduleFault(services: McpServices, e: () => Error): McpServices {
             throw e();
           }
         : bind(t, p),
+  });
+  const datasets = new Proxy(services.datasets, {
+    get: (t, p) => (p === "proSchedule" ? proSchedule : bind(t, p)),
+  });
+  return { ...services, datasets };
+}
+
+/**
+ * The services with the pro schedule dataset never loaded (no stamp, no rows): scheduleOf then reads
+ * ESPN's keyless proTeamSchedules_wl view (getProSchedule), where a fault can be injected.
+ */
+function noScheduleDataset(services: McpServices): McpServices {
+  const bind = (t: object, p: PropertyKey): unknown => {
+    const v: unknown = Reflect.get(t, p, t);
+    return typeof v === "function" ? (v as (...a: unknown[]) => unknown).bind(t) : v;
+  };
+  const ps = services.datasets.proSchedule;
+  const proSchedule = new Proxy(ps, {
+    get: (t, p) => (p === "games" ? () => ({ stamp: null, rows: [] }) : bind(t, p)),
   });
   const datasets = new Proxy(services.datasets, {
     get: (t, p) => (p === "proSchedule" ? proSchedule : bind(t, p)),
@@ -355,16 +371,12 @@ describe("the catch helpers (R11-4)", () => {
     const b = bug();
     expect(() => optionalOrThrow(b)).toThrow(b);
     expect(() => optionalOrThrow(coded("INTERNAL"))).toThrow(/INTERNAL/);
-    expect(() => optionalOrThrow(new EffError("STALE_ONLY"))).toThrow();
+    expect(() => optionalOrThrow(coded("VALIDATION"))).toThrow(/VALIDATION/);
     expect(() => optionalOrThrow("boom")).toThrow();
   });
-  it("optionalDatasetOrThrow: the same, and a dataset past its hard limit (STALE_ONLY) as null", () => {
-    expect(optionalDatasetOrThrow(new EffError("STALE_ONLY"))).toBeNull();
-    expect(optionalDatasetOrThrow(coded("ESPN_UPSTREAM_UNAVAILABLE"))).toBeNull();
-    expect(optionalDatasetOrThrow(coded("ESPN_REQUIRES_COOKIES"))).toBeNull();
-    const b = bug();
-    expect(() => optionalDatasetOrThrow(b)).toThrow(b);
-    expect(() => optionalDatasetOrThrow(coded("VALIDATION"))).toThrow(/VALIDATION/);
+  it("optionalOrThrow: STALE_ONLY (ESPN cannot answer, only data past its hard limit is cached) as null", () => {
+    expect(optionalOrThrow(new EffError("STALE_ONLY"))).toBeNull();
+    expect(optionalOrThrow(coded("STALE_ONLY"))).toBeNull();
   });
   it("fallbackWarning: 'unavailable' on an outage, 'not read' on a refusal (the session line says why)", () => {
     expect(fallbackWarning(coded("ESPN_UPSTREAM_UNAVAILABLE"), "espn:v", "served from x")).toBe(
@@ -396,9 +408,64 @@ describe("a bug in a read that absorbed every error answers INTERNAL (R11-4)", (
         s.fail(world.services, () => coded("ESPN_UPSTREAM_UNAVAILABLE")),
       );
       expect(out.isError, JSON.stringify(out.body).slice(0, 300)).toBe(false);
+      // and STALE_ONLY (ESPN cannot answer, only data past its hard limit is cached) is an outage
+      // these reads absorbed before R11-4, as E13's do (reclog.ts retroReadAbsorbed): it still answers
+      const stale = await run(
+        s.tool,
+        s.args(),
+        s.fail(world.services, () => new EffError("STALE_ONLY")),
+      );
+      expect(stale.isError, JSON.stringify(stale.body).slice(0, 300)).toBe(false);
     },
     120_000,
   );
+});
+
+describe("the pro schedule ESPN reads when the dataset was never loaded (R11-4)", () => {
+  const SCHED_LINE = "pro schedule unavailable: kickoffs and lock times unknown";
+  const espnSchedule = (e: () => Error): ((s: McpServices) => McpServices) => {
+    return (s) => faulty(noScheduleDataset(s), { getProSchedule: () => Promise.reject(e()) });
+  };
+  it("espn_get_injuries: a budget shortfall at proTeamSchedules_wl degrades (partial), never fails", async () => {
+    const args = { players: { team_id: 2 } };
+    const clean = await run("espn_get_injuries", args, world.services);
+    expect(clean.isError, JSON.stringify(clean.body).slice(0, 300)).toBe(false);
+    for (const reason of ["budget", "deadline"] as const) {
+      const r = await run(
+        "espn_get_injuries",
+        args,
+        espnSchedule(() => new UpstreamBudgetExhausted("proTeamSchedules_wl", reason))(
+          world.services,
+        ),
+      );
+      expect(r.isError, JSON.stringify(r.body).slice(0, 300)).toBe(false);
+      expect(r.body.partial).toBe(true);
+      expect(r.body.warnings).toContain(partialWarning({ view: "proTeamSchedules_wl", reason }));
+    }
+  }, 120_000);
+  it("espn_get_roster: a bug answers INTERNAL; an outage or a refusal answers without kickoffs", async () => {
+    const args = { week: 5 };
+    const clean = await run("espn_get_roster", args, world.services);
+    expect(clean.isError, JSON.stringify(clean.body).slice(0, 300)).toBe(false);
+    expect(clean.body.warnings ?? []).not.toContain(SCHED_LINE);
+    for (const fail of [scheduleFault, (s: McpServices, e: () => Error) => espnSchedule(e)(s)]) {
+      const b = await run("espn_get_roster", args, fail(world.services, bug));
+      expect(b.isError, JSON.stringify(b.body).slice(0, 300)).toBe(true);
+      expect(codeOf(b.body)).toBe("INTERNAL");
+      expect(JSON.stringify(b.body)).not.toContain("injected bug");
+    }
+    const out = await run(
+      "espn_get_roster",
+      args,
+      espnSchedule(() => coded("ESPN_UPSTREAM_UNAVAILABLE"))(world.services),
+    );
+    expect(out.isError, JSON.stringify(out.body).slice(0, 300)).toBe(false);
+    expect(out.body.warnings).toContain(SCHED_LINE);
+    for (const code of ["ESPN_AUTH_REJECTED", "ESPN_REQUIRES_COOKIES"]) {
+      const r = await run("espn_get_roster", args, espnSchedule(() => coded(code))(world.services));
+      expect(r.isError, `${code} ${JSON.stringify(r.body).slice(0, 300)}`).toBe(false);
+    }
+  }, 120_000);
 });
 
 describe("a refusal at a read that absorbed an outage only is said by the session line (R11-4)", () => {

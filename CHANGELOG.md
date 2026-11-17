@@ -359,8 +359,11 @@ minor version (plan 04 §4.4; plan 09 K6). One version covers the server, the Sk
   the seeding evidence's last-season settings, standings, schedule and league; the pro schedule
   beside the league clock, the scoreboard, the live scoreboard, the box score, the player list and
   the injuries; the player list's team names; `espn_analyze_lineup`'s standings — now absorb only
-  an outage, a session refusal or a missing fixture (and, as before, a pro schedule past its hard
-  limit); anything else answers `INTERNAL`. The reads that absorbed only an outage — in
+  an outage, a session refusal or a missing fixture (and, as before, `STALE_ONLY`: ESPN cannot
+  answer and only data past its hard limit is cached, so `allow_stale: true` is never needed for
+  an extra); anything else answers `INTERNAL`. `espn_get_injuries` reads its pro schedule within
+  the call's budget, so a budget or deadline shortfall at ESPN's schedule view answers partial, as
+  before, never `RATE_LIMITED`. The reads that absorbed only an outage — in
   `espn_analyze_matchup`, `espn_analyze_replacement`, `espn_analyze_waivers`,
   `espn_analyze_trade`, `espn_analyze_injury_cascade`, `espn_analyze_schedule`,
   `espn_analyze_roster`, `espn_analyze_evidence`, `espn_get_player_usage`,

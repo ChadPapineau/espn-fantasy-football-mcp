@@ -94,7 +94,6 @@ import {
   weekOf,
   withinBudget,
   optionalOrThrow,
-  optionalDatasetOrThrow,
   fallbackWarning,
 } from "./common.js";
 import {
@@ -602,7 +601,7 @@ export async function leagueDigest(
     let final = false;
     let window = true;
     const sched = await withinBudget(() => scheduleOf(ctx, seasonY, inputs), warnings).catch(
-      optionalDatasetOrThrow,
+      optionalOrThrow,
     );
     if (sched !== null) {
       const st = weekGameState(sched.schedule, clockWeek(league.clock), ctx.nowMs);
@@ -780,7 +779,7 @@ async function periodFlags(
   warnings: string[],
 ): Promise<{ provisional: boolean; corrections: boolean }> {
   const sched = await withinBudget(() => scheduleOf(ctx, seasonY, inputs), warnings).catch(
-    optionalDatasetOrThrow,
+    optionalOrThrow,
   );
   if (sched === null) return { provisional: true, corrections: true };
   let provisional = false;
@@ -1003,7 +1002,7 @@ export const getLiveScoreboard = defineTool({
     const sched = await withinBudget(
       () => scheduleOf(ctx, league.ref.season, inputs),
       warnings,
-    ).catch(optionalDatasetOrThrow);
+    ).catch(optionalOrThrow);
     const st = sched === null ? null : weekGameState(sched.schedule, w, ctx.nowMs);
     if (st === null) warnings.push("pro schedule unavailable: game window unknown");
     // each side's starters by game state (plan 07 A4 `players`), from the week's rosters and the same
@@ -1267,7 +1266,7 @@ export const getBoxScore = defineTool({
     const sched = await withinBudget(
       () => scheduleOf(ctx, league.ref.season, inputs, args.allow_stale === true),
       warnings,
-    ).catch(optionalDatasetOrThrow);
+    ).catch(optionalOrThrow);
     const states = boxGameStates(chosen, sched?.schedule ?? null, args.week, ctx.nowMs);
     const matchups = chosen.map((m) => ({
       matchup_id: m.matchup_id,

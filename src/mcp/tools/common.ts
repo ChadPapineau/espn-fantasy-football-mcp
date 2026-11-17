@@ -1220,22 +1220,16 @@ export function isOptionalReadFailure(e: unknown): boolean {
 /**
  * An optional read's catch (changelog §R11, R11-4; E13's house pattern, `8f41601`): null for what an
  * optional read may lose (isOptionalReadFailure: an outage, a session refusal — said by the call's
- * session line, refusals.ts — or fixture mode's `fixture_missing`), else the error rethrown, so a
- * bug answers INTERNAL and is never read as "unavailable".
+ * session line, refusals.ts — or fixture mode's `fixture_missing`), and for STALE_ONLY — ESPN cannot
+ * answer and only data past its hard limit is cached, an outage these reads (each absorbed every
+ * error before; several take no `allow_stale`) degrade as before, as E13's do (reclog.ts
+ * retroReadAbsorbed). Anything else is rethrown, so a bug answers INTERNAL and is never read as
+ * "unavailable".
  */
 export function optionalOrThrow(e: unknown): null {
-  if (isOptionalReadFailure(e)) return null;
+  if (isOptionalReadFailure(e) || (e as { effCode?: unknown } | null)?.effCode === "STALE_ONLY")
+    return null;
   throw e;
-}
-
-/**
- * The same for an optional read of a dataset (the pro schedule) that absorbed every error before:
- * also a dataset past its hard limit (STALE_ONLY), which such a read degrades as before, as E13's
- * schedule read does (reclog.ts retroReadAbsorbed). A bug propagates.
- */
-export function optionalDatasetOrThrow(e: unknown): null {
-  if ((e as { effCode?: unknown } | null)?.effCode === "STALE_ONLY") return null;
-  return optionalOrThrow(e);
 }
 
 /**
