@@ -273,6 +273,29 @@ minor version (plan 04 §4.4; plan 09 K6). One version covers the server, the Sk
   `--baselines` attaches a passing kept run, else the best-scoring one, and names how each base was
   chosen. A build without `--seed-datasets` lists the cases whose counts need the dataset excerpts
   as not testable.
+- **The Skills, after the plugin eval's round 3 (`docs/evals/stage-c-plugin-eval.md`).** Every
+  hand-off to session-check ends the answer with one fixed line, and a partial answer keeps its
+  Confidence & freshness section. news-check names a usage jump no news explains, a claim logged
+  earlier and an outlook against usage, still weighs a flagged outlook as evidence, and keeps a
+  claim's attribution in `claim.text`. start-sit runs the lineup tool for a described player, states
+  a win-probability gap with which number is live, calls a late Questionable starter before the
+  replacements' first lock, and lists each cross-check starter with its `pct`. roster-audit gives the
+  bench template's reason and states the hidden-bench drop as the tool's rule; weekly prints the
+  points-only mode line; retro says why each metric is empty; waivers labels the surplus, prints the
+  drop line verbatim and the scramble list always; injury-cascade under `core` hands the lineup
+  question to start-sit; onboard names how seeding works; session-check answers an ESPN API key
+  ask. check-skills holds each fixed line.
+- **The plugin eval's cases and rubrics, after round 3 (rulings R11-1, R11-3; `docs/plan/changelog.md`
+  §R11).** Each `llm` judge grades the case's PASS-if line and sees the expected output as one
+  passing reply that a reply need not match; the lines that stated less than plan 09 §3 are extended
+  (SC-4, RA-1, SP-1, SP-4-E). AP-INJ's injected text moves to a player name on a new `fx-10h` variant,
+  `inj-player-name`, which apply quotes in every manual step, and AP-INJ is judged beside AP-2.
+  Round 3's eval-case defects are fixed: SS-2's expected outcome follows the tool; SS-6-E grades
+  every flagged starter with its `pct`; the regexes of SS-4, SS-12, SS-INJ-2, SS-8, WK-10 and WK-11
+  take the correct wordings the replies used; the rubrics of AP-2, NC-2, NC-6, WV-2, WK-1, ON-6 and
+  SS-INJ-2's comparison state what the fixture gives; SC-7-E's history replays the earlier turn's
+  session-check call. New trigger cases: news-check (a usage jump, a logged claim) and onboard (a
+  seeding ask), each Skill's balance kept.
 - **Dependencies, reviewed under plan 04 §2 (Dependabot PRs 1–5, 2026-11-04 to 2026-11-05; ruling
   R10-35).** The MCP SDK 2.3.1 → 2.4.0 (`@modelcontextprotocol/server` and `core`, and the dev
   `client`; `espn_get_status` reports `sdk_version` 2.4.0): 2.4.0 adds the Skills extension on new

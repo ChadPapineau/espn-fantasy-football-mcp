@@ -1095,3 +1095,24 @@ the owner's delegation:
     quadratic cost unpinned; 51d81fd's code is linear (20,000 user-scope entries × 1,000 projects
     with one such entry: 2.5 s) (VR10-L1, a test gap; the VR9-3 layout with one entry running the
     plugin's command line, last in the pool).
+
+## Found in round 4's eval-case fixes (2026-11-16)
+
+What the eval-case stream of round 4 left open (`docs/plan/changelog.md` §R11). Everything else in
+round 3's eval-case triage is built.
+
+- **R11-2 waits for session-check's `when_to_use`.** The ruling makes "how do I get an ESPN API
+  key" a session-check positive and has `when_to_use` name the ask. The description and body answer
+  it since `63370ef`, but `when_to_use` does not name it, so check-skills refuses the positive ("matches
+  none of session-check's when_to_use phrases"). The trigger change is ready: neg-05 becomes pos-09,
+  and "How do I keep an API key out of my Node project's git history?" takes neg-05's place. The
+  Skills listing has 63 characters of headroom.
+- **WV-2's touchdown branch has no candidate.** Plan 09 §3.8's WV-2 flags a candidate with a strongly
+  negative `xfp_gap`; on the base pool no detailed candidate carries a usage signal, so the case grades
+  the no-signal branch only. A variant with such a candidate would test the flag.
+- **NC-3's and NC-4-E's flags.** Plan 09 §3.13 names `quiet_role_change` (NC-3) and
+  `unconfirmed_narrative` (NC-4-E). On the fixture NC-3 reads `no_claim`, and NC-4-E's expected
+  output names no flag, so neither PASS-if line names one.
+- **SC-6 and SC-10 replay SC-1's turn as text.** `HISTORY_SKILL_CALLS` lists SC-7-E only (round 3's
+  fidelity step); the other two follow-up turns could replay the session-check call the same way.
+
