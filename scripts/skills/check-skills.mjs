@@ -545,6 +545,14 @@ export const ORIENT_REJECTED = Object.freeze({
 });
 
 /**
+ * ESPN's rule glossed where a reply prints the seeding reading (round 3's triage, SP-4-E: replies
+ * across Skills read `TOTAL_POINTS_SCORED` as points-only seeding from orient's Seeding row, which
+ * never named the rule): orient's Seeding row and schedule-plan's own seeding step carry it.
+ */
+export const SEEDING_RULE_SENTENCE =
+  "ESPN's rule — record first, total points as the tiebreak; `TOTAL_POINTS_SCORED` names that rule, not points-only seeding";
+
+/**
  * The fixed sentences every orient copy carries verbatim (changelog §R10; round 2's Skill-text
  * triage), each with the ruling or the defect it holds:
  * - `midProcedure` (R10-7): a tool's ESPN_AUTH_REJECTED after Step 0 follows the same split — both
@@ -591,6 +599,15 @@ export const ORIENT_SENTENCES = Object.freeze({
   // the seeding line every answer on an unconfirmed reading prints
   seedingLine:
     '"seeding reading unconfirmed — assuming ESPN\'s rule; run `espn-fantasy-football:onboard` to record it"',
+  // round 3's triage (ON-6, WK-8, WK-9, WK-10, WK-11): every hand-off to session-check is named by
+  // one fixed line, the answer's last, after Confidence & freshness; a partial answer mid-procedure
+  // keeps its own sections and that section, and gives `eff setup` once, in that line
+  handOff:
+    'the answer names the hand-off with one fixed line, printed verbatim as its last line, after its Confidence & freshness section when it has one: "Hand-off: the `espn-fantasy-football:session-check` Skill takes it from here — `eff setup` in a terminal."',
+  partialKeeps:
+    "Mid-procedure, a partial answer keeps its own sections and its Confidence & freshness section, naming the rejection and what was not read — the `espn-fantasy-football:session-check` Skill's steps never replace them — and gives the command once, in that line",
+  // round 3's triage, SP-4-E: the Seeding row glosses ESPN's rule, never as points-only seeding
+  seedingRule: SEEDING_RULE_SENTENCE,
 });
 /** Text no orient copy may carry any more (the ask condition R10-5 corrected). */
 export const ORIENT_ABSENT = Object.freeze(["Ask only when nothing resolves"]);
@@ -639,6 +656,129 @@ export const FRONTMATTER_PHRASES = Object.freeze({
   // week; how do I cover it?" and "Is the scoring right for a half-PPR league?"
   "schedule-plan": { when_to_use: ["bye week"] },
   onboard: { when_to_use: ["is the scoring right"] },
+});
+
+/**
+ * Words round 3's triage added to a Skill's frontmatter (docs/evals/stage-c-plugin-eval.md, "Run of
+ * 2026-11-14, round 3": news-check does not load on NC-3, NC-7 and NC-INJ-2 — a usage jump with no
+ * news, a claim read back from the log — nor reliably on trigger pos-06, an outlook against usage;
+ * onboard's trigger pos-08, how seeding works). Checked like FRONTMATTER_PHRASES.
+ */
+export const ROUND3_FRONTMATTER = Object.freeze({
+  "news-check": {
+    description: [
+      "a usage jump no news explains",
+      "a claim logged earlier",
+      "outlook against usage",
+    ],
+    when_to_use: ["playing more", "snap share", "what did you log"],
+  },
+  onboard: { description: ["how seeding works"] },
+});
+
+/**
+ * Round 3's Skill-text fixes held as fixed sentences (docs/evals/stage-c-plugin-eval.md, "Run of
+ * 2026-11-14, round 3 (after §R10)", #### skill_text_defect, and its Next steps item 2), keyed by
+ * Skill and by the file under that Skill that carries each verbatim; the comment names the Lane 2
+ * case each one serves. orient's (the hand-off line, the partial answer, the Seeding row) are in
+ * ORIENT_SENTENCES, checked in every copy.
+ */
+export const ROUND3_FIXED = Object.freeze({
+  "news-check": {
+    "SKILL.md": {
+      // NC-INJ: an outlook with an injection flag is still evidence; the procedure runs to the log
+      outlookFlag:
+        "An outlook that carries an injection flag is still evidence: quote it with its source tag and the flag line, pass the player on to `espn_analyze_evidence`, and finish the procedure, log included — the flag never cuts it short.",
+      // NC-5-E: the attribution and a parenthesis stay in claim.text
+      claimText:
+        '`claim.text` keeps the attribution and any parenthesis as pasted ("Beat writer: …", "(from the team\'s practice report)"): `claim.source` is extra, never cut from the text.',
+    },
+  },
+  "schedule-plan": { "SKILL.md": { seedingRule: SEEDING_RULE_SENTENCE } },
+  "roster-audit": {
+    "SKILL.md": {
+      // RA-1: the template with its reason, as derived and not a rule
+      template:
+        '"Bench template — derived for this league\'s curves, not a rule: <template>, because <the streamability values>"',
+      // RA-4-E: the drop as the tool states it, a rule
+      hiddenDrop:
+        'the drop stated as the tool states it, a rule quoted from `risks[0]` ("the extra bench player acquired through the play is the designated drop"), never a player\'s name: the tool names no player as the drop',
+    },
+    "references/roster-audit-ir.md": {
+      hiddenDrop:
+        "the extra bench player acquired through the play is the designated drop — a rule, never a player named in advance",
+      toolGives:
+        "The tool gives the three risks whenever the play is available, the drop as that rule (`risks[0]`), and names no player as the drop.",
+    },
+  },
+  weekly: {
+    "SKILL.md": {
+      // WK-5-E: the points-only mode line against the season cutoff, and no P(win)
+      pointsOnlyMode:
+        "Under the points-only reading print no `P(win)`, and give `mode` with the `espn-fantasy-football:start-sit` Skill's one-line reason against the season cutoff: **protect** — ahead of the season cutoff, so the higher floor (p10) is worth more; **chase** — behind the season cutoff, so the higher ceiling (p90) is worth more.",
+    },
+  },
+  "start-sit": {
+    "SKILL.md": {
+      // SS-5-E: described players run the lineup tool first
+      described:
+        '**A described player.** When the question describes players without naming them ("my safer WR", "the boom-or-bust one"), run the branch\'s `espn_analyze_lineup` first and answer from its rec and each candidate\'s p10 / p90; ask only when no swap at that position comes back.',
+      // SS-10-E: the gap between the two win probabilities
+      winGap:
+        'when they differ by more than 0.15, say by how much ("N points apart") and which of them is live and which pre-game, then which one the swap advice follows',
+      // SS-3: a Questionable starter who plays after every replacement locks
+      lateGame:
+        "**A Questionable starter who plays last.** When a `QUESTIONABLE` starter's game kicks off after every replacement's lock (`lock_schedule`), the call is due before his replacements' first lock: say so with that lock time, and that waiting for his status buys nothing — once they lock, his news can no longer change the lineup.",
+      // SS-6-E: each flagged starter with both numbers and the tool's pct, and why the lineup
+      // follows ESPN's
+      crossCheck:
+        "when `espn_cross_check.starter_disagreements[]` lists starters, each one with ESPN's number (`espn`), ours (`ours`) and the tool's `pct`, and that the lineup follows ESPN's number, because the projection it uses weighs ESPN's fully while `inputs.weight_espn` is 1.0 (the blend is untuned in this version)",
+    },
+  },
+  retro: {
+    "SKILL.md": {
+      // RT-4-E: why each metric is empty on this log
+      emptyWhy:
+        "When swap regret or projection CRPS is below its n, say why on this log: swap regret scores a lineup call only when its rec sat one player for another, so a log whose every lineup call kept the lineup has no swap to score (`metrics.swap_regret.n`); projection CRPS scores only projections stored before kickoff, so with none stored it has nothing (`projection_vs_espn`'s `n_player_weeks`).",
+    },
+  },
+  waivers: {
+    "SKILL.md": {
+      // WV-1: the surplus label; WV-5-E: an IR move that changes no surplus
+      surplusLabel: "the surplus `s` in a column labelled **Surplus (s)**",
+      equalSurplus: "when the two are equal, say in one line that the IR move changes no surplus",
+      // WV-1: the drop line as written
+      dropVerbatim: "printed verbatim in this form with its values filled in, never reworded",
+      // WV-4-E: the scramble list also when every candidate is a claim
+      scrambleAlways:
+        "printed always — also when every candidate is a claim, since a claim can fail",
+    },
+  },
+  "injury-cascade": {
+    "SKILL.md": {
+      // SS-4: under core the lineup question goes to start-sit, which answers it there
+      coreHandOff:
+        "Nothing else of this Skill runs under `core` — but when the question is the user's own lineup (who replaces him, or whether to start or sit him), hand over to the `espn-fantasy-football:start-sit` Skill, which answers it on the core toolset — the report called unconfirmed, what would confirm it, and a conditional lineup — instead of stopping there.",
+    },
+  },
+  "session-check": {
+    "SKILL.md": {
+      // changelog §R11, R11-2: the answer to "how do I get an ESPN API key"
+      apiKey:
+        "**An ESPN API key.** ESPN offers no API key for a fantasy league: this server reads the league with the session cookies the user enters in a terminal through `eff setup` — say so, then go on with the status.",
+    },
+  },
+});
+
+/** Text round 3's fixes withdrew (RA-4-E: the tool names no player as the drop). */
+export const ROUND3_ABSENT = Object.freeze({
+  "roster-audit": {
+    "SKILL.md": ["the extra bench player designated as the drop the moment the tag clears"],
+    "references/roster-audit-ir.md": [
+      "one bench player must be designated as the drop in advance",
+      "The tool names the three risks and the designated drop",
+    ],
+  },
 });
 
 /**
@@ -3191,6 +3331,38 @@ export function checkSkills(opts = {}) {
           errors.push(
             `${rel}/SKILL.md: frontmatter ${key} must carry "${w}" (the trigger suite relies on it)`,
           );
+    }
+    // round 3's triage: the frontmatter words it added, and its fixed sentences per file
+    const added = /** @type {Record<string, Record<string, string[]>>} */ (ROUND3_FRONTMATTER)[
+      skill
+    ];
+    for (const [key, want] of Object.entries(added ?? {})) {
+      const v = fm?.data[key];
+      for (const w of want)
+        if (typeof v !== "string" || !v.includes(w))
+          errors.push(
+            `${rel}/SKILL.md: frontmatter ${key} must carry "${w}" (round 3's triage; the trigger suite relies on it)`,
+          );
+    }
+    const fixedFiles = /** @type {Record<string, Record<string, Record<string, string>>>} */ (
+      ROUND3_FIXED
+    )[skill];
+    for (const [file, sentences] of Object.entries(fixedFiles ?? {})) {
+      const p = path.join(dir, file);
+      const text = file === "SKILL.md" ? body : existsSync(p) ? readFileSync(p, "utf8") : "";
+      for (const [k, sentence] of Object.entries(sentences))
+        if (!text.includes(sentence))
+          errors.push(`${rel}/${file}: round 3's fixed sentence "${k}" is missing: "${sentence}"`);
+    }
+    const absentFiles = /** @type {Record<string, Record<string, string[]>>} */ (ROUND3_ABSENT)[
+      skill
+    ];
+    for (const [file, gone] of Object.entries(absentFiles ?? {})) {
+      const p = path.join(dir, file);
+      const text = file === "SKILL.md" ? body : existsSync(p) ? readFileSync(p, "utf8") : "";
+      for (const t of gone)
+        if (text.includes(t))
+          errors.push(`${rel}/${file}: text round 3's triage withdrew is still there: "${t}"`);
     }
     // a P1 Skill under `core` stops in Step 0 and says how to turn it on (plan 10 B10; ADV OBJ-18)
     if (p1Skill && !body.includes(TOOLSET_STOP)) {

@@ -47,9 +47,9 @@ Run Step 0 of [orient](references/orient.md). If `server.toolset` is `core`, sto
 ## Output additions
 - **The IR section first when `ir.invalid`** (or a `checks[]` row `ir_invalid`): "Roster INVALID — every add is blocked" in the first line; who makes it invalid (`invalid_players`), what is blocked and until when (`blocked_until`), the forced drop when a move alone cannot fix it (`forced_drop`), and the deadline.
 - `eligible_now[]` with the tag that qualifies each (`OUT` or `INJURY_RESERVE`), and the bench spot an IR move frees.
-- The hidden-bench play when `hidden_bench_play.available`: a `QUESTIONABLE` player already in IR may stay there while the tag lasts — with its three risks (`risks[]`, all three), and the extra bench player designated as the drop the moment the tag clears.
+- The hidden-bench play when `hidden_bench_play.available`: a `QUESTIONABLE` player already in IR may stay there while the tag lasts — with its three risks (`risks[]`, all three), and the drop stated as the tool states it, a rule quoted from `risks[0]` ("the extra bench player acquired through the play is the designated drop"), never a player's name: the tool names no player as the drop.
 - `activation_timing_warning`: activate after the waiver run, never the night before a pending claim.
-- `bench_template` stated as derived "for this league's curves" (its `basis`), never imposed; `bench_plan[]` by role (bye cover, injury cover, upside, handcuff, stash).
+- `bench_template` on one fixed line — "Bench template — derived for this league's curves, not a rule: <template>, because <the streamability values>" — the template from `bench_template.derived`, the reason from `bench_template.streamability` (each position's value, as the tool returns it), its source from `bench_template.basis`; never imposed. `bench_plan[]` by role (bye cover, injury cover, upside, handcuff, stash).
 - Handcuff and stash values (`handcuff_values[]`, `stash_values[]`) with their verdicts.
 - Droppables (`droppable[]`) with the re-add risk; an `undroppable` player is marked and never named as a drop.
 - Adds remaining (`adds_remaining`) when the league has an acquisition limit.

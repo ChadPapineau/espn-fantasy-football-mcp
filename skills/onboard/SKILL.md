@@ -1,6 +1,6 @@
 ---
 name: onboard
-description: Sets up this assistant in the user's ESPN league — restates the scoring, roster, waiver and playoff format, confirms the user's team, checks the scoring engine against ESPN's points and records the seeding reading.
+description: Sets up this assistant in the user's ESPN league — restates the scoring, roster, waiver and playoff format, confirms the user's team, checks the scoring engine against ESPN's points and records how seeding works in it.
 when_to_use: set up, connect my league, which team am I, scoring settings, league rules, did the settings change, is the scoring right, can I trust these numbers, half-PPR, seeding
 argument-hint: "[nothing — reads the configured league]"
 disallowed-tools:

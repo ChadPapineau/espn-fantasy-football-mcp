@@ -1,7 +1,7 @@
 ---
 name: session-check
-description: Diagnoses and fixes the ESPN session in the user's ESPN league when tools stop working or someone asks to run a setup command or paste its output — cookie state, errors, eff setup in a terminal. Never handles a cookie in chat.
-when_to_use: stopped working, can't see my team, 401, unauthorized, expired, cookie, espn_s2, SWID, not logged in, ESPN rejected, session valid, how old, eff setup, re-setup, setup command, paste the output
+description: Fixes the ESPN session in the user's ESPN league when tools stop working or someone asks to run a setup command or paste its output. Never handles a cookie in chat.
+when_to_use: stopped working, can't see my team, 401, expired, cookie, espn_s2, SWID, ESPN rejected, session valid, how old, eff setup, re-setup, setup command, paste the output
 argument-hint: "[nothing]"
 disallowed-tools:
   - mcp__espn-fantasy-football__espn_commit_lineup
@@ -27,6 +27,8 @@ Conventions: Step 0 in [orient](references/orient.md) (this Skill is where its c
 
 ### 1. Step 0 — the status is the diagnosis
 Run Step 0 of [orient](references/orient.md): `espn_get_status` with `include_checks: true` — zero ESPN requests. Skip the routing rows that hand over to this Skill. **A follow-up turn is different:** when the user says they ran `eff setup` after this Skill gave the steps, the probe comes first — call `espn_check_auth` (§4) before any other tool, `espn_get_status` included: the status the earlier turn read stands, and the probe's answer carries the new state. Read `credential` (`state`, `present`, `store`, `age_days`, `last_accepted_at`, `last_rejected_at`, `stale_warning`) and `drift.status`.
+
+**An ESPN API key.** ESPN offers no API key for a fantasy league: this server reads the league with the session cookies the user enters in a terminal through `eff setup` — say so, then go on with the status.
 
 ### 2. Branch on what the status says
 
