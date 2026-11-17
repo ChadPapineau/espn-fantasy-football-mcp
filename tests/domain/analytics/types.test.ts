@@ -71,7 +71,42 @@ describe("toCoarseDelta", () => {
 describe("isCoinFlip", () => {
   it("under the basis threshold is a coin flip whatever the interval", () => {
     expect(isCoinFlip("position_cv", 0.039, [0.01, 0.06])).toBe(true);
-    expect(isCoinFlip("player_sim", -0.019, [-0.03, -0.01])).toBe(true);
+    expect(isCoinFlip("player_sim", -0.019, [-0.03, 0.01])).toBe(true);
+  });
+  // changelog §R11, R11-5: a change that cannot gain — its interval's upper bound at or below 0 —
+  // is never a coin flip; the ΔP(win) branch applies only where the upper bound is above 0
+  it.each([
+    [-0.019, [-0.03, -0.01], false],
+    [0.001, [-3, 0], false],
+    [0, [0, 0], false],
+    [-0.001, [-3, -1e-9], false],
+    [Number.NaN, [-3, 0], false],
+    [Infinity, [-5, -1], false],
+    [0.001, [-3, 1e-9], true],
+    [0.001, [1e-9, 3], true],
+    [Number.NaN, [1e-9, 3], true],
+  ] as const)("ΔP(win) %s with the interval %j: coin flip %s (R11-5)", (dp, iv, want) => {
+    expect(isCoinFlip("position_cv", dp, iv)).toBe(want);
+    expect(isCoinFlip("player_sim", dp, iv)).toBe(want);
+  });
+  it("property: an interval whose upper bound is at or below 0 is never a coin flip, whatever ΔP(win) (R11-5)", () => {
+    const dp = fc.oneof(
+      fc.constant(null),
+      fc.constant(Number.NaN),
+      fc.double({ min: -1, max: 1, noNaN: true }),
+    );
+    fc.assert(
+      fc.property(
+        dp,
+        fc.double({ min: -50, max: 0, noNaN: true }),
+        fc.double({ min: -50, max: 0, noNaN: true }),
+        (d, a, b) => {
+          const iv = [Math.min(a, b), Math.max(a, b)] as const;
+          expect(isCoinFlip("position_cv", d, iv)).toBe(false);
+          expect(isCoinFlip("player_sim", d, iv)).toBe(false);
+        },
+      ),
+    );
   });
   it("at or over the threshold it is a coin flip only when the interval spans 0", () => {
     expect(isCoinFlip("position_cv", 0.04, [0.01, 0.07])).toBe(false);

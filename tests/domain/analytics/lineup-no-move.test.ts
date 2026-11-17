@@ -476,13 +476,11 @@ describe("where ΔP(win) decides a coin flip (R7-1)", () => {
     expect(starts(out)).toContain(16);
   });
 
-  // changelog §R10, R10-34 (the follow-up verifier's F1): the flag, not the interval read alone,
-  // says what is a coin flip. A pair whose best case is 0 cannot gain, and no interval spans 0
-  // here, but against this week's opponent its win-chance move is under the threshold: coin_flip,
-  // as built. Whether a change that cannot gain should ever be a coin flip is open (the Stage C
-  // backlog, "A pair that cannot gain, flagged a coin flip by ΔP(win)"); this pins what the Skills
-  // read today
-  it("a pair whose best case is 0 is a coin flip when ΔP(win) decides it, and not without an opponent", () => {
+  // changelog §R11, R11-5 (the follow-up verifier's F1; reads R10-34 through the tool): a change that
+  // cannot gain is never a coin flip. A pair whose best case is 0 has a known better choice,
+  // keeping, so ΔP(win) under the threshold no longer flags it (before: `coin_flip: true` against
+  // this week's opponent, as R10-34 pinned it); without an opponent its interval alone decides
+  it("a pair whose best case is 0 is never a coin flip, with or without an opponent (R11-5)", () => {
     const players = roster({
       5: {
         points: {
@@ -503,12 +501,175 @@ describe("where ΔP(win) decides a coin flip (R7-1)", () => {
     const vsOpp = pairOf(analyzeLineup(request({ players, compare: [{ out: 5, in: 11 }] })));
     expect(vsOpp?.interval[0]).toBeLessThan(0);
     expect(vsOpp?.interval[1]).toBe(0);
-    expect(vsOpp?.coin_flip).toBe(true);
+    expect(vsOpp?.coin_flip).toBe(false);
     const alone = pairOf(
       analyzeLineup(request({ players, compare: [{ out: 5, in: 11 }], opponent: null })),
     );
     expect(alone?.interval[1]).toBe(0);
     expect(alone?.coin_flip).toBe(false);
+  });
+});
+
+describe("a change that cannot gain is never a coin flip (R11-5)", () => {
+  /** A starter's Dist with the given p10 (mean 1 and p90 3 above it): the pair's out side. */
+  const outDist = (p10: number): LineupPlayer["points"] => ({
+    mean: p10 + 1,
+    p10,
+    p25: p10 + 0.3,
+    p50: p10 + 0.8,
+    p75: p10 + 1.5,
+    p90: p10 + 3,
+    p_zero: 0,
+    basis: "position_cv",
+  });
+  /** WR 5 at the given p10 against a ruled-out WR 11 (a point mass at 0): Δ is [−p90, −p10]. */
+  const pair = (p10: number, opponent: boolean) => {
+    const players = roster({
+      5: { points: outDist(p10) },
+      11: { injury_status: "OUT", points: dist(0) },
+    });
+    const out = analyzeLineup(
+      request({
+        players,
+        compare: [{ out: 5, in: 11 }],
+        ...(opponent ? {} : { opponent: null }),
+      }),
+    );
+    return out.swaps.find((s) => s.out === 5 && s.in === 11);
+  };
+  // the interval's upper bound is −p10: at or below 0 the pair cannot gain; above 0 it can, and
+  // there ΔP(win) under the threshold (the ruled-out entrant barely moves the win chance at these
+  // spreads) or the interval spanning 0 makes it a coin flip
+  it.each([
+    [0, true, 0, false],
+    [0, false, 0, false],
+    [0.01, true, -0.01, false],
+    [0.01, false, -0.01, false],
+    [-0.01, true, 0.01, true],
+    [-0.01, false, 0.01, true],
+  ] as const)(
+    "out p10 %s, opponent %s: upper bound %s, coin_flip %s",
+    (p10, opponent, upper, want) => {
+      const s = pair(p10, opponent);
+      expect(s?.interval[1]).toBe(upper);
+      expect(s?.interval[0]).toBeLessThan(0);
+      expect(s?.coin_flip).toBe(want);
+    },
+  );
+
+  // a seat that scores a known 0 (WR 5 on bye): doing nothing there scores exactly 0, so an entrant
+  // not expected to score cannot gain — coin_flip false, with or without an opponent, whatever his
+  // interval (here it spans 0); an entrant expected to score fills it, never a coin flip either
+  const spread = (mean: number): LineupPlayer["points"] => ({
+    mean,
+    p10: mean - 3,
+    p25: mean - 1.5,
+    p50: mean,
+    p75: mean + 1.5,
+    p90: mean + 3,
+    p_zero: 0,
+    basis: "position_cv",
+  });
+  it.each([
+    [-0.5, true],
+    [-0.5, false],
+    [0, true],
+    [0, false],
+    [0.01, true],
+    [0.01, false],
+  ] as const)(
+    "at a bye seat, an entrant expected to score %s (opponent %s): coin_flip false",
+    (mean, opponent) => {
+      const players = roster({
+        5: { points: dist(0), p_active: null },
+        11: { points: spread(mean) },
+      });
+      const out = analyzeLineup(
+        request({
+          players,
+          compare: [{ out: 5, in: 11 }],
+          ...(opponent ? {} : { opponent: null }),
+        }),
+      );
+      const s = out.swaps.find((x) => x.out === 5 && x.in === 11);
+      expect(s?.interval[0]).toBeLessThan(0);
+      expect(s?.interval[1]).toBeGreaterThan(0);
+      expect(s?.coin_flip).toBe(false);
+    },
+  );
+
+  // the same at an empty seat E2's assignment fills (the bench RB 10 no upgrade here, so it is the
+  // only change): the entrant not expected to score cannot gain, so the change is held as gaining
+  // nothing (the rec's words), never a coin flip and never made
+  it.each([
+    [0, true],
+    [0, false],
+    [-1, true],
+    [-1, false],
+  ] as const)(
+    "an empty seat whose entrant is expected to score %s (opponent %s) is held as gaining nothing",
+    (mean, opponent) => {
+      const players = [
+        ...roster({ 10: { points: dist(1, 0.6) } }).filter((p) => p.player_id !== 8),
+        player(16, "D/ST", mean, SLOT.BE, { points: spread(mean) }),
+      ];
+      const out = analyzeLineup(request({ players, ...(opponent ? {} : { opponent: null }) }));
+      const fill = out.swaps.find((s) => s.out === null);
+      expect(fill).toMatchObject({ in: 16, coin_flip: false });
+      expect(fill?.interval[1]).toBeGreaterThan(0);
+      expect(out.no_move).toBe(true);
+      expect(out.rec.action).toBe("keep the current lineup");
+      expect(starts(out)).not.toContain(16);
+      expect(out.rec.assumptions.some((a) => a.text.includes("1 change that gains nothing"))).toBe(
+        true,
+      );
+      expect(out.rec.assumptions.some((a) => a.text.includes("coin flip"))).toBe(false);
+    },
+  );
+
+  it("property: no swaps[] row whose upper bound is at or below 0 is a coin flip, nor one at a seat that scores 0 whose entrant is not expected to score", () => {
+    const side = fc
+      .tuple(
+        fc.double({ min: -5, max: 25, noNaN: true }),
+        fc.double({ min: 0, max: 12, noNaN: true }),
+        fc.double({ min: 0, max: 12, noNaN: true }),
+      )
+      .map(([m, lo, hi]): LineupPlayer["points"] => ({
+        mean: m,
+        p10: m - lo,
+        p25: m - lo / 2,
+        p50: m,
+        p75: m + hi / 2,
+        p90: m + hi,
+        p_zero: 0,
+        basis: "position_cv",
+      }));
+    fc.assert(
+      fc.property(side, side, fc.boolean(), fc.boolean(), (o, i, bye, withOpp) => {
+        const players = roster({
+          5: bye ? { points: dist(0), p_active: null } : { points: o },
+          11: { points: i },
+        });
+        const out = analyzeLineup(
+          request({
+            players,
+            compare: [{ out: 5, in: 11 }],
+            ...(withOpp ? {} : { opponent: null }),
+          }),
+        );
+        for (const s of out.swaps) {
+          if (s.interval[1] <= 0 && s.coin_flip) return false;
+          const seat = players.find((p) => p.player_id === s.out);
+          const entrant = players.find((p) => p.player_id === s.in);
+          const pts = seat?.points;
+          const zeroSeat = s.out === null || (pts?.mean === 0 && pts.p10 === 0 && pts.p90 === 0);
+          if (zeroSeat && entrant !== undefined && !(entrant.points.mean > 0) && s.coin_flip)
+            return false;
+        }
+        return true;
+      }),
+      { numRuns: 300 },
+    );
   });
 });
 
@@ -550,8 +711,8 @@ describe("invariants over random rosters (R7-1)", () => {
         // round-4b review's F12), change by change: a held entrant never starts in the advice, a
         // decisive one always does
         const told = new Set(starts(out));
-        const held = (s: (typeof out.swaps)[number]): boolean =>
-          s.coin_flip || (s.interval[0] === 0 && s.interval[1] === 0);
+        // held also when it cannot gain (R11-5: its upper bound at or below 0 — `[0, 0]` among them)
+        const held = (s: (typeof out.swaps)[number]): boolean => s.coin_flip || s.interval[1] <= 0;
         for (const s of out.swaps) {
           if (s.coin_flip && s.interval[0] === 0 && s.interval[1] === 0) return false;
           if (held(s) && told.has(s.in)) return false;

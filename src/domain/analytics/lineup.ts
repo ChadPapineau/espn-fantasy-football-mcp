@@ -613,8 +613,10 @@ function actionText(c: ActionCounts): string {
 // reaching his seat. Each change is decided on its own numbers, the ones `swaps[]` shows:
 //  1. held when it is a coin flip (`coin_flip`: its Δ interval spans 0 — strictly below at one end,
 //     strictly above at the other: spansZero, the round-4b review's F12 — or, when this week's
-//     opponent decides it, |ΔP(win)| is under the basis threshold); held when it gains nothing (Δ 0
-//     whatever happens: `[0, 0]`, `coin_flip` false); made otherwise;
+//     opponent decides it and it can gain, |ΔP(win)| is under the basis threshold); held as gaining
+//     nothing when it cannot gain (its interval's upper bound at or below 0, `[0, 0]` among them, or
+//     an entrant not expected to score at a seat that scores 0: `coin_flip` false; R11-5); made
+//     otherwise;
 //  2. a seat that scores a known 0 now — empty, or held by a player who will not play (a point mass
 //     at 0: on bye, ruled out) — is priced exactly, by the entrant's own quantiles: doing nothing
 //     there scores exactly 0, so the change is made whenever the entrant is expected to score;
@@ -625,7 +627,7 @@ function actionText(c: ActionCounts): string {
 // are the starters kept and the entrants held out). E2's mean-optimal assignment — its starters in
 // `recommended_lineup` and `rec.lineup`, `e_points_after`, `p_win_after`, `p_win_interval` — is
 // unchanged by the rule (R7-1: C2 replays it, and R6-1's identity with ESPN's lineup holds);
-// `swaps[]` lists every change of it, a held one with `coin_flip` set or its interval `[0, 0]`. Which entrant takes which
+// `swaps[]` lists every change of it, a held one with `coin_flip` set or one that cannot gain. Which entrant takes which
 // freed seat is the solve's tie-break, re-seated only when that makes more of the changes (below).
 
 /** How the no-move rule decided one change. */
@@ -656,9 +658,6 @@ const scoresZero = (d: Dist): boolean => d.mean === 0 && d.p10 === 0 && d.p90 ==
 /** A swap into a seat that scores a known 0 now: an empty one, or one held by a player who will not score. */
 const freesZeroSeat = (pr: { readonly out: LineupPlayer | null }): boolean =>
   pr.out === null || scoresZero(pr.out.points);
-
-/** A Δ interval that is 0 whatever happens. */
-const gainsNothing = (iv: readonly [number, number]): boolean => iv[0] === 0 && iv[1] === 0;
 
 /**
  * A swap's Δ points (`in` − `out`) and its p10–p90 interval. A side with no spread (an empty seat, a
@@ -691,13 +690,26 @@ function pairDelta(pr: { readonly out: LineupPlayer | null; readonly in: LineupP
   return { de, interval: [round(de - Z90 * s), round(de + Z90 * s)] };
 }
 
+/**
+ * A change that cannot gain (changelog §R11, R11-5): its Δ interval's upper bound is at or below 0
+ * (`[0, 0]` among them), or its entrant is not expected to score at a seat that scores a known 0
+ * (doing nothing there scores exactly 0). It is never a coin flip: keeping is the better choice.
+ */
+const cannotGain = (iv: readonly [number, number], zeroSeat: boolean, de: number): boolean =>
+  iv[1] <= 0 || (zeroSeat && !(de > 0));
+
 /** Rule 1 for a change that is not forced: made, or held as a coin flip or as gaining nothing. */
-function heldOrMade(coinFlip: boolean, zeroSeat: boolean, iv: readonly [number, number]): Verdict {
-  // Δ 0 whatever happens is held as gaining nothing, coin flip or not: `[0, 0]` does not span 0
-  // (spansZero — the round-4b review's F12), and a change that gains nothing is never made
-  if (gainsNothing(iv)) return "gains_nothing";
-  if (!coinFlip) return "made";
-  return zeroSeat ? "gains_nothing" : "coin_flip";
+function heldOrMade(
+  coinFlip: boolean,
+  zeroSeat: boolean,
+  iv: readonly [number, number],
+  de: number,
+): Verdict {
+  // a change that cannot gain is held as gaining nothing, never a coin flip and never made: `[0, 0]`
+  // and `[−p90, 0]` do not span 0 (spansZero — the round-4b review's F12), and isCoinFlip's ΔP(win)
+  // branch does not reach them (R11-5)
+  if (cannotGain(iv, zeroSeat, de)) return "gains_nothing";
+  return coinFlip ? "coin_flip" : "made";
 }
 
 /**
@@ -1201,14 +1213,11 @@ export function analyzeLineup(req: LineupRequest): LineupData {
       dp,
       delta_pf: round(de),
       interval,
-      // a change that gains nothing whatever happens ([0, 0]) is held as gaining nothing, never a
-      // coin flip (spansZero; the round-4b review's F12). Rule 2: doing nothing at a seat that
-      // scores 0 scores exactly 0 — never a coin flip while the entrant is expected to score
-      coin_flip: gainsNothing(interval)
-        ? false
-        : freesZeroSeat(pr)
-          ? !(de > 0)
-          : isCoinFlip(basis, pwinDecides ? dp : null, interval),
+      // a change that cannot gain (its upper bound at or below 0, [0, 0] among them) is never a coin
+      // flip (isCoinFlip; R11-5, the round-4b review's F12). Rule 2: doing nothing at a seat that
+      // scores 0 scores exactly 0, so the change is made while the entrant is expected to score and
+      // cannot gain while he is not — a coin flip either way never (R11-5)
+      coin_flip: !freesZeroSeat(pr) && isCoinFlip(basis, pwinDecides ? dp : null, interval),
       option_value:
         out === null
           ? null
@@ -1240,7 +1249,7 @@ export function analyzeLineup(req: LineupRequest): LineupData {
         de: s.de,
         interval: s.interval,
         by_pwin: s.coin_flip && !spans(s.interval),
-        verdict: forced ? "made" : heldOrMade(s.coin_flip, freesZeroSeat(pr), s.interval),
+        verdict: forced ? "made" : heldOrMade(s.coin_flip, freesZeroSeat(pr), s.interval, s.de),
       };
     });
     for (const l of f.unpairedLeavers) {
@@ -1259,7 +1268,7 @@ export function analyzeLineup(req: LineupRequest): LineupData {
         de: -l.points.mean,
         interval,
         by_pwin: coin && !spans(interval),
-        verdict: forced ? "made" : heldOrMade(coin, scoresZero(l.points), interval),
+        verdict: forced ? "made" : heldOrMade(coin, scoresZero(l.points), interval, -l.points.mean),
       });
     }
     const onChains = new Set(f.pairs.flatMap((pr) => pr.movers));

@@ -254,7 +254,7 @@ export function toCoarseDelta(delta: number): CoarseDelta {
  * the change can either gain or lose (plan 09 §2 guardrail 9's "a Δ interval including 0"). An
  * interval that ends at 0 cannot gain (`[-35.2, 0]`: the swap loses or gains nothing) or cannot
  * lose (`[0, 5]`), and `[0, 0]` gains nothing whatever happens — none of them spans 0, so none is a
- * coin flip by its interval (isCoinFlip's ΔP(win) branch can still flag one; the round-4b review's F12: a pair whose entrant is ruled out read `coin_flip: true` while its own
+ * coin flip by its interval, nor by ΔP(win) when it cannot gain (isCoinFlip, R11-5; the round-4b review's F12: a pair whose entrant is ruled out read `coin_flip: true` while its own
  * verdict said the swap loses points). The one rule for every caller (E2's swaps, its compare
  * pairs and the held changes behind its Rec).
  */
@@ -265,13 +265,17 @@ export function spansZero(interval: readonly [number, number]): boolean {
 /**
  * Whether a swap is a coin flip (|ΔP(win)| under the basis threshold, or its interval spans 0 —
  * spansZero). `deltaPwin: null` — no ΔP(win) to read (no opponent roster, or a points objective
- * where this week's opponent does not matter): the interval alone decides (changelog R7-1).
+ * where this week's opponent does not matter): the interval alone decides (changelog R7-1). A
+ * change that cannot gain — its interval's upper bound at or below 0 — is never a coin flip, whatever
+ * ΔP(win) says: keeping is the known better choice (changelog §R11, R11-5); the ΔP(win) branch
+ * applies only where the upper bound is above 0.
  */
 export function isCoinFlip(
   basis: DistBasis,
   deltaPwin: number | null,
   interval: readonly [number, number],
 ): boolean {
+  if (interval[1] <= 0) return false;
   const spans = spansZero(interval);
   if (deltaPwin === null) return spans;
   if (!Number.isFinite(deltaPwin)) return true;

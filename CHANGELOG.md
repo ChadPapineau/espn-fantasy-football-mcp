@@ -331,6 +331,13 @@ minor version (plan 04 §4.4; plan 09 K6). One version covers the server, the Sk
 
 ### Fixed
 
+- **`espn_analyze_lineup` flagged a change that cannot gain a coin flip (ruling R11-5;
+  `docs/plan/changelog.md` §R11).** A swap whose Δ interval's upper bound is at or below 0 (a
+  `[−3, 0]` pair with a ruled-out entrant) read `coin_flip: true` against this week's opponent when
+  its win-chance move was under the threshold, and a change whose entrant is not expected to score
+  at a seat that scores a known 0 read `coin_flip: true` whatever the opponent, while the rec held it
+  as gaining nothing. Such a change now reads `coin_flip: false` and the rec holds it as a change
+  that gains nothing; the ΔP(win) test applies only where the interval's upper bound is above 0.
 - **`eff doctor` named the wrong server and the wrong plugin copy.** Row 2 counted the Yahoo
   sibling's server (registered as `fantasy-football-mcp-server`, launching its own `dist/cli.js
   serve`) as a second registration of this one, called it "entry ok" and pointed at `eff uninstall`;
