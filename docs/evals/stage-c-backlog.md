@@ -1141,8 +1141,9 @@ What the server stream of the §R12 fix round built and left open (`docs/plan/ch
   (`STALE_ONLY`), "pro schedule not read: …" on a session refusal; a bug answers `INTERNAL`. The
   sites: `espn_get_roster`, the league clock, the live scoreboard, `espn_analyze_lineup`,
   `scheduleOrEmpty` (E3, E8, E9) and `rosReadingOf` (the projections' rest-of-season reading, E4,
-  E5, E6, E7, E11). The scoreboard's, the box score's, the player list's and the injuries' schedule
-  reads already absorbed `STALE_ONLY` and say no line. `espn_analyze_trade`'s offer line ("season
+  E5, E6, E7, E11). The scoreboard's, the box score's, the player list's, the injuries' and E13's
+  two schedule reads absorbed `STALE_ONLY` with no line at all; the refix below gives each its line
+  (the round-5 verifier's F1). `espn_analyze_trade`'s offer line ("season
   simulation … ΔU from the cold-start PF-per-win rate") is the one other optional read whose line
   said "unavailable" on a refused read (its matchups). `tests/mcp/optional-read-lines.test.ts`
   holds each site.
@@ -1161,6 +1162,36 @@ What the server stream of the §R12 fix round built and left open (`docs/plan/ch
   standings ("standings unavailable: waiver rank unknown …") absorb only the call's budget signal, so
   an outage or a session refusal there fails the call. They are not pro-schedule reads, so R12-5 does
   not name them; their lines are never reached on a refusal.
+- **The refix after the round-5 verifier (F1, F2), built.** F1: `espn_get_scoreboard`,
+  `espn_get_box_score` (one read for its game states and its flags), `espn_list_players`,
+  `espn_get_injuries` and both of E13's schedule reads go through `optionalScheduleOf` and say what
+  the answer goes without, by cause ("provisional and corrections_window_open are conservative";
+  "game_state from the box score alone; final, provisional and corrections_window_open are
+  conservative"; "next_opponent and next_kickoff are null"; "kickoffs unknown and game_day false";
+  "the week scored is the one before the current week"; "final and corrections_window_open are
+  conservative; no forecast or attribution row is scored"). F2: E3 live passes a refused fact as
+  `live_refused` (`src/domain/analytics/matchup.ts`): it is unread, so nothing is conditioned, and
+  "live conditioning unavailable" names only the facts an outage lost. This also closes what R11-4's
+  `!boxRead.refused` guard opened: a refused box score was dropped from the unread list, and P(win)
+  was conditioned on points never read (0 so far, `live` non-null).
+  `tests/mcp/optional-read-lines.test.ts` and `tests/domain/analytics/matchup.test.ts` hold them
+  (each failing before the fix).
+- **`espn_analyze_lineup`'s pro-schedule read absorbs more than R12-5 names (the round-5
+  verifier's F3): a widening to confirm.** It degraded on a budget shortfall only; since `b6954aa`
+  it absorbs what every other optional pro-schedule read absorbs (`optionalOrThrow`: an outage, a
+  session refusal, fixture mode's `fixture_missing`, `STALE_ONLY`) and answers with "pro schedule
+  unavailable: lock times unknown" (or "not read" on a refusal). R12-5 rules on `STALE_ONLY` only.
+  The basis claimed is R11-4 ("an optional read absorbs only what an optional read may lose: an
+  outage and a session refusal") read with R12-4, whose "not read" line presumes an optional read
+  absorbs a refusal. Asked of the orchestrator: confirm it under §R12, or narrow the catch to the
+  budget and `STALE_ONLY`. Narrowing is one catch in `analyzeLineupTool`, and the lineup's case in
+  `tests/mcp/optional-read-lines.test.ts` would then expect an outage and a refusal to fail the
+  call.
+- **One optional pro-schedule read still says nothing: `leaguePremiumFit`'s.** E5's league-fitted
+  premium places its logged waiver runs in fantasy weeks by the schedule's kickoffs
+  (`weeklyRunFeed`). It reads with `allow_stale: true`, so `STALE_ONLY` never reaches it and R12-5
+  does not name it. On an outage it keys the runs without kickoffs and says no line. Left open: it
+  is a side input of a fit that states its own basis.
 
 ## Found in round 5's eval-case fixes (2026-11-19)
 

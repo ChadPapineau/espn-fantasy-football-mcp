@@ -158,9 +158,27 @@ async function scheduleOrEmpty(
   warnings: string[],
   allowStale: boolean,
 ): Promise<ProSchedule> {
+  return (await scheduleReadOrEmpty(ctx, season, inputs, warnings, allowStale)).schedule;
+}
+
+/**
+ * scheduleOrEmpty, and whether the session refused the read — E3 live keeps a refused schedule's
+ * game states unread (nothing conditioned) without calling them unavailable (the round-5
+ * verifier's F2).
+ */
+async function scheduleReadOrEmpty(
+  ctx: ToolContext,
+  season: number,
+  inputs: InputStamp[],
+  warnings: string[],
+  allowStale: boolean,
+): Promise<{ readonly schedule: ProSchedule; readonly refused: boolean }> {
   const s = await optionalScheduleOf(ctx, season, inputs, warnings, allowStale);
   if (s.read === null) warnings.push(scheduleWarning(s.failure, "lock times and byes unknown"));
-  return s.read?.schedule ?? emptySchedule(season);
+  return {
+    schedule: s.read?.schedule ?? emptySchedule(season),
+    refused: s.read === null && sessionRefusalOf(s.failure) !== null,
+  };
 }
 
 /** Subjects (platform player + crosswalk gsis id) of roster entries. */
@@ -574,7 +592,10 @@ export const analyzeMatchupTool = defineTool({
     const mine = rosters.find((r) => r.team.team_id === team);
     if (mine === undefined) throw new EffError("NOT_FOUND");
     const actual = new Map<number, number | null>();
+    // the live facts not read: by an outage (said as unavailable) or by a session refusal (said by
+    // the session line); either way nothing is conditioned on them (the round-5 verifier's F2)
     const liveUnread: string[] = [];
+    const liveRefused: string[] = [];
     let oppId: number | null | undefined;
     if (args.mode === "live") {
       const boxRead = { refused: false };
@@ -596,9 +617,12 @@ export const analyzeMatchupTool = defineTool({
         for (const side of [m.home, m.away])
           for (const e of side?.entries ?? [])
             actual.set(e.player.ref.id, e.actual?.applied_total ?? null);
-      // a refused read is said by the call's session line, never as unavailable (R11-4)
-      if (box === null && !boxRead.refused)
-        liveUnread.push("the box score's points so far (espn:mBoxscore)");
+      // a refused read is said by the call's session line, never as unavailable (R11-4), and still
+      // conditions nothing: its points so far are unknown, never 0 (the round-5 verifier's F2)
+      if (box === null)
+        (boxRead.refused ? liveRefused : liveUnread).push(
+          "the box score's points so far (espn:mBoxscore)",
+        );
       const pair = boxRows.find((m) => m.home.team_id === team || m.away?.team_id === team);
       if (pair !== undefined)
         oppId =
@@ -613,9 +637,12 @@ export const analyzeMatchupTool = defineTool({
     // pre: the season schedule before the pro schedule, as before (a cold call without the
     // dataset still answers, lock times unknown)
     if (args.mode === "pre") oppId = await pairedIn();
-    const schedule = await scheduleOrEmpty(ctx, b.league.ref.season, inputs, warnings, allowStale);
+    const sched = await scheduleReadOrEmpty(ctx, b.league.ref.season, inputs, warnings, allowStale);
+    const schedule = sched.schedule;
     if (args.mode === "live" && weekGames(schedule, b.w).length === 0)
-      liveUnread.push(`the pro schedule's week-${String(b.w)} game states`);
+      (sched.refused ? liveRefused : liveUnread).push(
+        `the pro schedule's week-${String(b.w)} game states`,
+      );
     if (oppId === undefined) oppId = await pairedIn();
     const opp = oppId === null ? undefined : rosters.find((r) => r.team.team_id === oppId);
     if (opp === undefined)
@@ -717,6 +744,7 @@ export const analyzeMatchupTool = defineTool({
       deadline_ms: cpuDeadlineOf(ctx),
       inputs: toDataInputs(inputs, ctx.nowMs),
       live_unread: liveUnread,
+      live_refused: liveRefused,
       banked,
     });
     const data: MatchupToolData = { ...out.data, inputs: toDataInputs(inputs, ctx.nowMs) };

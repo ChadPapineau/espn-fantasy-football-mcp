@@ -83,7 +83,6 @@ import {
   platformInput,
   readOpts,
   rulesOf,
-  scheduleOf,
   seasonTransactions,
   sessionRefusalOf,
   SESSION_READ_WARNINGS,
@@ -97,6 +96,7 @@ import {
   optionalScheduleOf,
   scheduleWarning,
   fallbackWarning,
+  type ScheduleRead,
 } from "./common.js";
 import {
   canonical,
@@ -775,22 +775,20 @@ export const scoreboardSchema = z.strictObject({
     .max(40),
 });
 
-/** The provisional / corrections flags of a set of weeks from the pro schedule (plan 01 §5.4). */
-async function periodFlags(
-  ctx: ToolContext,
-  seasonY: number,
+/**
+ * The provisional / corrections flags of a set of weeks from the pro schedule (plan 01 §5.4); both
+ * conservative (true) when the call has no schedule, which the caller's line says.
+ */
+function periodFlagsOf(
+  sched: ScheduleRead | null,
   weeks: readonly number[],
-  inputs: InputStamp[],
-  warnings: string[],
-): Promise<{ provisional: boolean; corrections: boolean }> {
-  const sched = await withinBudget(() => scheduleOf(ctx, seasonY, inputs), warnings).catch(
-    optionalOrThrow,
-  );
+  nowMs: number,
+): { provisional: boolean; corrections: boolean } {
   if (sched === null) return { provisional: true, corrections: true };
   let provisional = false;
   let corrections = false;
   for (const w of weeks) {
-    const st = weekGameState(sched.schedule, w, ctx.nowMs);
+    const st = weekGameState(sched.schedule, w, nowMs);
     if (st.games > 0 && st.provisional) provisional = true;
     if (st.corrections_window_open) corrections = true;
   }
@@ -845,7 +843,15 @@ export const getScoreboard = defineTool({
       weeks,
       matchups: compact ? matchups.map(slimMatchup) : matchups,
     };
-    const flags = await periodFlags(ctx, league.ref.season, weeks, inputs, warnings);
+    // optional (changelog §R12, R12-4 and R12-5): an outage, a refusal or a dataset past its hard
+    // limit answers with conservative flags, said by cause (the round-5 verifier's F1: it said
+    // nothing); a bug is INTERNAL
+    const sched = await optionalScheduleOf(ctx, league.ref.season, inputs, warnings);
+    if (sched.read === null)
+      warnings.push(
+        scheduleWarning(sched.failure, "provisional and corrections_window_open are conservative"),
+      );
+    const flags = periodFlagsOf(sched.read, weeks, ctx.nowMs);
     return {
       data,
       inputs,
@@ -1267,10 +1273,24 @@ export const getBoxScore = defineTool({
       if (chosen.length === 0) throw new EffError("NOT_FOUND");
     }
     const full = args.detail === "full";
-    const sched = await withinBudget(
-      () => scheduleOf(ctx, league.ref.season, inputs, args.allow_stale === true),
+    // optional, one read for the game states and the week's flags (changelog §R12, R12-4 and
+    // R12-5): without it each row keeps the box score's own state and the flags are conservative,
+    // said by cause (the round-5 verifier's F1: it said nothing); a bug is INTERNAL
+    const schedGot = await optionalScheduleOf(
+      ctx,
+      league.ref.season,
+      inputs,
       warnings,
-    ).catch(optionalOrThrow);
+      args.allow_stale === true,
+    );
+    const sched = schedGot.read;
+    if (sched === null)
+      warnings.push(
+        scheduleWarning(
+          schedGot.failure,
+          "game_state from the box score alone; final, provisional and corrections_window_open are conservative",
+        ),
+      );
     const states = boxGameStates(chosen, sched?.schedule ?? null, args.week, ctx.nowMs);
     const matchups = chosen.map((m) => ({
       matchup_id: m.matchup_id,
@@ -1287,7 +1307,7 @@ export const getBoxScore = defineTool({
             if (p.match) matched++;
           }
     const share = checked === 0 ? null : (checked - matched) / checked;
-    const flags = await periodFlags(ctx, league.ref.season, [args.week], inputs, warnings);
+    const flags = periodFlagsOf(sched, [args.week], ctx.nowMs);
     // final once the week's games are official: every player's game is final, and a player on bye
     // has no game to wait for (he never blocks it)
     const rows = matchups.flatMap((m) => [...m.home.players, ...(m.away?.players ?? [])]);

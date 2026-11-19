@@ -93,6 +93,15 @@ export interface MatchupWinRequest {
    */
   readonly live_unread?: readonly string[];
   /**
+   * `live` only: the live facts the session refused (ESPN_REQUIRES_COOKIES / ESPN_AUTH_REJECTED), one
+   * fixed phrase each, as in `live_unread`. They are unread too, so nothing is conditioned on them,
+   * but the call's session line says them (src/mcp/refusals.ts), never as unavailable (changelog
+   * §R12, R12-4; the round-5 verifier's F2): the "live conditioning unavailable" warning names only
+   * `live_unread`'s facts, and the assumption names both. Leaving a refused fact out of `live_unread`
+   * conditioned P(win) on a box score never read (a finished starter scored 0).
+   */
+  readonly live_refused?: readonly string[];
+  /**
    * A later week of a multi-week matchup period: the points each side already holds from the
    * period's earlier weeks (ESPN `points_by_week`), carried into the margin of every method — the
    * normal approximation and every Monte-Carlo path — so P(win), its interval and the margin are
@@ -388,8 +397,12 @@ export async function analyzeMatchupWin(req: MatchupWinRequest): Promise<Matchup
       ),
     );
   // live facts this call did not read: nothing is conditioned on them (an unread box score is not
-  // 0 points, an unknown game is not a bye) — every started player keeps his pre-game distribution
-  const unread = mode === "live" ? [...new Set(req.live_unread ?? [])] : [];
+  // 0 points, an unknown game is not a bye) — every started player keeps his pre-game distribution.
+  // A refused fact is unread too; only its line differs (the session line says it)
+  const outage = mode === "live" ? [...new Set(req.live_unread ?? [])] : [];
+  const refused =
+    mode === "live" ? [...new Set(req.live_refused ?? [])].filter((x) => !outage.includes(x)) : [];
+  const unread = [...outage, ...refused];
   const conditioned = unread.length === 0;
 
   const myStarters = req.me.filter((p) => isStart(req.roster, p.player.slot_id));
@@ -417,12 +430,15 @@ export async function analyzeMatchupWin(req: MatchupWinRequest): Promise<Matchup
       assumptions.push(
         A(
           `live facts not read (${unread.join("; ")}): every started player is scored from his pre-game projection, with no points so far and no game state`,
-          "the same call again reads them (what this call read is cached)",
+          outage.length > 0
+            ? "the same call again reads them (what this call read is cached)"
+            : "an ESPN session is stored, as the session line says, and the same call is made again",
         ),
       );
-      warnings.push(
-        `live conditioning unavailable: ${unread.join(" and ")} not read; p_win is the pre-game number for the lineups as set (live: null) — call again for the live one`,
-      );
+      if (outage.length > 0)
+        warnings.push(
+          `live conditioning unavailable: ${outage.join(" and ")} not read; p_win is the pre-game number for the lineups as set (live: null) — call again for the live one`,
+        );
     } else if ([...myStarters, ...oppStarters].some((p) => p.game_state === "in"))
       assumptions.push(
         A(

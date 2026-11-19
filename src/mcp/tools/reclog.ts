@@ -55,8 +55,9 @@ import {
   isOptionalReadFailure,
   leagueOf,
   leagueRef,
+  optionalScheduleOf,
   readOpts,
-  scheduleOf,
+  scheduleWarning,
   sessionRefusalOf,
   settingsOf,
   take,
@@ -81,8 +82,9 @@ import {
 /**
  * What E13's optional reads absorb (the round-4d product account): an optional read's failure — an
  * outage, a session refusal (said by the call's session line; refusals.ts) or fixture mode's
- * `fixture_missing` (isOptionalReadFailure) — or a dataset past its hard limit (STALE_ONLY: the
- * schedule read here takes no `allow_stale`, so the call degrades as before). Anything else is a
+ * `fixture_missing` (isOptionalReadFailure) — or a dataset past its hard limit (STALE_ONLY: these
+ * reads take no `allow_stale`, so the call degrades as before; the pro schedule's two reads go
+ * through optionalScheduleOf, which absorbs the same and says its line). Anything else is a
  * bug and propagates, as the house optional reads do (isOptionalReadFailure, else rethrow: the live
  * scoreboard's rosters in league.ts, the player stats in espn-p1.ts); before, every error read as null.
  */
@@ -311,10 +313,15 @@ async function lastFinalWeek(
   inputs: InputStamp[],
   warnings: string[],
 ): Promise<Week> {
-  const sched = await withinBudget(() => scheduleOf(ctx, season, inputs), warnings).catch(
-    retroReadAbsorbed,
-  );
-  if (sched !== null)
+  // optional (changelog §R12, R12-4 and R12-5; what retroReadAbsorbed absorbs): without it the
+  // week before the current one, said by cause (the round-5 verifier's F1: it said nothing)
+  const got = await optionalScheduleOf(ctx, season, inputs, warnings);
+  const sched = got.read;
+  if (sched === null)
+    warnings.push(
+      scheduleWarning(got.failure, "the week scored is the one before the current week"),
+    );
+  else
     for (let w = Math.min(current, BOUNDS.week.max); w >= 1; w--)
       if (weekGameState(sched.schedule, w, ctx.nowMs).final) return w;
   return Math.max(1, current - 1);
@@ -429,9 +436,18 @@ export const analyzeRetrospective = defineTool({
       roster: scored.roster,
       team_result: scored.result,
     });
-    const sched = await withinBudget(() => scheduleOf(ctx, season, inputs), warnings).catch(
-      retroReadAbsorbed,
-    );
+    // optional (changelog §R12, R12-4 and R12-5): without the week's games and kickoffs the week
+    // is never final and no pre-lock forecast can be told apart, said by cause (the round-5
+    // verifier's F1: it said nothing); a bug is INTERNAL
+    const schedGot = await optionalScheduleOf(ctx, season, inputs, warnings);
+    const sched = schedGot.read;
+    if (sched === null)
+      warnings.push(
+        scheduleWarning(
+          schedGot.failure,
+          "final and corrections_window_open are conservative; no forecast or attribution row is scored",
+        ),
+      );
     // Phase 3 (plan 10 C9): the attribution rows of the re-fit window — v2 projections stored before
     // their game joined to the final box scores — and the applied overrides; ESPN's box scores of
     // earlier weeks are cached reads (final weeks), each within the call's budget

@@ -4,7 +4,10 @@
 // outage; no line calls a refusal "unavailable". R12-5: a dataset past its hard limit
 // (STALE_ONLY) is an outage for an optional read, so every optional pro-schedule read absorbs it
 // with its "unavailable" line, espn_get_roster's included (as `a40f590` did for the injuries' read);
-// a bug still answers INTERNAL. Fixture mode (fx-10h, Team 02, week 5), fake clock; no network.
+// a bug still answers INTERNAL. The round-5 verifier's F1: the scoreboard's, the box score's, the
+// player list's, the injuries' and E13's two schedule reads absorbed it with no line at all, so an
+// answer went without the schedule unsaid; F2: E3 live's conditioning line called a refused
+// schedule "unavailable". Fixture mode (fx-10h, Team 02, week 5), fake clock; no network.
 import { readFileSync } from "node:fs";
 import path from "node:path";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
@@ -144,6 +147,50 @@ const SCHEDULE_LINES: readonly LineSite[] = [
     args: { week: 5, objective: "auto" },
     rest: "lock times unknown",
   },
+  // F2: live mode's schedule read, whose conditioning line is said by cause too
+  {
+    site: "analytics-p1.ts scheduleOrEmpty (espn_analyze_matchup live)",
+    tool: "espn_analyze_matchup",
+    args: { week: 5, mode: "live", seed: 1 },
+    rest: "lock times and byes unknown",
+  },
+  // F1: the optional schedule reads that said no line
+  {
+    site: "league.ts the scoreboard's pro schedule (its period flags)",
+    tool: "espn_get_scoreboard",
+    args: { week: 4 },
+    rest: "provisional and corrections_window_open are conservative",
+  },
+  {
+    site: "league.ts the box score's pro schedule (game states and period flags)",
+    tool: "espn_get_box_score",
+    args: { week: 4, team_id: 2 },
+    rest: "game_state from the box score alone; final, provisional and corrections_window_open are conservative",
+  },
+  {
+    site: "players.ts the player list's pro schedule",
+    tool: "espn_list_players",
+    args: { status: "WAIVERS", sort: "percOwned", week: 5, limit: 25 },
+    rest: "next_opponent and next_kickoff are null",
+  },
+  {
+    site: "datasets.ts the injuries' pro schedule",
+    tool: "espn_get_injuries",
+    args: { players: { team_id: 2 } },
+    rest: "kickoffs unknown and game_day false",
+  },
+  {
+    site: "reclog.ts E13's pro schedule (the scored week's games, the kickoffs)",
+    tool: "espn_analyze_retrospective",
+    args: { week: 4 },
+    rest: "final and corrections_window_open are conservative; no forecast or attribution row is scored",
+  },
+  {
+    site: "reclog.ts E13's default week (lastFinalWeek)",
+    tool: "espn_analyze_retrospective",
+    args: {},
+    rest: "the week scored is the one before the current week",
+  },
 ];
 
 describe("R12-4: an optional pro-schedule read's line says 'not read' on a refusal, 'unavailable' on an outage", () => {
@@ -239,21 +286,18 @@ describe("R12-4: espn_analyze_trade's offer without the season simulation", () =
   }, 120_000);
 });
 
-/** An optional pro-schedule read, and its line's rest when it says one (null: the answer needs none). */
+/** An optional pro-schedule read, and its line's rest (every one says what its answer goes without). */
 interface StaleSite {
   readonly site: string;
   readonly tool: string;
   readonly args: () => J;
-  readonly rest: string | null;
+  readonly rest: string;
 }
 
-// every optional pro-schedule read not already held by optional-read-faults.test.ts's absorb-all
-// sites (the league clock, the scoreboard, the live scoreboard, the box score, the player list and
-// the injuries)
+// every optional pro-schedule read, each with its line (the round-5 verifier's F1: the scoreboard,
+// the box score, the player list, the injuries and E13 absorbed STALE_ONLY and said nothing)
 const STALE_SITES: readonly StaleSite[] = [
-  ...SCHEDULE_LINES.filter(
-    (s) => s.tool !== "espn_get_league" && s.tool !== "espn_get_live_scoreboard",
-  ).map((s) => ({ ...s, args: () => s.args })),
+  ...SCHEDULE_LINES.map((s) => ({ ...s, args: () => s.args })),
   {
     site: "analytics-p1.ts scheduleOrEmpty (espn_analyze_matchup season)",
     tool: "espn_analyze_matchup",
@@ -320,10 +364,8 @@ describe("R12-5: every optional pro-schedule read absorbs STALE_ONLY with its 'u
           fault(() => new EffError("STALE_ONLY"))(world.services),
         );
         expect(stale.isError, `${how} ${peek(stale.body)}`).toBe(false);
-        if (s.rest !== null) {
-          expect(stale.body.warnings, how).toContain(`pro schedule unavailable: ${s.rest}`);
-          expect(stale.body.warnings ?? [], how).not.toContain(`pro schedule not read: ${s.rest}`);
-        }
+        expect(stale.body.warnings, how).toContain(`pro schedule unavailable: ${s.rest}`);
+        expect(stale.body.warnings ?? [], how).not.toContain(`pro schedule not read: ${s.rest}`);
         const b = await run(s.tool, s.args(), fault(bug)(world.services));
         expect(b.isError, `${how} ${peek(b.body)}`).toBe(true);
         expect(codeOf(b.body), how).toBe("INTERNAL");
@@ -331,5 +373,84 @@ describe("R12-5: every optional pro-schedule read absorbs STALE_ONLY with its 'u
       }
     },
     240_000,
+  );
+});
+
+// the round-5 verifier's F2 at its root: E3 live's `live_unread` decided both whether the live facts
+// condition P(win) and the line that says they were not read, so a refused read either was called
+// "unavailable" (the pro schedule) or, left out of the list, let P(win) condition on facts never read
+// (the box score: a finished starter scored 0 points). A refused fact still conditions nothing
+// (plan 01 §5.6–§5.7; `2bec608`), and its line is the session line, never "unavailable"
+/** The part of E3's data the F2 check reads. */
+interface Live {
+  readonly data?: { readonly live?: unknown; readonly rec?: { readonly action?: string } };
+}
+
+describe("F2: E3 live conditions nothing on a refused live fact, and never calls the refusal unavailable", () => {
+  const args = { week: 5, mode: "live", seed: 1 } as const;
+  const OUTAGE_LINE = /^live conditioning unavailable: (.+) not read; p_win is the pre-game number/;
+  const FAULTS: readonly (readonly [
+    string,
+    string,
+    (code: string) => (s: McpServices) => McpServices,
+  ])[] = [
+    [
+      "the pro schedule's game states",
+      "the pro schedule's week-5 game states",
+      (code) => espnFault(() => coded(code)),
+    ],
+    [
+      "the box score's points so far",
+      "the box score's points so far (espn:mBoxscore)",
+      (code) => (s) => faulty(s, { getBoxScores: coded(code) }),
+    ],
+  ];
+  it.each(FAULTS.map(([label, fact, fault]) => [label, fact, fault] as const))(
+    "%s",
+    async (_label, fact, fault) => {
+      const clean = await run("espn_analyze_matchup", args, world.services);
+      expect(clean.isError, peek(clean.body)).toBe(false);
+      const cleanWarnings = clean.body.warnings ?? [];
+      // the clean call conditions on both facts
+      expect((clean.body as Live).data?.live, peek(clean.body)).not.toBeNull();
+      expect(cleanWarnings.some((w) => OUTAGE_LINE.test(w))).toBe(false);
+      for (const code of ["ESPN_AUTH_REJECTED", "ESPN_REQUIRES_COOKIES"]) {
+        const r = await run("espn_analyze_matchup", args, fault(code)(world.services));
+        expect(r.isError, `${code} ${peek(r.body)}`).toBe(false);
+        const w = r.body.warnings ?? [];
+        // nothing conditioned: live null, the rec says the live facts were not read, partial
+        expect((r.body as Live).data?.live, code).toBeNull();
+        expect((r.body as Live).data?.rec?.action, code).toBe(
+          "no lineup action: pre-game win probability of the lineups as set (live facts not read)",
+        );
+        expect(r.body.partial, code).toBe(true);
+        expect(
+          w.some((x) => x.includes("finished players without an ESPN actual")),
+          code,
+        ).toBe(false);
+        // said once, by the session line; no line calls the refusal unavailable
+        expect(
+          w.filter((x) => x.endsWith(END[code] ?? "")),
+          code,
+        ).toHaveLength(1);
+        expect(
+          w.filter((x) => x.includes("unavailable") && !cleanWarnings.includes(x)),
+          code,
+        ).toEqual([]);
+      }
+      // an outage of the same read still says the conditioning line, naming the fact
+      const out = await run(
+        "espn_analyze_matchup",
+        args,
+        fault("ESPN_UPSTREAM_UNAVAILABLE")(world.services),
+      );
+      expect(out.isError, peek(out.body)).toBe(false);
+      expect((out.body as Live).data?.live).toBeNull();
+      const line = (out.body.warnings ?? []).find((x) => OUTAGE_LINE.test(x));
+      expect(line, peek(out.body)).toBe(
+        `live conditioning unavailable: ${fact} not read; p_win is the pre-game number for the lineups as set (live: null) — call again for the live one`,
+      );
+    },
+    120_000,
   );
 });

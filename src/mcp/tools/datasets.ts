@@ -44,8 +44,8 @@ import {
   proTeamAbbrev,
   scheduleOf,
   weekOf,
-  optionalOrThrow,
-  withinBudget,
+  optionalScheduleOf,
+  scheduleWarning,
 } from "./common.js";
 import {
   gsisOrNull,
@@ -197,11 +197,14 @@ export const getInjuries = defineTool({
       warnings,
     );
     if (sel.missing > 0) warnings.push(`${String(sel.missing)} requested player(s) not found`);
-    // a budget shortfall at ESPN's keyless schedule view (no dataset loaded) degrades: partial
-    const sched = await withinBudget(
-      () => scheduleOf(ctx, league.ref.season, inputs, allowStale),
-      warnings,
-    ).catch(optionalOrThrow);
+    // optional (changelog §R12, R12-4 and R12-5): a budget shortfall at ESPN's keyless schedule
+    // view (no dataset loaded; partial), an outage, a refusal or a dataset past its hard limit
+    // answers without kickoffs, said by cause (the round-5 verifier's F1: it said nothing); a bug
+    // is INTERNAL
+    const got = await optionalScheduleOf(ctx, league.ref.season, inputs, warnings, allowStale);
+    const sched = got.read;
+    if (sched === null)
+      warnings.push(scheduleWarning(got.failure, "kickoffs unknown and game_day false"));
     const games = sched === null ? [] : gamesOfWeek(sched.schedule, w);
     const ids = sel.players.map((p) => ({ p, xw: crosswalkOf(ctx, p.ref.id, p.position_id) }));
     const gsis = present(ids.map((x) => x.xw.gsis_id));

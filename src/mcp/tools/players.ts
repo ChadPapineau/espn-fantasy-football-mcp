@@ -51,7 +51,6 @@ import {
   leagueRef,
   proTeamAbbrev,
   readOpts,
-  scheduleOf,
   searchRow,
   slotsOf,
   snapshotStandIn,
@@ -60,6 +59,8 @@ import {
   withinBudget,
   jerseyOf,
   optionalOrThrow,
+  optionalScheduleOf,
+  scheduleWarning,
   fallbackWarning,
 } from "./common.js";
 import { isoNull, playerSearchRow, week } from "./schemas.js";
@@ -509,10 +510,13 @@ export const listPlayers = defineTool({
     if (args.sort === "name") warnings.push(PLAYER_LIST_WARNINGS.name_sort_page_only);
     if (args.injured !== undefined && !fromSnapshot)
       warnings.push(PLAYER_LIST_WARNINGS.injured_post_filter);
-    const sched = await withinBudget(
-      () => scheduleOf(ctx, league.ref.season, inputs),
-      warnings,
-    ).catch(optionalOrThrow);
+    // optional (changelog §R12, R12-4 and R12-5): an outage, a refusal or a dataset past its hard
+    // limit answers without the week's games, said by cause (the round-5 verifier's F1: it said
+    // nothing); a bug is INTERNAL
+    const got = await optionalScheduleOf(ctx, league.ref.season, inputs, warnings);
+    const sched = got.read;
+    if (sched === null)
+      warnings.push(scheduleWarning(got.failure, "next_opponent and next_kickoff are null"));
     const names = players.some((p) => p.on_team_id !== null)
       ? await teamNames(ctx, inputs, warnings)
       : new Map<number, UntrustedText>();

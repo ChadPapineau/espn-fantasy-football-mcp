@@ -412,6 +412,54 @@ describe("live conditioning", () => {
     expect(read.partial).toBe(false);
   });
 
+  // the round-5 verifier's F2: a fact the session refused is unread as well — nothing is conditioned
+  // on it — but the call's session line says it, so the conditioning warning never calls it
+  // unavailable (changelog §R12, R12-4); before, a refused box score was left out of the list and
+  // P(win) conditioned on points never read (a finished starter scored 0)
+  it("live facts refused by the session: nothing conditioned, no 'unavailable' line; an outage beside one names only itself", async () => {
+    const kick = NOW - 0.5 * LIVE.gameMs;
+    const asSet = (base: number, scale: number) =>
+      roster(base, scale).map((p, i) =>
+        i < 4 ? mp({ ...p, locked: true }, i < 2 ? "final" : "in", null, kick) : mp(p),
+      );
+    const me = asSet(100, 1);
+    const opp = asSet(200, 0.95);
+    const box = "the box score's points so far (espn:mBoxscore)";
+    const games = "the pro schedule's week-5 game states";
+    const outage = await analyzeMatchupWin(
+      req({ mode: "live", me, opponent: opp, live_unread: [box] }),
+    );
+    const refused = await analyzeMatchupWin(
+      req({ mode: "live", me, opponent: opp, live_refused: [box] }),
+    );
+    // the same unconditioned answer as the outage's: the pre-game P(win) of the lineups as set
+    expect(refused.data.live).toBeNull();
+    expect(refused.partial).toBe(true);
+    expect(refused.data.p_win).toBe(outage.data.p_win);
+    expect(refused.data.interval).toEqual(outage.data.interval);
+    expect(refused.data.rec.action).toBe(outage.data.rec.action);
+    expect(refused.warnings.some((w) => w.includes("scored 0"))).toBe(false);
+    // said by the assumption, never by a warning that calls it unavailable
+    expect(refused.warnings.some((w) => w.includes("unavailable"))).toBe(false);
+    const said = refused.data.rec.assumptions.find((a) => a.text.startsWith("live facts not read"));
+    expect(said?.text).toContain(`live facts not read (${box})`);
+    expect(said?.revisit_trigger).toMatch(/session/);
+    // an outage beside a refusal: both unread, the warning names the outage's fact only
+    const both = await analyzeMatchupWin(
+      req({ mode: "live", me, opponent: opp, live_unread: [games], live_refused: [box, box] }),
+    );
+    expect(both.data.live).toBeNull();
+    expect(both.warnings.filter((w) => w.startsWith("live conditioning unavailable"))).toEqual([
+      `live conditioning unavailable: ${games} not read; p_win is the pre-game number for the lineups as set (live: null) — call again for the live one`,
+    ]);
+    expect(
+      both.data.rec.assumptions.find((a) => a.text.startsWith("live facts not read"))?.text,
+    ).toContain(`live facts not read (${games}; ${box})`);
+    // pre ignores the field
+    const pre = await analyzeMatchupWin(req({ mode: "pre", live_refused: [box] }));
+    expect(pre.partial).toBe(false);
+  });
+
   it("warnings: a live player without a kickoff, a final player without an actual", async () => {
     const me = roster(100).map((p, i) =>
       i === 0

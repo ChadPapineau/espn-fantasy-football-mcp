@@ -420,19 +420,39 @@ minor version (plan 04 §4.4; plan 09 K6). One version covers the server, the Sk
   `espn_analyze_lineup`, the schedule of `espn_analyze_matchup`, `espn_analyze_schedule` and
   `espn_analyze_roster`, and the rest-of-season reading of `espn_get_projections`,
   `espn_analyze_waivers`, `espn_analyze_replacement`, `espn_analyze_trade`,
-  `espn_analyze_injury_cascade` and `espn_analyze_league_activity`. `espn_analyze_trade`'s offer
-  without the season simulation says `season simulation not read: ΔU from the cold-start PF-per-win
-  rate` when the session refused the matchups. The outage lines are unchanged.
-- **A stale pro schedule failed `espn_get_roster` and other optional schedule reads (ruling R12-5;
-  `docs/plan/changelog.md` §R12).** A pro schedule past its hard limit (`STALE_ONLY`) is lost data,
-  an outage for an optional read: `espn_get_roster`, `espn_analyze_lineup`, the schedule of
-  `espn_analyze_matchup`, `espn_analyze_schedule` and `espn_analyze_roster`, and the rest-of-season
-  reading of `espn_get_projections`, `espn_analyze_waivers`, `espn_analyze_replacement`,
-  `espn_analyze_trade`, `espn_analyze_injury_cascade` and `espn_analyze_league_activity` now answer
-  with the "pro schedule unavailable" line where they failed the call, as the injuries, the player
-  list, the clock and the scoreboards already did. `espn_analyze_lineup`'s schedule read, which
-  degraded on a budget shortfall only, now also absorbs an outage and a session refusal. A bug
-  still answers `INTERNAL`.
+  `espn_analyze_injury_cascade` and `espn_analyze_league_activity` — and in the reads that said no
+  line (below: the scoreboard, the box score, the player list, the injuries and the
+  retrospective). `espn_analyze_trade`'s offer without the season simulation says `season
+  simulation not read: ΔU from the cold-start PF-per-win rate` when the session refused the
+  matchups. The outage lines are unchanged.
+- **A stale pro schedule failed `espn_get_roster` and other optional schedule reads, or went unsaid
+  (ruling R12-5; `docs/plan/changelog.md` §R12).** A pro schedule past its hard limit
+  (`STALE_ONLY`) is lost data, an outage for an optional read: `espn_get_roster`,
+  `espn_analyze_lineup`, the schedule of `espn_analyze_matchup`, `espn_analyze_schedule` and
+  `espn_analyze_roster`, and the rest-of-season reading of `espn_get_projections`,
+  `espn_analyze_waivers`, `espn_analyze_replacement`, `espn_analyze_trade`,
+  `espn_analyze_injury_cascade` and `espn_analyze_league_activity` now answer with the "pro
+  schedule unavailable" line where they failed the call. Of the reads that already absorbed it,
+  only the league clock and the live scoreboard said a line; the others answered without the
+  schedule and said nothing (the round-5 verifier's F1). They now say it by cause, on a stale
+  dataset, an outage or a refusal: `espn_get_scoreboard` (`pro schedule unavailable: provisional
+  and corrections_window_open are conservative`), `espn_get_box_score` (`… game_state from the box
+  score alone; final, provisional and corrections_window_open are conservative`, one read for both
+  its uses), `espn_list_players` (`… next_opponent and next_kickoff are null`),
+  `espn_get_injuries` (`… kickoffs unknown and game_day false`) and `espn_analyze_retrospective`
+  (`… the week scored is the one before the current week` when no `week` is given, and
+  `… final and corrections_window_open are conservative; no forecast or attribution row is
+  scored`).
+  `espn_analyze_lineup`'s schedule read, which degraded on a budget shortfall only, now also absorbs
+  an outage and a session refusal, as R11-4's optional reads do (`docs/evals/stage-c-backlog.md`
+  asks for that widening to be confirmed). A bug still answers `INTERNAL`.
+- **`espn_analyze_matchup` live conditioned P(win) on a box score the session refused, and called
+  a refused pro schedule "unavailable" (the round-5 verifier's F2; ruling R12-4).** A live fact the
+  session refused is unread like one an outage lost, so nothing is conditioned on it: the pre-game
+  P(win) of the lineups as set, `live: null`, `partial: true`. Before, a refused box score was
+  dropped from the unread list and its points so far read as 0. The session line says the refusal:
+  the `live conditioning unavailable: …` warning names only the facts an outage lost, and the
+  assumption names every unread fact.
 - **The cheat-sheet did not say what `espn_analyze_schedule`'s costs measure (the round-4 plugin
   eval's SP-1).** Its row in `tool-outputs.md` now says that `bye_cluster_cost` is the loss left
   after the streams fill the holes (0 off a cluster of 2 or more starters out), that
