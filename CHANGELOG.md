@@ -317,6 +317,43 @@ minor version (plan 04 §4.4; plan 09 K6). One version covers the server, the Sk
   branch on the base pool. waivers gives a strongly negative `xfp_gap` its size: 2 or more points a
   game over the usage window, read from `espn_get_player_usage`, since `signals[]` carries only the
   positive gap.
+- **The Skills after the plugin eval's round 4 (rulings R12-1 to R12-3; `docs/plan/changelog.md`
+  §R12).** news-check's description again names the beat, practice or official report and a
+  start/sit, claim or trade, beside the outlook against usage, a usage jump and a logged claim, and
+  its `when_to_use` adds "outlook says", "practice report" and "you logged about"; onboard confirms
+  which team is the user's and names "by record or by points"; session-check opens with the
+  assistant or its tools stopping; trade names a buy-low or sell-high target. The listing stays
+  within its 4 600-character ceiling (4 573): other descriptions were tightened and five phrases no
+  trigger positive matches were cut. A stop at Step 0 holds the Session line, one "Not read" line,
+  session-check's steps and the hand-off line, with `eff setup` once and no section of the Skill's
+  own output; a partial answer's Confidence & freshness opens with the rejection on one fixed line;
+  beside the hand-off line a tool's session-refusal line is said without its own command. Every
+  line a run dropped or reworded is now a fixed line, given verbatim: roster-audit's Phase line;
+  schedule-plan's worst weeks in the tool's order, `bye_cluster_cost` as the loss left after the
+  fixes, the season simulation on a bye question too and nothing after the core-toolset stop;
+  start-sit's cross-check table with `pct`, the unconfirmed-report line, no move for a locked player
+  and the live split; waivers' usage read before the decision with a stated selector, the
+  touchdown-luck flag on every candidate named, the Premium label, the failed-claim line, the
+  Scramble list label and no claim verdict for a free agent in the scramble brief; apply's
+  no-agreement question and a deadline on every step; session-check's one line on a pasted command;
+  and the lines news-check, injury-cascade, retro, stream-kdef, trade, onboard and weekly give for
+  the priors, the outlook, the role column, the followed calls and baselines, the implied total and
+  the add after the run, the Δ table and the order labels, match and mismatch, and the six headings
+  and Deadline column. weekly answers "what happened in my league" with the League activity section
+  alone. check-skills holds every one.
+- **The plugin eval's cases after round 4 (rulings R12-1, R12-2, R12-6; `docs/plan/changelog.md`
+  §R12).** Every regex that checks a line the Skills now give verbatim accepts that line, filled in
+  from its fixture, and plan 09 §3's term for it, never a different meaning. The regexes round 4's
+  replies failed with the line in place take the forms they used: the live split with the count
+  before its word (SS-9, SS-11-E), the IR move that changes no surplus (WV-5-E), "once the run
+  clears" (KD-4-E), backticked slot names (RA-2), a column headed ESPN (SS-6-E), the chance the role
+  lasts (IC-1) and the scoring that does not match ESPN's (ON-3). WK-1's deadlines are free graders:
+  a Deadline column in each action table and a time on every move row. WK-10's six-part line is one
+  judge per clause, says the persisted history is empty on its seed and names weekly's
+  League-activity-only answer; RT-4-E, NC-7 and ON-6 grade what their fixtures give. SC-6's and
+  SC-10's histories replay the session-check call, as SC-7-E's does. news-check's trigger set holds
+  NC-2's, NC-6's and NC-7's prompts as positives, with three new negatives. Plan 09 lists WV-8 and
+  the `td-inflated` and `inj-player-name` variants.
 - **Dependencies, reviewed under plan 04 §2 (Dependabot PRs 1–5, 2026-11-04 to 2026-11-05; ruling
   R10-35).** The MCP SDK 2.3.1 → 2.4.0 (`@modelcontextprotocol/server` and `core`, and the dev
   `client`; `espn_get_status` reports `sdk_version` 2.4.0): 2.4.0 adds the Skills extension on new

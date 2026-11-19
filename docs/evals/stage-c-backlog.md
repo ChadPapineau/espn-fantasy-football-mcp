@@ -1127,6 +1127,8 @@ round 3's eval-case triage is built.
   output names no flag, so neither PASS-if line names one.
 - **SC-6 and SC-10 replay SC-1's turn as text.** `HISTORY_SKILL_CALLS` lists SC-7-E only (round 3's
   fidelity step); the other two follow-up turns could replay the session-check call the same way.
+  **Closed** by round 5's eval-case fixes: round 4's Sonnet branches of both ran the follow-up turn
+  without the Skill, and `HISTORY_SKILL_CALLS` now lists SC-6 and SC-10 beside SC-7-E.
 
 
 ## Found in round 5's server fixes (2026-11-19)
@@ -1159,3 +1161,41 @@ What the server stream of the §R12 fix round built and left open (`docs/plan/ch
   standings ("standings unavailable: waiver rank unknown …") absorb only the call's budget signal, so
   an outage or a session refusal there fails the call. They are not pro-schedule reads, so R12-5 does
   not name them; their lines are never reached on a refusal.
+
+## Found in round 5's eval-case fixes (2026-11-19)
+
+What the eval-case stream of the §R12 fix round built and left open (`docs/plan/changelog.md` §R12).
+Everything in round 4's eval-case triage is built; `tests/skills/round5-eval-cases.test.ts` holds it.
+
+- **R12-1's regexes, case by case.** Each regex that checks a line the Skills now give verbatim
+  accepts it, filled in from the case's fixture, and plan 09 §3's term: SS-9 and SS-11-E (the live
+  split), SS-6-E 02–04 (the cross-check table with `pct`), SS-12 and SS-INJ-2 (the unconfirmed line),
+  WV-1 (the Premium label beside Surplus (s)), WV-4-E and WV-6-E (the Scramble list label), WV-5-E
+  (Surplus with the IR move, and "the IR move changes no surplus"), NC-1 (the priors line), IC-1 (P(role
+  holds)), ON-3 (the self-check line), RT-1 (the Followed column), RT-4-E ("n too small (0 of 30)"),
+  RT-6 (N of M calls scored), KD-1 (Implied total), KD-4-E (the add after the run), TR-1 (the Δ
+  table), WK-1 (the six headings), WK-10 and WK-11 (orient's Partial line), and ON-6, WK-9 and SS-13
+  (orient's stop at Step 0). The other fixed lines (RA-1's Phase line, SP-1's and SP-CORE's, AP-2's,
+  AP-7's, TR-3's, NC-INJ's, IC-3's and WV-6-E's) are graded by judges only.
+- **IC-1's and ON-3's second causes take the same meaning, never a near word.** IC-1 04 accepts the
+  chance that the role lasts only beside a chance word ("His bigger role lasts while Pierce is out" is
+  a duration, and fails); ON-3 02 accepts the scoring that "doesn't match ESPN", never a bare "doesn't
+  match".
+- **R12-2's split is applied to the lines this round touched** (WK-10, NC-7, ON-6). Other PASS-if
+  lines still join conditions, RA-1's judge 04 among them (the phase and the bench template's reason);
+  splitting them all is a ruling's to order.
+- **KD-1 takes the second option.** Its regex 03 already takes the fixed column (Implied total) and
+  plan 09's term, so no judge was added; a failing KD-1 run still keeps no reply on record.
+- **WK-1's deadline graders read the tables by section.** The column grader needs a table with a
+  Deadline column in each of the lineup, Waivers, K and D/ST, and Injuries and byes sections (the
+  fixture has an IR move), under weekly's six fixed headings; the row grader fails a move row whose
+  last cell is blank, a dash, n/a, none, TBD or "this week". A move given only in prose is caught by
+  the first, not the second.
+- **VS-12, checked on round 4's kept SC-7-E sessions.** The replayed Skill text's base-directory line
+  names the suite's own plugin copy (`<suite>/plugins/base--core/skills/session-check`), which exists
+  and holds every reference the text links; no run read one. Round 4's Opus copy of the suite kept the
+  line of the suite it was copied from, a byte-identical plugin, so a copied suite reads while the
+  original stays in place. No case change.
+- **R12-6's §5.2 line.** §5.2 now names `td-inflated` and counts seven `inj-*` variants, naming
+  `inj-player-name` in place of `inj-tradeblock` for AP-INJ (TR-INJ keeps `inj-tradeblock`). §3.6's
+  AP-INJ line still names `inj-tradeblock`: the ruling changes §3's WV-8 line and §5.2 only.
