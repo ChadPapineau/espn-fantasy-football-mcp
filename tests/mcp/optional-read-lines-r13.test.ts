@@ -10,6 +10,9 @@
 // standings, the trade's, the cascade's, the roster audit's and the league activity's standings, the
 // evidence's rosters, the retrospective's scoring settings, the seeding evidence's last-season
 // league, the search's team names and position filter, and espn_get_roster's opponent order.
+// The R13 verifier's findings: every site holds the budget (F2), the two optionalOrThrow reads hold
+// STALE_ONLY (F5), the evidence's rosters line is true beside the IR-move check it leaves standing
+// (F1), and the cascade's standings line is said only where a claim verdict is priced (F4).
 // Fixture mode (fx-10h, Team 02, week 5), fake clock; no network.
 import { readFileSync } from "node:fs";
 import path from "node:path";
@@ -151,7 +154,20 @@ interface Site {
   readonly base?: (s: McpServices) => McpServices;
   /** Whether the budget is injected too (the reads that absorbed it before). */
   readonly budget?: boolean;
+  /**
+   * Whether a cache past its hard limit (STALE_ONLY) is an outage here too: the reads that go
+   * through optionalOrThrow (R11-4), which failed the call on it before R13-2.
+   */
+  readonly stale?: boolean;
 }
+
+/**
+ * The evidence's rosters line: without them a rival's slot and lock are unknown, so the lock check
+ * is not made and the IR-move check (field lineup_slot) reads him as not in IR — it is still made
+ * (the R13 verifier's F1)
+ */
+const EVIDENCE_ROSTERS_REST =
+  "the lineup_locked check is not made; the lineup_slot check reads him as not in IR";
 
 const line = (view: string, rest: string) => ({
   unavailable: `${view} unavailable: ${rest}`,
@@ -167,6 +183,7 @@ const SITES: readonly Site[] = [
     fault: read("getMatchups"),
     ...line("schedule", "no opponent, objective mean, mode neutral"),
     budget: true,
+    stale: true,
   },
   {
     site: "analytics.ts espn_analyze_waivers' standings (budget only before)",
@@ -175,6 +192,7 @@ const SITES: readonly Site[] = [
     fault: read("getStandings"),
     ...line("standings", "waiver rank unknown (cold-start premium at k = N/2)"),
     budget: true,
+    stale: true,
   },
   {
     site: "analytics.ts leaguePremiumFit's pro schedule (E5's fitted premium; no line before)",
@@ -194,6 +212,7 @@ const SITES: readonly Site[] = [
     args: () => ({ week: 5, objective: "auto" }),
     fault: read("getStandings"),
     ...line("standings", "the season read from the results"),
+    budget: true,
   },
   {
     site: "market-p1.ts espn_analyze_trade's standings (the offer's season simulation)",
@@ -201,6 +220,7 @@ const SITES: readonly Site[] = [
     args: () => tradeArgs,
     fault: read("getStandings"),
     ...line("standings", "the season read from the results"),
+    budget: true,
   },
   {
     site: "market-p1.ts espn_analyze_injury_cascade's standings (its waiver verdicts)",
@@ -208,6 +228,7 @@ const SITES: readonly Site[] = [
     args: () => ({ player: { player_ids: [rb] } }),
     fault: read("getStandings"),
     ...line("standings", "waiver rank unknown (cold-start premium at k = N/2)"),
+    budget: true,
   },
   {
     site: "analytics-p1.ts espn_analyze_roster's standings (fx-10h: no acquisition limit)",
@@ -215,6 +236,7 @@ const SITES: readonly Site[] = [
     args: () => ({ seed: 3 }),
     fault: read("getStandings"),
     ...line("standings", "the season read from the results"),
+    budget: true,
   },
   {
     site: "analytics-p1.ts espn_analyze_roster's standings (an acquisition limit of 30)",
@@ -226,6 +248,7 @@ const SITES: readonly Site[] = [
       "standings",
       "adds_remaining counts no acquisition as used; the season read from the results",
     ),
+    budget: true,
   },
   {
     site: "market-p1.ts espn_analyze_league_activity's standings (its refusal line is its own)",
@@ -234,13 +257,15 @@ const SITES: readonly Site[] = [
     fault: read("getStandings"),
     unavailable: "standings unavailable: waiver-order movement goes without them",
     notRead: null,
+    budget: true,
   },
   {
     site: "market-p1.ts espn_analyze_evidence's rosters (a rival's player: his slot and lock)",
     tool: "espn_analyze_evidence",
     args: () => ({ player: { player_ids: [rivalPlayer] } }),
     fault: read("getRosters"),
-    ...line("rosters", "the lineup_slot and lineup_locked checks are not made"),
+    ...line("rosters", EVIDENCE_ROSTERS_REST),
+    budget: true,
   },
   {
     site: "reclog.ts espn_analyze_retrospective's scoring settings",
@@ -248,6 +273,7 @@ const SITES: readonly Site[] = [
     args: () => ({ week: 4 }),
     fault: read("getScoringSettings"),
     ...line("scoring settings", "no forecast or attribution row is scored"),
+    budget: true,
   },
   {
     site: "league.ts the seeding evidence's last-season league (its bracket-edit flag)",
@@ -256,6 +282,7 @@ const SITES: readonly Site[] = [
     fault: (f) => lastSeason(f),
     base: lastSeason(null),
     ...line("last season's league", "playoff_edited is null"),
+    budget: true,
   },
   {
     site: "players.ts espn_search_players' team names",
@@ -263,6 +290,7 @@ const SITES: readonly Site[] = [
     args: () => ({ query: "Robinson" }),
     fault: read("getStandings"),
     ...line("standings", "on_team_name is null"),
+    budget: true,
   },
   {
     site: "players.ts espn_search_players' position filter",
@@ -278,6 +306,7 @@ const SITES: readonly Site[] = [
     args: () => ({ week: 5, all: true }),
     fault: read("getMatchups"),
     ...line("matchups", "my opponent's roster is not placed second"),
+    budget: true,
   },
 ];
 
@@ -340,7 +369,8 @@ describe("R13-2: an optional read says 'unavailable' on an outage, 'not read' on
       expect(cleanWarnings).not.toContain(s.unavailable);
       if (s.notRead !== null) expect(cleanWarnings).not.toContain(s.notRead);
       // an outage: the answer without the read, said "unavailable"
-      for (const code of ["ESPN_UPSTREAM_UNAVAILABLE", "RATE_LIMITED", "ESPN_DRIFT_DETECTED"]) {
+      const outages = ["ESPN_UPSTREAM_UNAVAILABLE", "RATE_LIMITED", "ESPN_DRIFT_DETECTED"];
+      for (const code of s.stale === true ? [...outages, "STALE_ONLY"] : outages) {
         const out = await run(s.tool, s.args(), svc(coded(code)));
         expect(out.isError, `${code} ${peek(out.body)}`).toBe(false);
         expect(out.body.warnings, `${code} ${JSON.stringify(out.body.warnings)}`).toContain(
@@ -457,7 +487,7 @@ describe("R13-2: leaguePremiumFit's own schedule read, made first", () => {
 // my roster's snapshot stands in for a failed rosters read only where it holds the subject: my own
 // player (said by rostersOf's snapshot line), never a rival's, whose slot and lock it does not carry
 describe("R13-2: espn_analyze_evidence's rosters beside my roster's snapshot", () => {
-  const unavailable = "rosters unavailable: the lineup_slot and lineup_locked checks are not made";
+  const unavailable = `rosters unavailable: ${EVIDENCE_ROSTERS_REST}`;
   beforeAll(async () => {
     const week = 5;
     const got = await world.services.platform.getRoster(
@@ -492,4 +522,84 @@ describe("R13-2: espn_analyze_evidence's rosters beside my roster's snapshot", (
       JSON.stringify(own.body.warnings),
     ).toBe(true);
   }, 120_000);
+
+  // the line is true beside the disagreement it leaves standing (the R13 verifier's F1): the IR-move
+  // check is still made without the rosters, reading the rival's QUESTIONABLE WR as not in IR
+  it("an IR-move claim on a rival's player: the line beside the lineup_slot disagreement", async () => {
+    const args = {
+      player: { player_ids: [rivalPlayer] },
+      claim: { text: "put him on IR this week" },
+    };
+    const disagrees = (b: Body): unknown => (b.data as J).structured_disagrees;
+    const ir = { field: "lineup_slot", claim_value: "IR move" };
+    const clean = await run("espn_analyze_evidence", args, world.services);
+    expect(clean.isError, peek(clean.body)).toBe(false);
+    expect(disagrees(clean.body)).toMatchObject(ir);
+    const out = await run(
+      "espn_analyze_evidence",
+      args,
+      faulty(world.services, { getRosters: coded("ESPN_UPSTREAM_UNAVAILABLE") }),
+    );
+    expect(out.isError, peek(out.body)).toBe(false);
+    expect(disagrees(out.body)).toMatchObject(ir);
+    expect(out.body.warnings).toContain(unavailable);
+    expect(
+      (out.body.warnings ?? []).filter((w) => w.startsWith("rosters ")),
+      JSON.stringify(out.body.warnings),
+    ).toEqual([unavailable]);
+  }, 120_000);
+});
+
+// the cascade's standings price only its claim verdicts (E5's waiver rank): with no free-agent or
+// waivers beneficiary no claim is priced, so the line is not said (the R13 verifier's F4)
+describe("R13-2: espn_analyze_injury_cascade's standings line only where a claim is priced", () => {
+  const rest = "waiver rank unknown (cold-start premium at k = N/2)";
+  interface Cascade {
+    beneficiaries: { availability: { status: string | null } }[];
+  }
+  const claimable = (b: Body): number =>
+    (b.data as Cascade).beneficiaries.filter(
+      (x) => x.availability.status === "FREEAGENT" || x.availability.status === "WAIVERS",
+    ).length;
+
+  it("no claimable beneficiary: no standings line on an outage or the budget", async () => {
+    const roster = await run("espn_get_roster", { week: 5, team_id: myTeam }, world.services);
+    const ids = (roster.body.data as { players: { player_id: number; position: string }[] }).players
+      .filter((p) => ["QB", "RB", "WR", "TE"].includes(p.position))
+      .map((p) => p.player_id);
+    let quiet = 0;
+    for (const id of ids) {
+      const c = await run(
+        "espn_analyze_injury_cascade",
+        { player: { player_ids: [id] } },
+        world.services,
+      );
+      if (!c.isError && claimable(c.body) === 0) {
+        quiet = id;
+        break;
+      }
+    }
+    expect(quiet).toBeGreaterThan(0);
+    for (const f of [coded("ESPN_UPSTREAM_UNAVAILABLE"), "budget" as const]) {
+      const out = await run(
+        "espn_analyze_injury_cascade",
+        { player: { player_ids: [quiet] } },
+        faulty(world.services, { getStandings: f }),
+      );
+      expect(out.isError, peek(out.body)).toBe(false);
+      expect(claimable(out.body)).toBe(0);
+      expect(
+        (out.body.warnings ?? []).filter((w) => w.endsWith(rest)),
+        JSON.stringify(out.body.warnings),
+      ).toEqual([]);
+    }
+    // a priced claim (rb's waivers beneficiaries) keeps it
+    const priced = await run(
+      "espn_analyze_injury_cascade",
+      { player: { player_ids: [rb] } },
+      faulty(world.services, { getStandings: coded("ESPN_UPSTREAM_UNAVAILABLE") }),
+    );
+    expect(claimable(priced.body)).toBeGreaterThan(0);
+    expect(priced.body.warnings).toContain(`standings unavailable: ${rest}`);
+  }, 240_000);
 });

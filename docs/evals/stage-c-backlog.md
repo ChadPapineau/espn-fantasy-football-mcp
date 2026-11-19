@@ -1277,13 +1277,18 @@ What the server stream built under R13-2 (`docs/plan/changelog.md` §R13) and wh
 `src/mcp/tools` left as it is. `tests/mcp/optional-read-lines-r13.test.ts` holds every site built
 here: on an outage (`ESPN_UPSTREAM_UNAVAILABLE`, `RATE_LIMITED`, `ESPN_DRIFT_DETECTED`) the call
 answers with the "unavailable" line; on a refusal (both codes) the "not read" line, exactly one
-session line and `partial: true`; on a bug `INTERNAL`; where the read absorbed the budget before,
-the budget too. Each site failed before its fix. A mutation pass over the lines, the catches and
+session line and `partial: true`; on a bug `INTERNAL`; on the budget, which every site absorbed
+before, `partial: true` and the "unavailable" line (all fifteen cases since the verifier's F2: the
+sweep's had none, and a mutant silencing the line on the budget alone survived at five sites); at
+the two reads that go through `optionalOrThrow`, `STALE_ONLY` too (F5). Each site failed before its
+fix. A mutation pass over the lines, the catches and
 the causes (27 mutants) killed all but one, the evidence's snapshot standing in for a rival's player,
 which no world held a snapshot for; a case with my roster's snapshot now kills it.
 
 - **R13-2's named sites, built.** `espn_analyze_lineup`'s matchups and `espn_analyze_waivers`'
-  standings absorb an outage and a refusal through `optionalOrThrow`, with `fallbackWarning` lines;
+  standings absorb an outage and a refusal through `optionalOrThrow`, with `fallbackWarning` lines
+  — and a cache past its hard limit (`STALE_ONLY`), an outage for an optional read as R12-5 reads
+  it, which failed the call before and no longer asks for `allow_stale: true` there;
   `leaguePremiumFit`'s pro schedule says `pro schedule unavailable: the fitted premium's logged
   waiver runs grouped by Tuesday-to-Tuesday week` (`not read` on a refusal: the session line names
   the read, never what the fit goes without), and a bug in that read is thrown past the fit's own
@@ -1292,8 +1297,13 @@ which no world held a snapshot for; a case with my roster's snapshot now kills i
 - **The sweep's sites, built.** The reads that answered without their data and said nothing: the
   standings of `espn_analyze_lineup`, `espn_analyze_trade`'s offer, `espn_analyze_injury_cascade`'s
   verdicts, `espn_analyze_roster` (whose `adds_remaining` counted the acquisitions used as 0) and
-  `espn_analyze_league_activity`; `espn_analyze_evidence`'s rosters (a rival's player: my roster's
-  snapshot, which stood in for every subject, now stands in for my own players only);
+  `espn_analyze_league_activity`, the cascade's only where E5 priced a claim verdict (with no
+  free-agent or waivers beneficiary the standings change nothing; the verifier's F4);
+  `espn_analyze_evidence`'s rosters (a rival's player: my roster's snapshot, which stood in for
+  every subject, now stands in for my own players only; the line says the lock check is not made
+  and the IR-move check, field `lineup_slot`, reads him as not in IR — that check still runs on his
+  designation, so "the lineup_slot … checks are not made" was untrue beside its disagreement, the
+  verifier's F1);
   `espn_analyze_retrospective`'s scoring settings; the seeding evidence's last-season league (its
   `playoff_edited` flag); the team names of `espn_search_players` and `espn_list_players`;
   `espn_search_players`' position filter (whose budget shortfall was also unsaid and not partial);
@@ -1313,8 +1323,9 @@ which no world held a snapshot for; a case with my roster's snapshot now kills i
   (the simulator's note "the playoff bracket has started and its field is unknown (no standings
   seeds) …"), `espn_analyze_league_activity`'s rosters ("N rosters unreadable: no needs for them"
   when rival needs are asked; nothing else reads them), `espn_list_transactions`' pending claims
-  (`espn:mPendingTransactions unavailable`). The R10-12 sites that stay silent on a refusal
-  (`unavailableUnlessRefused`, the `!refused` guards) are R13-2's silent clause and unchanged.
+  (`espn:mPendingTransactions unavailable`). The sites that stay silent on a refusal
+  (`unavailableUnlessRefused`, the `!refused` guards, built under R10-11 and R11-4) are unchanged;
+  this round did not check them against R13-2's silent clause, so they are open below (item 3).
 - **Open, for the orchestrator.** (1) `partial` on an outage: these lines leave `partial` as the house
   contract sets it (`tool-outputs.md`: the budget, the deadline or the limiter held a read back, or a
   session refusal), so an outage alone answers `partial: false` with its "unavailable" line, as
@@ -1323,4 +1334,17 @@ which no world held a snapshot for; a case with my roster's snapshot now kills i
   would also tell the Skills to repeat the call (`tool-outputs.md`'s partial paragraph). Not changed.
   (2) Guards that absorb a bug in a computation, not a read, with or without a line — `leaguePremiumFit`'s
   fit (logged only), E2's seeding simulator ("seeding simulator unavailable: …"), E1's v2 layer
-  ("v2-opportunity unavailable …") — are R11-4's class, not R13-2's; left for a ruling.
+  ("v2-opportunity unavailable …") — are R11-4's class, not R13-2's; left for a ruling. (3) The
+  silent-on-refusal sites against R13-2's clause (the verifier's F3). The call's session line
+  (`refusals.ts`) names the read, why and `eff setup`, never what the answer goes without, so a
+  site whose outage line names a consequence loses that on a refusal: E3 season mode's standings
+  ("the season read from the results", `standingsOrNull`), `espn_get_player_usage`'s scoring
+  settings ("points_league, xfp_ep and xfp_gap are null"), the cascade's my roster ("claim/pass
+  verdicts are null"), the season simulations ("competing read as yes", "every week weighted 1"),
+  and the `unavailableUnlessRefused` sites in `datasets-p1.ts`, `analytics-p1.ts`, `league.ts`,
+  `espn-p1.ts` and `market-p1.ts` (the positional rating, the box score's "nothing conditioned",
+  the free-agent pool, last season's seeding evidence, the box score's player points, the outlook
+  paragraphs). Each needs either a `fallbackWarning` "not read" line, as this round gave its own
+  sites, or a recorded reason that the session line already says it; the Skills' tests and the
+  eval cases that pin the refusal answers (R10-11, R10-12, R10-28) read those answers, so the
+  change is the orchestrator's to scope.

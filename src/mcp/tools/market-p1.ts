@@ -1247,6 +1247,8 @@ export const analyzeInjuryCascadeTool = defineTool({
           ? game.lines.implied.home
           : game.lines.implied.away;
     const tmById = new Map(teammates.map((p) => [p.ref.id, p]));
+    // whether E5 priced a claim verdict: the standings reach the answer only through it
+    const claims = { priced: false };
     await turn();
     const out = await analyzeInjuryCascade({
       injured: {
@@ -1281,8 +1283,8 @@ export const analyzeInjuryCascadeTool = defineTool({
       ...(mine === null
         ? {}
         : {
-            evaluate_claims: (list: readonly CascadeClaimInput[]) =>
-              waiverVerdicts(
+            evaluate_claims: async (list: readonly CascadeClaimInput[]) => {
+              const verdicts = await waiverVerdicts(
                 ctx,
                 b,
                 mine,
@@ -1293,7 +1295,10 @@ export const analyzeInjuryCascadeTool = defineTool({
                 list,
                 ros,
                 warnings,
-              ),
+              );
+              if (verdicts.size > 0) claims.priced = true;
+              return verdicts;
+            },
           }),
       clock: ctx.services.clock,
       inputs: toDataInputs(inputs, ctx.nowMs),
@@ -1301,8 +1306,9 @@ export const analyzeInjuryCascadeTool = defineTool({
     if (mine === null && !rostersRead.refused)
       warnings.push("my roster unavailable: claim/pass verdicts are null");
     // the claim/pass verdicts are E5's, priced at my waiver rank: without the standings at the
-    // cold-start rank, said by cause (changelog §R13, R13-2)
-    if (mine !== null && standings === null)
+    // cold-start rank, said by cause (changelog §R13, R13-2) — only where a verdict was priced (no
+    // free-agent or waivers beneficiary: the standings changed nothing; the R13 verifier's F4)
+    if (claims.priced && standings === null)
       warnings.push(
         fallbackWarning(
           stFailure,
@@ -1689,7 +1695,8 @@ export const analyzeEvidenceTool = defineTool({
     let locked: boolean | null = null;
     if (p.status === "ONTEAM") {
       // an optional read (changelog §R13, R13-2): without the rosters his slot and lock are unknown,
-      // so the checks that read them are not made — said by cause; a bug is INTERNAL (R11-4). My
+      // so the lock check is not made and the IR-move check (field lineup_slot, which still runs on
+      // his designation) reads him as not in IR — said by cause; a bug is INTERNAL (R11-4). My
       // roster's snapshot stands in only for my own player (rostersOf says it): a rival's player is
       // not on it
       let rFailure: unknown = null;
@@ -1706,7 +1713,7 @@ export const analyzeEvidenceTool = defineTool({
           fallbackWarning(
             rFailure,
             "rosters",
-            "the lineup_slot and lineup_locked checks are not made",
+            "the lineup_locked check is not made; the lineup_slot check reads him as not in IR",
           ),
         );
       const e = rosters?.flatMap((r) => r.entries).find((x) => x.player.ref.id === p.ref.id);
