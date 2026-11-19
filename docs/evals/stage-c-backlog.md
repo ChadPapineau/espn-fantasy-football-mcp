@@ -1213,16 +1213,26 @@ Everything in round 4's eval-case triage is built; `tests/skills/round5-eval-cas
   chance that the role lasts only beside a chance word ("His bigger role lasts while Pierce is out" is
   a duration, and fails); ON-3 02 accepts the scoring that "doesn't match ESPN", never a bare "doesn't
   match".
-- **R12-2's split is applied to the lines this round touched** (WK-10, NC-7, ON-6). Other PASS-if
-  lines still join conditions, RA-1's judge 04 among them (the phase and the bench template's reason);
-  splitting them all is a ruling's to order.
+- **R12-2's split is applied to the lines this round touched** (WK-10, NC-7, ON-6), and, after the
+  round-5 verifier (V5S-5), to the six it named: ON-6's rejection and hand-off, RT-4-E's metrics and
+  why each is empty, RA-1's phase, bench template and its reason (the line that failed every round-4
+  run), WK-10's history and hand-off lines, and WK-11's seven clauses. Other PASS-if lines still join
+  conditions (among them SS-12 03, SS-INJ-2 03, IC-INJ 03, RT-INJ 04 and 05, WK-8 07,
+  WK-9 07, SC-11 06); whether R12-2 reaches them is asked of the orchestrator.
 - **KD-1 takes the second option.** Its regex 03 already takes the fixed column (Implied total) and
   plan 09's term, so no judge was added; a failing KD-1 run still keeps no reply on record.
-- **WK-1's deadline graders read the tables by section.** The column grader needs a table with a
-  Deadline column in each of the lineup, Waivers, K and D/ST, and Injuries and byes sections (the
-  fixture has an IR move), under weekly's six fixed headings; the row grader fails a move row whose
-  last cell is blank, a dash, n/a, none, TBD or "this week". A move given only in prose is caught by
-  the first, not the second.
+- **WK-1's deadline graders read the tables by section.** The column grader needs, in each of the
+  lineup, Waivers, K and D/ST, and Injuries and byes sections (the fixture has an IR move), under
+  weekly's six fixed headings, a table with a Deadline column or a line that gives its Deadline with
+  a time (plan 09 §3.2's term; the round-5 verifier's V5S-4: round 4's Sonnet base run 1 gave the IR
+  move so). The row grader reads every cell, the first included, finds the Deadline cell under its
+  header wherever the column sits (up to nine cells before it), and fails a row naming a move whose
+  Deadline cell is blank, a dash, n/a, none, TBD or "this week"; Start and Bench are a move only in a
+  swap ("over", "for", "in place of"), so a kept starter's role and a Bench slot pass, and a table
+  with no Deadline column (League activity's rivals' moves) is not graded (V5S-3). A move named in
+  prose is the third grader's, one judge on the moves outside a Deadline column. Round 4's eight WK-1
+  replies trip the row grader on none; the column grader fails both Opus base runs (no lineup
+  Deadline column, and "This week: vs …" headings), which weekly's fixed lines now cover.
 - **VS-12, checked on round 4's kept SC-7-E sessions.** The replayed Skill text's base-directory line
   names the suite's own plugin copy (`<suite>/plugins/base--core/skills/session-check`), which exists
   and holds every reference the text links; no run read one. Round 4's Opus copy of the suite kept the
@@ -1230,4 +1240,27 @@ Everything in round 4's eval-case triage is built; `tests/skills/round5-eval-cas
   original stays in place. No case change.
 - **R12-6's §5.2 line.** §5.2 now names `td-inflated` and counts seven `inj-*` variants, naming
   `inj-player-name` in place of `inj-tradeblock` for AP-INJ (TR-INJ keeps `inj-tradeblock`). §3.6's
-  AP-INJ line still names `inj-tradeblock`: the ruling changes §3's WV-8 line and §5.2 only.
+  AP-INJ line still names `inj-tradeblock`: the ruling changes §3's WV-8 line and §5.2 only. The
+  round-5 verifier (V5S-10) counts four more variants the suite runs and plan 09 never names:
+  `outlook-more-work` (1 case), `private-league` (4), `private-league-none` (1) and
+  `private-expiring` (1). Whether R12-6 extends to them and to §3.6's AP-INJ line is asked of the
+  orchestrator; plan 09 is unchanged until then.
+
+## Found in the round-5 verifier's findings on the Skills and the cases (2026-11-19)
+
+- **Built** (`tests/skills/round4-fixes.test.ts`, `tests/skills/round5-eval-cases.test.ts`):
+  session-check's API-key note only when asked, and left out of a take-over (V5S-1; ON-6 07 keeps
+  its allowance); schedule-plan's order rule without the clause `espn_analyze_schedule` contradicts
+  (V5S-2: the tool runs its own season simulation and weights 1 only when its own matchups read
+  fails, with a warning); WK-1's row and column graders and one judge for prose moves (V5S-3,
+  V5S-4); the six joined lines split (V5S-5); start-sit's conditional swap only on an unlocked slot,
+  with a fixed line for a locked one (V5S-6); ON-3 02 no longer passes "0 mismatch", "no mismatch"
+  or a condition (V5S-7); session-check's take-over step 5, trade's "no verdict before **Devil's
+  advocate:**" and weekly's "never 'This week: vs …'" pinned (V5S-8); schedule-plan's "playoff
+  seed" restored and the CHANGELOG's count of cut phrases corrected to six (V5S-9). check-skills'
+  `ROUND4_ABSENT` holds the withdrawn sentences out.
+- **To watch in round 5's trigger run:** onboard neg-08 ("Who is the 4 seed in my league right
+  now?") and waivers pos-01 ("Who should I pick up this week…"): "pickup" stays cut, the listing at
+  4 587 of 4 600.
+- **Open, for the orchestrator:** R12-2's scope beyond the named lines (V5S-5) and R12-6's beyond its
+  text (V5S-10), above.

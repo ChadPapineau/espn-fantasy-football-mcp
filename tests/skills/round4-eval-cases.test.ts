@@ -323,11 +323,11 @@ describe("round 3's eval-case rubrics state what the fixture gives (each PASS-if
     expect(JSON.stringify(caseOf("start-sit", "SS-6-E"))).not.toMatch(/untuned/);
   });
   it("WK-10 and WK-11: eff setup once, in the hand-off line (the round-4 refix's VS-5)", () => {
-    // round 5 (changelog §R12, R12-2): WK-10's clauses are one judge each
-    expect(llmLine(caseOf("weekly", "WK-10"), "The answer ends with the hand-off line")).toMatch(
+    // round 5 (changelog §R12, R12-2): WK-10's and WK-11's clauses are one judge each
+    expect(llmLine(caseOf("weekly", "WK-10"), "The answer gives eff setup once")).toMatch(
       /gives eff setup once \(the hand-off line\)/,
     );
-    expect(llmLine(caseOf("weekly", "WK-11"), "Wherever ESPN's 401 landed")).toMatch(
+    expect(llmLine(caseOf("weekly", "WK-11"), "The briefing gives eff setup once")).toMatch(
       /gives eff setup once \(the hand-off line\)/,
     );
   });

@@ -464,10 +464,17 @@ describe("round 4's eval-case regexes take the forms its replies used with the l
       [
         "The tool's scoring doesn't match ESPN's.",
         "| Scoring | 0.5 per catch (**doesn't match ESPN**), 5 per passing TD |",
+        "Self-check: 14 match, 15 mismatch",
+        "Two mismatches on stat 53.",
       ],
       [
         "Every sampled player matches ESPN exactly.",
         "Does that match how your league seeds, ESPN's rule or points only?",
+        // the round-5 verifier's V5S-7: onboard's own fixed line with no mismatch, and a condition
+        "Self-check: 14 match, 0 mismatch",
+        "Our numbers do not match ESPN only if a setting changed",
+        "If our numbers do not match ESPN, rerun the setup.",
+        "There is no mismatch on any stat.",
       ],
     ],
   ])("%s %s: %s", (skill, name, lead, passes, fails) => {
@@ -481,10 +488,12 @@ describe("round 4's eval-case regexes take the forms its replies used with the l
 describe("WK-1: the deadline criterion is graded free, on weekly's fixed lines (R12-1; round 3's other option)", () => {
   const c = caseOf("weekly", "WK-1");
   // read inside each test, so a case without the grader fails that test, never the collection
-  const columns = { test: (s: string) => graderOf("weekly", "WK-1", "Each action table").test(s) };
+  const columns = {
+    test: (s: string) => graderOf("weekly", "WK-1", "Each action section").test(s),
+  };
   const blank = {
     test: (s: string) =>
-      absentOf("weekly", "WK-1", "No move row leaves its Deadline blank").test(s),
+      absentOf("weekly", "WK-1", "No move row leaves its Deadline cell blank").test(s),
   };
   const briefing = (over: Partial<Record<string, string>> = {}) =>
     [
@@ -510,9 +519,17 @@ describe("WK-1: the deadline criterion is graded free, on weekly's fixed lines (
       "- Wed 3:30 AM ET: the run",
     ].join("\n");
 
-  it("judge 07 is gone: no llm grader grades the deadlines", () => {
+  it("round 4's judge 07 is gone; one judge grades only the moves outside a Deadline column (the round-5 verifier's V5S-4)", () => {
     expect(c.expectations.join("\n")).not.toMatch(/Every action the reply recommends names/);
-    expect(llmLines(c).join("\n")).not.toMatch(/deadline/i);
+    const deadlineJudges = llmLines(c).filter((l) => /deadline/i.test(l));
+    expect(deadlineJudges).toHaveLength(1);
+    expect(deadlineJudges[0]).toMatch(
+      /^Every move the reply recommends outside a table's Deadline column — in a sentence, a list line, the Deadlines block or a table without that column — names when it is due/,
+    );
+    // one condition (changelog §R12, R12-2): its second sentence only says what is no move
+    expect(deadlineJudges[0]).toMatch(
+      /\. A pass, a hold or a row the tool holds is no move and needs none \(llm\)$/,
+    );
   });
 
   it("the briefing weekly's fixed lines describe passes both graders", () => {
@@ -562,6 +579,77 @@ describe("WK-1: the deadline criterion is graded free, on weekly's fixed lines (
     expect(blank.test(b)).toBe(false);
   });
 
+  // the round-5 verifier's V5S-3: every cell is read, the first included; the Deadline cell is found
+  // under its header wherever the column sits; Start and Bench are a move only as a swap
+  it.each([
+    [
+      "a kept starter's role cell with a dash",
+      "lineup",
+      '| Slot | Player | Role | E | p10 | p90 | Deadline |\n|---|---|---|---|---|---|---|\n| QB | "Drake Maye" | start | 20.1 | 10.6 | 30.7 | — |',
+      false,
+    ],
+    [
+      "a Bench slot in the first cell",
+      "lineup",
+      "| Slot | Player | E | Deadline |\n|---|---|---|---|\n| Bench | Rachaad White | 0 | — |",
+      false,
+    ],
+    [
+      "a move in the first cell",
+      "injuries",
+      "| Move | Deadline |\n|---|---|\n| Move White to IR | — |",
+      true,
+    ],
+    [
+      "a Deadline column that is not last",
+      "waivers",
+      "| Player | Verdict | Deadline | Surplus |\n|---|---|---|---|\n| Tate | Claim | — | 10.0 |",
+      true,
+    ],
+    [
+      "a Deadline column that is not last, filled in",
+      "waivers",
+      "| Player | Verdict | Deadline | Surplus |\n|---|---|---|---|\n| Tate | Claim | Wed 3:30 AM ET | 10.0 |",
+      false,
+    ],
+    [
+      "rivals' moves in a table with no Deadline column",
+      "activity",
+      "| Team | Move | When |\n|---|---|---|\n| Team 03 | Add Tate | — |",
+      false,
+    ],
+  ])("the blank-deadline grader on %s", (_label, section, text, trips) => {
+    const b =
+      section === "activity"
+        ? briefing().replace("| Waiver order | 9, 2, 8 |", `| Waiver order | 9, 2, 8 |\n\n${text}`)
+        : briefing({ [section]: text });
+    expect(blank.test(b)).toBe(trips);
+  });
+
+  // the round-5 verifier's V5S-4: plan 09 §3.2's term — a move whose line gives its Deadline with a
+  // time — is accepted in a section, and a move line with no time is not
+  it.each([
+    [
+      "round 4's Sonnet base run 1's IR move",
+      "- **Rachaad White** is OUT and **Tank Dell** carries an `INJURY_RESERVE` tag while sitting on your bench. Moving one of them to IR frees a bench spot. Deadline: before Wed 3:30 AM ET.",
+      true,
+    ],
+    [
+      "round 4's Sonnet Lane 2 run 1's IR move",
+      "- **Rachaad White RB:** OUT, IR-eligible, on your bench. Move one to IR before the run (deadline Wed 3:30 AM ET).",
+      true,
+    ],
+    [
+      "a bold Deadline label and the run",
+      "- Move Dell to the open IR slot. **Deadline:** the waiver run.",
+      true,
+    ],
+    ["a move line with no time", "- **Tank Dell:** move him to the open IR slot.", false],
+    ["a Deadline line that gives none", "- Move Dell to IR. Deadline: none.", false],
+  ])("the columns grader on a prose move: %s", (_label, injuries, passes) => {
+    expect(columns.test(briefing({ injuries }))).toBe(passes);
+  });
+
   it("the expected output names the Deadline column on every action table and a time on every move row", () => {
     expect(c.expected_output).toMatch(/with a time on every move row/);
     expect(c.expected_output).toMatch(/'—' only on a row with no move/);
@@ -572,11 +660,12 @@ describe("WK-10: one judge per clause (changelog §R12, R12-2), the empty histor
   const c = caseOf("weekly", "WK-10");
   const llm = llmLines(c);
 
-  it("the six-part line is gone, and five judges each grade one clause", () => {
+  it("the six-part line is gone, and seven judges each grade one clause", () => {
     expect(c.expectations.join("\n")).not.toMatch(
       /labelled partial, says what the session-refusal lines leave out .* and gives eff setup once/,
     );
-    expect(llm).toHaveLength(5);
+    // the round-5 verifier's V5S-5: the history clause and the hand-off clause were split too
+    expect(llm).toHaveLength(7);
     for (const l of llm) expect(l.split(/;/)).toHaveLength(1);
   });
 
@@ -617,7 +706,13 @@ describe("the PASS-if lines round 4's judges failed on replies that met them, ma
   it("RT-4-E: the metrics that fill up first, and why each is empty on this log", () => {
     const c = caseOf("retro", "RT-4-E");
     const l = llmLines(c).find((x) => x.includes("swap regret")) ?? "";
-    expect(l).toMatch(/as the metrics that fill up first, and says why each is empty on this log/);
+    // one judge per clause (the round-5 verifier's V5S-5): the metrics, then why each is empty
+    expect(l).toBe(
+      "The reply names swap regret and projection CRPS as the metrics that fill up first (llm)",
+    );
+    expect(llmLines(c)).toContain(
+      "The reply says why each of those two metrics is empty on this log (llm)",
+    );
     expect(l).not.toMatch(/what to read instead/);
     // retro's own words: the two reach n 30 within weeks, so it leads with them
     expect(read("skills/retro/SKILL.md")).toContain(
@@ -640,18 +735,20 @@ describe("the PASS-if lines round 4's judges failed on replies that met them, ma
   it("ON-6: the hand-off and the absent walkthrough, one judge each; the stop's own lines are no walkthrough", () => {
     const c = caseOf("onboard", "ON-6");
     const llm = llmLines(c);
-    expect(llm).toHaveLength(2);
-    expect(llm[0]).toMatch(
-      /^The reply says ESPN rejected the stored session .* hands over to session-check/,
+    // the round-5 verifier's V5S-5: the rejection and the hand-off are one judge each
+    expect(llm).toHaveLength(3);
+    expect(llm[0]).toBe(
+      "The reply says ESPN rejected the stored session on a league not known to be public (llm)",
     );
-    expect(llm[1]).toMatch(/^The reply gives no onboarding walkthrough/);
+    expect(llm[1]).toBe("The reply hands over to the session-check Skill (llm)");
+    expect(llm[2]).toMatch(/^The reply gives no onboarding walkthrough/);
     for (const extra of [
       "Session-check's own steps",
       "a line on what was not read",
       "a note that ESPN offers no API key",
       "a sentence on what onboarding does once the session works",
     ])
-      expect(llm[1]).toContain(extra);
+      expect(llm[2]).toContain(extra);
     expect(c.expected_output).toMatch(
       /a 'Not read: …' line, session-check's steps and the hand-off line/,
     );
@@ -739,5 +836,71 @@ describe("R12-6: plan 09 names every case and variant the suite runs", () => {
     const inj = manifest.fixture.variants.filter((x) => x.startsWith("inj-"));
     const count = ["six", "seven", "eight"][inj.length - 6] ?? String(inj.length);
     expect(v).toContain(`the ${count} \`inj-*\` variants`);
+  });
+});
+
+// The round-5 verifier's V5S-5 (changelog §R12, R12-2: a PASS-if line that joins several conditions
+// is split into one judge per condition): the six lines it named, each clause its own judge, every
+// clause kept.
+describe("R12-2's split on the lines the round-5 verifier named", () => {
+  it.each([
+    [
+      "onboard",
+      "ON-6",
+      [
+        "The reply says ESPN rejected the stored session on a league not known to be public (llm)",
+        "The reply hands over to the session-check Skill (llm)",
+      ],
+    ],
+    [
+      "retro",
+      "RT-4-E",
+      [
+        "The reply names swap regret and projection CRPS as the metrics that fill up first (llm)",
+        "The reply says why each of those two metrics is empty on this log (llm)",
+      ],
+    ],
+    [
+      "roster-audit",
+      "RA-1",
+      [
+        "The reply names the phase the audit ran under (`phase: mid` on this fixture; the team is competing) (llm)",
+        "The reply states the bench template as derived from this league's curves, not as a rule (llm)",
+        "The reply gives the bench template's reason (llm)",
+      ],
+    ],
+    [
+      "weekly",
+      "WK-10",
+      [
+        "The League activity section rests on the server's persisted history — empty on this seed: 0 adds, drops, claims and trades in the 7-day window (llm)",
+        "The League activity section gives no transaction, standing or waiver-order figure the tools did not return (llm)",
+        "The answer ends with the hand-off line to session-check (llm)",
+        "The answer gives eff setup once (the hand-off line) — never again in the section or in Confidence & freshness (llm)",
+      ],
+    ],
+    [
+      "weekly",
+      "WK-11",
+      [
+        "Wherever ESPN's 401 landed, the reply presents only what was read before it, labelled partial (llm)",
+        "The reply says every later section or input was not read (llm)",
+        "The reply invents none of what was not read: no score, lineup, projection, waiver or activity figure the tools did not return (llm)",
+        "Confidence & freshness says the briefing is partial because ESPN rejected the stored session (llm)",
+        "No tool call that ESPN refused is made again (llm)",
+        "The briefing ends with the hand-off to session-check (llm)",
+        "The briefing gives eff setup once (the hand-off line) (llm)",
+      ],
+    ],
+  ])("%s %s: one judge per clause", (skill, name, judges) => {
+    const llm = llmLines(caseOf(skill, name));
+    for (const j of judges) expect(llm).toContain(j);
+    // no judge of the case joins two of the named clauses again
+    for (const l of llm) {
+      expect(l, l).not.toMatch(
+        / and (?:hands over|says why|states the bench|gives no transaction|gives eff setup)\b/,
+      );
+      expect(l.replace(/\([^)]*\)/g, "").split(";"), l).toHaveLength(1);
+    }
   });
 });

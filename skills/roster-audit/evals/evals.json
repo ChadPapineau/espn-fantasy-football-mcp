@@ -13,7 +13,9 @@
         "The skill called espn_analyze_replacement before espn_analyze_roster (tool_order)",
         "The skill called espn_analyze_roster before espn_record_recommendation (tool_order)",
         "The reply covers the bench by role and names a handcuff or stash verdict (regex: `handcuff|stash`)",
-        "The reply names the phase the audit ran under (`phase: mid` on this fixture; the team is competing) and states the bench template as derived from this league's curves, with its reason, not as a rule (llm)",
+        "The reply names the phase the audit ran under (`phase: mid` on this fixture; the team is competing) (llm)",
+        "The reply states the bench template as derived from this league's curves, not as a rule (llm)",
+        "The reply gives the bench template's reason (llm)",
         "The reply notes the open IR slot and the bench players eligible to move into it (llm)"
       ]
     },

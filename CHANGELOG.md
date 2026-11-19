@@ -323,8 +323,11 @@ minor version (plan 04 §4.4; plan 09 K6). One version covers the server, the Sk
   its `when_to_use` adds "outlook says", "practice report" and "you logged about"; onboard confirms
   which team is the user's and names "by record or by points"; session-check opens with the
   assistant or its tools stopping; trade names a buy-low or sell-high target. The listing stays
-  within its 4 600-character ceiling (4 573): other descriptions were tightened and five phrases no
-  trigger positive matches were cut. A stop at Step 0 holds the Session line, one "Not read" line,
+  within its 4 600-character ceiling (4 587): other descriptions were tightened and six phrases were
+  cut — onboard's "scoring settings", roster-audit's "rate my team", start-sit's "am I going to win",
+  waivers' "pickup" (what waivers' trigger pos-01 and WV-1 ask, as "pick up") and "bid", and
+  schedule-plan's "playoff seed", since restored as its one word for a seed question (onboard's
+  trigger neg-08). A stop at Step 0 holds the Session line, one "Not read" line,
   session-check's steps and the hand-off line, with `eff setup` once and no section of the Skill's
   own output; a partial answer's Confidence & freshness opens with the rejection on one fixed line;
   beside the hand-off line a tool's session-refusal line is said without its own command. Every
@@ -340,7 +343,15 @@ minor version (plan 04 §4.4; plan 09 K6). One version covers the server, the Sk
   the priors, the outlook, the role column, the followed calls and baselines, the implied total and
   the add after the run, the Δ table and the order labels, match and mismatch, and the six headings
   and Deadline column. weekly answers "what happened in my league" with the League activity section
-  alone. check-skills holds every one.
+  alone. check-skills holds every one. After the round-5 verifier: session-check gives its API-key
+  note only when the user asks about a key, and never when it takes over from a stop at Step 0;
+  schedule-plan runs the season simulation first because the answer's playoff odds come from it
+  (`espn_analyze_schedule` runs its own simulation for P(alive), so no week is weighted 1 for want
+  of step 3.4); start-sit gives a conditional swap for a reported-inactive player only while his
+  slot is unlocked, and otherwise one fixed line that no swap is possible; weekly's IR move is a row
+  of the Injuries and byes table with its Deadline, and a move named outside a table gives its time
+  on its line. session-check's take-over step 5, trade's "no verdict before **Devil's advocate:**"
+  and weekly's "never 'This week: vs …'" are fixed lines too.
 - **The plugin eval's cases after round 4 (rulings R12-1, R12-2, R12-6; `docs/plan/changelog.md`
   §R12).** Every regex that checks a line the Skills now give verbatim accepts that line, filled in
   from its fixture, and plan 09 §3's term for it, never a different meaning. The regexes round 4's
@@ -353,7 +364,14 @@ minor version (plan 04 §4.4; plan 09 K6). One version covers the server, the Sk
   League-activity-only answer; RT-4-E, NC-7 and ON-6 grade what their fixtures give. SC-6's and
   SC-10's histories replay the session-check call, as SC-7-E's does. news-check's trigger set holds
   NC-2's, NC-6's and NC-7's prompts as positives, with three new negatives. Plan 09 lists WV-8 and
-  the `td-inflated` and `inj-player-name` variants.
+  the `td-inflated` and `inj-player-name` variants. After the round-5 verifier: WK-1's row grader
+  reads every cell, the first included, finds the Deadline cell under its header wherever the column
+  sits, and takes Start or Bench as a move only in a swap, so a kept starter's "—" passes and rivals'
+  moves are not graded; its column grader also takes a section whose move line gives its Deadline
+  with a time (plan 09's "every action names a deadline"), and one judge grades the moves named
+  outside a Deadline column. ON-3's mismatch grader no longer passes "0 mismatch", "no mismatch" or a
+  condition. ON-6's, RT-4-E's, RA-1's, WK-10's and WK-11's joined PASS-if lines are one judge per
+  clause (R12-2).
 - **Dependencies, reviewed under plan 04 §2 (Dependabot PRs 1–5, 2026-11-04 to 2026-11-05; ruling
   R10-35).** The MCP SDK 2.3.1 → 2.4.0 (`@modelcontextprotocol/server` and `core`, and the dev
   `client`; `espn_get_status` reports `sdk_version` 2.4.0): 2.4.0 adds the Skills extension on new

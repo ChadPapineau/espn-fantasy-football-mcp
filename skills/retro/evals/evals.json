@@ -52,7 +52,8 @@
       "files": ["evals/fixtures/fx-10h"],
       "expectations": [
         "The reply says the sample is too small (regex: `n too small|0 of 30|n = ?0`)",
-        "The reply names swap regret and projection CRPS as the metrics that fill up first, and says why each is empty on this log (llm)",
+        "The reply names swap regret and projection CRPS as the metrics that fill up first (llm)",
+        "The reply says why each of those two metrics is empty on this log (llm)",
         "The reply never calls the win probability calibrated (llm)"
       ]
     },
