@@ -1158,7 +1158,9 @@ What the server stream of the §R12 fix round built and left open (`docs/plan/ch
   giving those sites a "not read: <what the answer goes without>" line, which would say a
   consequence the session line does not. Ruled: R13-2 — silence on a refusal stands where the
   answer loses nothing beyond what the call's session line says; a read whose answer loses more
-  says "not read: …" (the R13 fix round's sites below).
+  says "not read: …" (the R13 fix round's sites below). Built at the R13 fix round's own sites
+  (`b8d429c`, `3a7ca34`); the older silent-on-refusal sites are not yet checked against the clause
+  (item 3 of the server sweep's open list, below).
 - **Two optional reads degrade on a budget shortfall only.** `espn_analyze_lineup`'s matchups
   ("schedule unavailable: no opponent, objective mean, mode neutral") and `espn_analyze_waivers`'
   standings ("standings unavailable: waiver rank unknown …") absorb only the call's budget signal, so
@@ -1224,7 +1226,9 @@ Everything in round 4's eval-case triage is built; `tests/skills/round5-eval-cas
   why each is empty, RA-1's phase, bench template and its reason (the line that failed every round-4
   run), WK-10's history and hand-off lines, and WK-11's seven clauses. Other PASS-if lines still join
   conditions (among them SS-12 03, SS-INJ-2 03, IC-INJ 03, RT-INJ 04 and 05, WK-8 07,
-  WK-9 07, SC-11 06); whether R12-2 reaches them is asked of the orchestrator.
+  WK-9 07, SC-11 06); whether R12-2 reaches them is asked of the orchestrator. Ruled: R13-1 —
+  every joined line in the suite is split, one judge per condition; built (`3dd5b76`, refixed in
+  `937783e`; the R13 sections below).
 - **KD-1 takes the second option.** Its regex 03 already takes the fixed column (Implied total) and
   plan 09's term, so no judge was added; a failing KD-1 run still keeps no reply on record.
 - **WK-1's deadline graders read the tables by section.** The column grader needs, in each of the
@@ -1250,7 +1254,8 @@ Everything in round 4's eval-case triage is built; `tests/skills/round5-eval-cas
   round-5 verifier (V5S-10) counts four more variants the suite runs and plan 09 never names:
   `outlook-more-work` (1 case), `private-league` (4), `private-league-none` (1) and
   `private-expiring` (1). Whether R12-6 extends to them and to §3.6's AP-INJ line is asked of the
-  orchestrator; plan 09 is unchanged until then.
+  orchestrator; plan 09 is unchanged until then. Ruled: R13-3, built (`3dd5b76`): §5.2 names the
+  four, and §3.6's AP-INJ runs on `inj-player-name` (below).
 
 ## Found in the round-5 verifier's findings on the Skills and the cases (2026-11-19)
 
@@ -1267,23 +1272,24 @@ Everything in round 4's eval-case triage is built; `tests/skills/round5-eval-cas
   `ROUND4_ABSENT` holds the withdrawn sentences out.
 - **To watch in round 5's trigger run:** onboard neg-08 ("Who is the 4 seed in my league right
   now?") and waivers pos-01 ("Who should I pick up this week…"): "pickup" stays cut, the listing at
-  4 587 of 4 600.
+  4 587 of 4 600. Ruled: R13-4 — the trigger run reports both by name, on both models.
 - **Open, for the orchestrator:** R12-2's scope beyond the named lines (V5S-5) and R12-6's beyond its
-  text (V5S-10), above.
+  text (V5S-10), above. Ruled: R13-1 and R13-3, both built (`3dd5b76`; below).
 
 ## Found in the R13 fix round's server sweep (2026-11-19)
 
-What the server stream built under R13-2 (`docs/plan/changelog.md` §R13) and what its sweep of
-`src/mcp/tools` left as it is. `tests/mcp/optional-read-lines-r13.test.ts` holds every site built
-here: on an outage (`ESPN_UPSTREAM_UNAVAILABLE`, `RATE_LIMITED`, `ESPN_DRIFT_DETECTED`) the call
-answers with the "unavailable" line; on a refusal (both codes) the "not read" line, exactly one
-session line and `partial: true`; on a bug `INTERNAL`; on the budget, which every site absorbed
-before, `partial: true` and the "unavailable" line (all fifteen cases since the verifier's F2: the
-sweep's had none, and a mutant silencing the line on the budget alone survived at five sites); at
-the two reads that go through `optionalOrThrow`, `STALE_ONLY` too (F5). Each site failed before its
-fix. A mutation pass over the lines, the catches and
-the causes (27 mutants) killed all but one, the evidence's snapshot standing in for a rival's player,
-which no world held a snapshot for; a case with my roster's snapshot now kills it.
+What the server stream built under R13-2 (`docs/plan/changelog.md` §R13; built in `b8d429c`, refixed
+in `3a7ca34`) and what its sweep of `src/mcp/tools` left as it is.
+`tests/mcp/optional-read-lines-r13.test.ts` holds every site built here: on an outage
+(`ESPN_UPSTREAM_UNAVAILABLE`, `RATE_LIMITED`, `ESPN_DRIFT_DETECTED`) the call answers with the
+"unavailable" line; on a refusal (both codes) the "not read" line, exactly one session line and
+`partial: true`; on a bug `INTERNAL`; on the budget, which every site absorbed before,
+`partial: true` and the "unavailable" line (all fifteen cases since the verifier's F2: the sweep's
+had none, and a mutant silencing the line on the budget alone survived at five sites); at the two
+reads that go through `optionalOrThrow`, `STALE_ONLY` too (F5). Each site failed before its fix. A
+mutation pass over the lines, the catches and the causes (27 mutants) killed all but one, the
+evidence's snapshot standing in for a rival's player, which no world held a snapshot for; a case
+with my roster's snapshot now kills it.
 
 - **R13-2's named sites, built.** `espn_analyze_lineup`'s matchups and `espn_analyze_waivers`'
   standings absorb an outage and a refusal through `optionalOrThrow`, with `fallbackWarning` lines
@@ -1348,3 +1354,68 @@ which no world held a snapshot for; a case with my roster's snapshot now kills i
   sites, or a recorded reason that the session line already says it; the Skills' tests and the
   eval cases that pin the refusal answers (R10-11, R10-12, R10-28) read those answers, so the
   change is the orchestrator's to scope.
+
+## Found in the R13 fix round's eval cases (2026-11-19)
+
+What the eval-case stream built under R13-1 and R13-3 (`docs/plan/changelog.md` §R13) and what it
+left open.
+
+- **R13-1, built (`3dd5b76`; refixed in `937783e`, below).** The sweep covered all 177 llm-graded
+  PASS-if lines, Lane 2 and injection: 162 `(llm)` and 15 `(llm, judge sees both replies)`. 85 lines
+  that joined conditions are now 203 judges, each in place: 177 → 295 judges, and `planSuite`
+  reports 0 errors. The classification rule: split clauses that each carry their own requirement,
+  joined by "and", ";", a clause list, "without", "instead of" / "rather than", or ", never" naming
+  a behaviour that could co-occur. Keep one judge for a named set listed out ("both baselines",
+  "the tool's three risks", "what the refusal lines leave out", as `c355819` kept WK-10 10 and
+  RT-4-E 02), the scope of one prohibition, a statement with its reason, and one comparison against
+  the base trajectory. `3dd5b76` also kept an item with its attributes as one judge; the refix
+  splits it (below). 39 judges trip the heuristic and stay one; `tests/skills/r13-1-judges.json`
+  records why for each. Nine cases carry a `$comment` note for a judge kept as one because its
+  conditions are one fact said two ways (SS-5-E's: two alternatives, either of which passes): AP-7,
+  RA-1, RA-4-E, NC-7, SS-3, SS-5-E, WK-4-E, WK-7-E and WK-10.
+  `tests/skills/r13-1-judge-splits.test.ts` holds all of it: the heuristic, stale entries,
+  placement, the counts in the cases and in the built suite, and the notes.
+- **R13-3, built (`3dd5b76`).** Plan 09 §5.2 names `private-league`, `private-league-none`,
+  `private-expiring` and `outlook-more-work`, and §3.6's AP-INJ runs on `inj-player-name`.
+  `tests/skills/r13-3-plan09-variants.test.ts` checks that every manifest variant is named in §5.2,
+  or counted for the seven `inj-*` variants, and that every variant a case runs is in the manifest.
+- **Open:** `skills/README.md`'s evals schema line (`{ id, name, toolset, prompt, expected_output,
+  files, expectations[], history?, base? }`) does not list the case note `$comment?` that
+  check-skills now accepts (R13-1). That file is outside the eval-case stream's paths.
+- **To watch in round 5:** the llm bar now counts 323 judges instead of 177 (295 after `3dd5b76`,
+  323 after the refix). Round 4 → round 5 llm pass rates compare across R13-1's split, as round 3 →
+  round 4 compared across R11-3.
+
+## Found in the R13 refix verifier's findings on the eval cases (2026-11-19)
+
+- **Built** (`937783e`; `tests/skills/r13-1-judge-splits.test.ts`, `tests/skills/r13-1-judges.json`,
+  `tests/skills/ss2-underdog-coin-flip.test.ts`):
+  - F1: SS-4's bench judge is scoped to the unconfirmed report, with any swap conditional on ESPN
+    confirming it, so start-sit's conditional swap passes.
+  - F2: every joined line the verifier named is split in place, and so is every line of the same
+    shape that the extended heuristic found. That covers a quotation with its label or source tag
+    (AP-2, NC-INJ, NC-INJ-2, NC-6, NC-7 04, RT-INJ, RA-INJ, SP-INJ, WV-INJ, TR-INJ, KD-INJ 02),
+    content and its order (TR-3), an item with its attributes (TR-4, SS-6-E, SS-11-E, TR-5-E 04),
+    two values (SP-1 06, WV-1 10, TR-1 07, TR-3's two changes), and the former "one table", "one
+    roster state" and "one answer" exemptions (SP-4-E, KD-INJ 03, WV-7-E). `c355819`'s WK-11 07 and
+    NC-7 04 are included, since R13-1 reaches every line. Judges go from 295 to 323, with 90 split
+    lines.
+  - F3: the heuristic knows the missed joiners ("as well as", ", then", ", plus", ", also", "with
+    its" or "at its", "labelled", ", each with", a quotation "as a claim"), and the verifier's two
+    mutations of RA-CORE 04 now fail the sweep.
+  - F4: SS-2's coin-flip judge is exact for underdog-9 (the reply calls nothing a coin flip; the
+    lineup tool flags none there), and the fixture fact is tested on the core toolset with the
+    datasets seeded.
+- **Left one judge, with why in the inventory** (`tests/skills/r13-1-judges.json`, 39 judges): a
+  value with its own uncertainty, basis or id (TR-3's verdict with its interval, as the verifier's
+  own split kept it; SS-11-E's win probability with its interval; NC-2's flag with its basis;
+  ON-2's teams with their `team_id`), a named set (RT-1, RT-4-E, RA-4-E, SS-6-E's three numbers,
+  WK-10), the scope of one prohibition (ON-6, SC-11, WK-10, and SS-5-E's one spread), one comparison
+  against the base trajectory (12 `(llm, judge sees both replies)` judges), one fact said two ways
+  (the nine noted cases), and five of their own kind: NC-5-E's one transformation, WV-5-E's
+  disjunction and its one offer, WK-1's condition with its scope, and WK-10's source with its value
+  on this seed. The refix moved six entries out (SP-4-E, KD-INJ, WV-7-E, TR-4, and the earlier
+  TR-3 and SS-6-E judges, all split now) and six in (NC-2, NC-5-E, ON-2, SS-11-E, and TR-3's and
+  SS-6-E's new judges).
+- **Not held:** a join in words the heuristic does not know, on a new line, passes the sweep
+  unsplit; the test header says so (F3).

@@ -463,6 +463,35 @@ minor version (plan 04 §4.4; plan 09 K6). One version covers the server, the Sk
   `espn_get_roster` with `all: true` (`matchups unavailable: my opponent's roster is not placed
   second`). `espn_analyze_lineup`'s widened pro-schedule read (`b6954aa`) and `espn_analyze_matchup`
   live's refused box score that conditions nothing (`38c0c3c`) are confirmed under R13-2, unchanged.
+- **The plugin eval graded a PASS-if line that joined conditions with one judge (ruling R13-1;
+  `docs/plan/changelog.md` §R13).** Every llm-graded PASS-if line that joined conditions is now one
+  judge per condition, every condition kept, in its place: 85 of the 177 lines across the 13 Skills'
+  cases became 203 judges, taking the suite from 177 judges to 295, the verifier's SS-12 03,
+  SS-INJ-2 03, IC-INJ 03, RT-INJ 04 and 05, WK-8 07, WK-9 07 and SC-11 06 among them. A line whose
+  conditions are one fact said two ways stays one judge (as do SS-5-E's two alternatives, either of
+  which passes), and a case note (`$comment`, which check-skills now accepts) says why: AP-7, RA-1,
+  RA-4-E, NC-7, SS-3, SS-5-E, WK-4-E, WK-7-E and WK-10. Eight expected-output examples now show the
+  condition a split judge grades on its own. After the R13 refix verifier: SS-4's bench judge keeps
+  the scope its joined line gave it — the reply does not bench the RB1 on the unconfirmed report,
+  and any swap for him is conditional on ESPN confirming it — so start-sit's conditional swap
+  passes. SS-2's coin-flip judge is exact for its fixture, where the lineup tool flags no coin flip:
+  the reply calls nothing a coin flip. Joined parts are now one judge each wherever they were
+  joined: a quotation and its label or source tag, content and its order, two numbers named as one
+  basis, an item and its listed attributes. That covers AP-2, NC-INJ, NC-INJ-2, NC-6, NC-7,
+  RT-INJ, RA-INJ, SP-INJ, WV-INJ, TR-INJ, KD-INJ, TR-1, TR-3, TR-4, TR-5-E, SS-6-E, SS-11-E, SP-1,
+  SP-4-E, WV-1, WV-7-E and WK-11, and takes the suite to 90 split lines and from 295 llm judges to
+  323. A line still stays one judge where its parts cannot be graded apart: a value with its own
+  uncertainty, basis or id, a named set, a prohibition's scope, one comparison against the base
+  trajectory, or one fact said two ways, among the reasons the inventory gives for each of its 39.
+  The join check also catches "as well as", ", then", ", plus", ", also", "with its" (or "at its"),
+  "labelled", ", each with" and a quotation "as a claim". `tests/skills/r13-1-judge-splits.test.ts`
+  pins the join heuristic to the inventory in `tests/skills/r13-1-judges.json`, and
+  `tests/skills/ss2-underdog-coin-flip.test.ts` holds SS-2's fixture fact.
+- **Plan 09 did not name four fixture variants the suite runs (ruling R13-3;
+  `docs/plan/changelog.md` §R13).** §5.2's variant list now names `private-league`,
+  `private-league-none`, `private-expiring` and `outlook-more-work`, and §3.6's AP-INJ runs on
+  `inj-player-name`. `tests/skills/r13-3-plan09-variants.test.ts` checks every manifest variant
+  against §5.2.
 - **An optional read's line called a session refusal "unavailable" (ruling R12-4;
   `docs/plan/changelog.md` §R12).** Every optional pro-schedule read now says its line by cause, as
   the fallbacks do: `pro schedule unavailable: …` on an outage (the call's budget, ESPN, a dataset
