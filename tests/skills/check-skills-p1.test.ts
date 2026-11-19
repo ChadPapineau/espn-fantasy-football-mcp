@@ -117,7 +117,8 @@ describe("the P1 Skill body", () => {
   });
 
   it.each([
-    ["trade", /devil's advocate/i, "contrarian"],
+    // global: since round 4's triage the order rule labels its first part "Devil's advocate:" too
+    ["trade", /devil's advocate/gi, "contrarian"],
     ["injury-cascade", /hypothesis_only/g, "guess_only"],
     ["schedule-plan", /marginal-values table/gi, "values grid"],
     ["roster-audit", /hidden-bench/gi, "spare-slot"],

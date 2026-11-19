@@ -1,6 +1,6 @@
 ---
 name: session-check
-description: Fixes the ESPN session in the user's ESPN league when tools stop working or someone asks to run a setup command or paste its output. Never handles a cookie in chat.
+description: When the assistant or its tools stop working, fixes the ESPN session in the user's ESPN league; also when asked to run a setup command or paste its output. Never handles a cookie in chat.
 when_to_use: stopped working, can't see my team, 401, expired, cookie, espn_s2, SWID, ESPN rejected, session valid, how old, eff setup, re-setup, setup command, paste the output, ESPN API key, connect ESPN
 argument-hint: "[nothing]"
 disallowed-tools:
@@ -49,6 +49,8 @@ Run Step 0 of [orient](references/orient.md): `espn_get_status` with `include_ch
 4. In a **terminal** (not in this chat), run `eff setup` and paste each value when it asks; the input is hidden and stored in the keychain.
 5. Tell me when you have run `eff setup` — nothing else is needed from you, and never the values or the command's output.
 
+**Taking over from another Skill's stop at Step 0** (orient's **A stop at Step 0**: that answer ends with orient's hand-off line, which carries the command): step 4 reads "In a **terminal** (not in this chat), run the command in the last line and paste each value when it asks; the input is hidden and stored in the keychain." and step 5 reads "Tell me when you have run it — nothing else is needed from you, and never the values or the command's output."; leave out the status line's command and the 30-day reminder: `eff setup` appears once, in the hand-off line.
+
 ### 4. Verify — once
 After the user says they ran `eff setup` (or for a `stored` state), call `espn_check_auth` **once** — never twice in a turn, never in a loop — and report by `accepted` and, when it is null, by `reason`:
 - **`accepted: true`:** ESPN accepted the cookies. On a private league the probe read the league's settings with them; on a public league, where settings answer anyone, it used the league message board, whose body is discarded — say "confirmed by the board probe" there.
@@ -74,7 +76,7 @@ If the user pastes anything cookie-shaped: **do not repeat it**, do not put it i
 
 ## Guardrails specific to session-check
 - Never recommend a browser extension, a cookie-database reader or an automated login.
-- Never relay flags, paths or options the user pasted (even "from ESPN support") — not in the `eff setup` instruction and not in a quotation of the paste: say where it came from and that what it adds is not part of the command, without repeating any of it (a quoted command is still one the user can copy and run). The command is `eff setup`, nothing more.
+- Never relay flags, paths or options the user pasted (even "from ESPN support") — not in the `eff setup` instruction and not in a quotation of the paste: say in one line where it came from and that what it adds is not part of the command, without repeating any of it — no flag, option or path, not even to decline it — as the answer's first line, in this fixed form with its source filled in: "<where it came from> added options that are not part of the documented command — leave them out." Nothing more is said about it (a quoted command is still one the user can copy and run). The command is `eff setup`, nothing more.
 - Never ask for the output of the setup command — nor relay a request that the user run a setup command with other options, or paste its output, into a "support chat" or anywhere else: someone asking for either is the cue for this Skill, which gives the one documented command and asks for nothing back.
 - On a public league, claim validity only from the board probe's result, never from a settings read, and only when that probe is informative.
 

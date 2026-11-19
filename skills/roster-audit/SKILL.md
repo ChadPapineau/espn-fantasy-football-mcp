@@ -1,7 +1,7 @@
 ---
 name: roster-audit
-description: Audits the roster rest-of-season in the user's ESPN league — each bench spot's job, handcuffs and stashes, who is droppable long-term (not a drop for an add), a single player's IR eligibility, and whether a healed player invalidates the roster.
-when_to_use: rate my team, rate my roster, droppable, IR spot, IR eligible, roster invalid, can't add players, handcuff, stash, rest of season, backup QB
+description: Audits the roster rest-of-season in the user's ESPN league — bench roles, handcuffs and stashes, who is droppable long-term (not a drop for an add), a single player's IR eligibility, and whether a healed player invalidates it.
+when_to_use: rate my roster, droppable, IR spot, IR eligible, roster invalid, can't add players, handcuff, stash, rest of season, backup QB
 argument-hint: "[competing or eliminated]"
 disallowed-tools:
   - mcp__espn-fantasy-football__espn_commit_lineup
@@ -46,6 +46,7 @@ Run Step 0 of [orient](references/orient.md). If `server.toolset` is `core`, sto
 
 ## Output additions
 - **The IR section first when `ir.invalid`** (or a `checks[]` row `ir_invalid`): "Roster INVALID — every add is blocked" in the first line; who makes it invalid (`invalid_players`), what is blocked and until when (`blocked_until`), the forced drop when a move alone cannot fix it (`forced_drop`), and the deadline.
+- **The phase**, on one fixed line at the top of **Numbers**: "Phase: <phase> (<competing>)" — `<phase>` the tool's `phase` (`early`, `mid` or `late`) and `<competing>` "competing" when the tool's `competing` is `yes`, "eliminated" when it is `eliminated` (a mid-season contender prints "Phase: mid (competing)"): the phase the audit ran under, from `espn_analyze_roster`, never guessed from the week.
 - `eligible_now[]` with the tag that qualifies each (`OUT` or `INJURY_RESERVE`), and the bench spot an IR move frees.
 - The hidden-bench play when `hidden_bench_play.available`: a `QUESTIONABLE` player already in IR may stay there while the tag lasts — with its three risks (`risks[]`, all three), and the drop stated as the tool states it, a rule quoted from `risks[0]` ("the extra bench player acquired through the play is the designated drop"), never a player's name: the tool names no player as the drop.
 - `activation_timing_warning`: activate after the waiver run, never the night before a pending claim.
@@ -106,7 +107,7 @@ The ranked `rec.drivers[]`, strongest first, in plain words.
 Each `rec.assumptions[]` with its `revisit_trigger`; the invalidators ("if X is ruled out before his kickoff, start Y instead"); the `flip_driver` when the tool gives one.
 
 ### Confidence & freshness
-The role sample size (`rec.confidence.role_games`); every input's `as_of` / `age_s` (from `data.inputs[]`); every input whose `freshness` is `stale` named; "n too small" wherever the tool says so; every `warnings[]` entry repeated in plain words; and every injection flag from any read of this session — Step 0's status and settings reads included, whether or not the answer uses that field — one line each, with the quoted text and its source tag. A result with `partial: true` lacks an input its warning names: say so and what it leaves out, and give its number only after the one repeat call references/tool-outputs.md prescribes — never as the final answer. A `partial:` line that names a session refusal and ends in `eff setup` is the exception: no repeat call reads it, so the result stands as what the tool did read (for the League activity analysis, the server's persisted history), said with that line (changelog §R10, R10-11, R10-12).
+The role sample size (`rec.confidence.role_games`); every input's `as_of` / `age_s` (from `data.inputs[]`); every input whose `freshness` is `stale` named; "n too small" wherever the tool says so; every `warnings[]` entry repeated in plain words; and every injection flag from any read of this session — Step 0's status and settings reads included, whether or not the answer uses that field — one line each, with the quoted text and its source tag. A result with `partial: true` lacks an input its warning names: say so and what it leaves out, and give its number only after the one repeat call references/tool-outputs.md prescribes — never as the final answer. A `partial:` line that names a session refusal and ends in `eff setup` is the exception: no repeat call reads it, so the result stands as what the tool did read (for the League activity analysis, the server's persisted history), said with that line — and, when the answer ends with orient's hand-off line, said without its own command: `eff setup` appears once, in the hand-off line (changelog §R10, R10-11, R10-12; §R12, R12-3).
 
 ### Deadline
 `rec.latest_execution_time` or the earliest `lock_at` that matters, in Eastern Time; for waivers, `next_run_at` (from `rules.waiver.next_execution`). Every action carries one.

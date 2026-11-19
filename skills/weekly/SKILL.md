@@ -30,7 +30,7 @@ Conventions: Step 0, routing and the never-re-fetch rules in [orient](references
 ### 0. Step 0 and scope
 Run Step 0 of [orient](references/orient.md). When `credential.stale_warning` is true, open with one **Session** line ("your ESPN session is N days old; re-running `eff setup` in a terminal now avoids a game-day failure") — below the invalid-roster block when there is one (orient's order of the opening lines). The week is `clock.current_matchup_period` unless the user named one.
 
-**Scope.** "What happened in my league?" alone is the League activity section only (step 6) — no lineup, no projections. Otherwise run every step.
+**Scope.** "What happened in my league?" alone is the League activity section only (step 6) — no lineup, no projections — and its answer is **the League-activity-only answer** (Output, below). Otherwise run every step.
 
 ### 1. Last week
 `espn_get_scoreboard` for last week (the result), then `espn_analyze_retrospective` for that week when the recommendation log has entries — its headline only (the full review is the `espn-fantasy-football:retro` Skill). `final: false` → label it provisional.
@@ -65,11 +65,11 @@ From the injuries already read: every flagged player with ESPN's tag, the offici
 
 ## Output — the six sections
 
-At most one page: each section one table; a sub-decision the rec holds is one line, named as the rec names it ("coin flip — no move", or "no move — it gains nothing"). On an invalid roster (step 2) the **Roster INVALID** block comes first — above the header (the title and the reads' `as_of`) and the Session and seeding lines, before Last week: the page opens with **"Roster INVALID — every add is blocked"**, the player who must leave IR, the drop that forces if any, and the deadline (the next run).
+At most one page: each section one table, under the six section headings printed verbatim, in this order, never renamed — **Last week**, **This week's matchup and lineup**, **Waivers**, **K and D/ST**, **Injuries and byes**, **League activity** (never "This week: vs …"); a sub-decision the rec holds is one line, named as the rec names it ("coin flip — no move", or "no move — it gains nothing"). On an invalid roster (step 2) the **Roster INVALID** block comes first — above the header (the title and the reads' `as_of`) and the Session and seeding lines, before Last week: the page opens with **"Roster INVALID — every add is blocked"**, the player who must leave IR, the drop that forces if any, and the deadline (the next run).
 
 **The header** prints the data time: the `as_of` of the reads the briefing rests on (the roster, the projections and the pool — `meta.as_of`, or each input's `as_of` in `data.inputs[]`), in Eastern Time; on an invalid roster it comes right after the Roster INVALID block, never above it.
 
-**Every action carries its deadline.** Each table whose rows are actions — the lineup, the waiver brief, K and D/ST, and every move under Injuries and byes — has a **Deadline** column: a lineup move's `lock_at` (the player's kickoff), a claim's `next_run_at`, an add now's lock time (before his game locks), an add after the run's `next_run_at`, an IR move's next run (before it, so the freed seat counts). A row with no move says "—". The **Deadlines** block below stays as the summary.
+**Every action carries its deadline.** Each table whose rows are actions — the lineup, the waiver brief, K and D/ST, and every move under Injuries and byes — has a **Deadline** column: a lineup move's `lock_at` (the player's kickoff), a claim's `next_run_at`, an add now's lock time (before his game locks), an add after the run's `next_run_at`, an IR move's next run (before it, so the freed seat counts). A row with no move says "—". Every move row gives its time in that column, in Eastern Time — never a blank, never "this week". The **Deadlines** block below stays as the summary.
 
 ### Last week
 Result, score, the retrospective headline (or "provisional").
@@ -78,7 +78,7 @@ Result, score, the retrospective headline (or "provisional").
 Opponent (quoted name, `team_id`), `P(win)` as its band with `basis` (never under the points-only reading: step 5 prints `mode` with its reason instead), the lineup the rec sets or keeps, by slot, with `E`, `p10`, `p90`, the top swap or "no move", the lock schedule. The lineup the rec sets or keeps is `rec.subjects[]`: each `start` subject in its `slot` — or, when a warning says `rec.subjects` lists only the players who move, the roster's current slots with each `start` subject put in its `slot` and each `sit` subject on the bench (changelog §R10, R10-15). The move is the tool's `rec` — its action, or **"No move"** when `rec.no_move` is true — never `recommended_lineup` or `rec.lineup`, both the mean-optimal assignment, which also starts a swap the rec holds as a coin flip (changelog §R10, R10-15).
 
 ### Waivers
-The claim brief or the scramble brief, with the premium band, verdicts, the drop and `next_run_at`; the **Value basis** line.
+The claim brief or the scramble brief, with the premium band, verdicts, the drop and `next_run_at`; the **Value basis** line. Each candidate's verdict is the tool's own word — `claim`, `pass`, `marginal`, `fa_add_after_run` or `fa_add_now`, never "no claim" — and the premium is given on the `espn-fantasy-football:waivers` Skill's fixed line, "Premium Π(k, W): N, band [low–high]" (in the scramble brief no free agent gets a claim or a pass).
 
 ### K and D/ST
 Per position: hold or stream, the top option with its two-week look-ahead and how to act on its verdict (add now, or after the run), ESPN's projection beside ours.
@@ -89,7 +89,9 @@ Flagged players and byes for the next three weeks.
 ### League activity
 Rivals' moves, losing claims, the waiver order.
 
-Then one **Deadlines** block — the summary of the tables' Deadline columns: the earliest lineup lock, `next_run_at`, the scramble window — and a **Not actionable here** list ending with the apply line of guardrail 10 while `capabilities.write` is false.
+Then one **Deadlines** block — the summary of the tables' Deadline columns: the earliest lineup lock, `next_run_at`, the scramble window — and a **Not actionable here** list ending with the apply line of guardrail 10 while `capabilities.write` is false — in a briefing, never in the League-activity-only answer.
+
+**The League-activity-only answer** (step 0's scope): the League activity section, then Confidence & freshness and Attribution — no other section of the briefing, no **Deadlines** block and no **Not actionable here** list, since nothing in it is an action to time or apply; when a session refusal handed over, the hand-off line ends it.
 
 ## Guardrails specific to weekly
 - `espn_analyze_lineup` at most once per briefing; the phase comes from `last_execution` versus now, never the weekday.
@@ -140,7 +142,7 @@ The ranked `rec.drivers[]`, strongest first, in plain words.
 Each `rec.assumptions[]` with its `revisit_trigger`; the invalidators ("if X is ruled out before his kickoff, start Y instead"); the `flip_driver` when the tool gives one.
 
 ### Confidence & freshness
-The role sample size (`rec.confidence.role_games`); every input's `as_of` / `age_s` (from `data.inputs[]`); every input whose `freshness` is `stale` named; "n too small" wherever the tool says so; every `warnings[]` entry repeated in plain words; and every injection flag from any read of this session — Step 0's status and settings reads included, whether or not the answer uses that field — one line each, with the quoted text and its source tag. A result with `partial: true` lacks an input its warning names: say so and what it leaves out, and give its number only after the one repeat call references/tool-outputs.md prescribes — never as the final answer. A `partial:` line that names a session refusal and ends in `eff setup` is the exception: no repeat call reads it, so the result stands as what the tool did read (for the League activity analysis, the server's persisted history), said with that line (changelog §R10, R10-11, R10-12).
+The role sample size (`rec.confidence.role_games`); every input's `as_of` / `age_s` (from `data.inputs[]`); every input whose `freshness` is `stale` named; "n too small" wherever the tool says so; every `warnings[]` entry repeated in plain words; and every injection flag from any read of this session — Step 0's status and settings reads included, whether or not the answer uses that field — one line each, with the quoted text and its source tag. A result with `partial: true` lacks an input its warning names: say so and what it leaves out, and give its number only after the one repeat call references/tool-outputs.md prescribes — never as the final answer. A `partial:` line that names a session refusal and ends in `eff setup` is the exception: no repeat call reads it, so the result stands as what the tool did read (for the League activity analysis, the server's persisted history), said with that line — and, when the answer ends with orient's hand-off line, said without its own command: `eff setup` appears once, in the hand-off line (changelog §R10, R10-11, R10-12; §R12, R12-3).
 
 ### Deadline
 `rec.latest_execution_time` or the earliest `lock_at` that matters, in Eastern Time; for waivers, `next_run_at` (from `rules.waiver.next_execution`). Every action carries one.
