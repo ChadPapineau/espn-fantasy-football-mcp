@@ -175,7 +175,15 @@ describe("WV-2 on td-inflated: a touchdown-inflated candidate the tool does not 
     const line = c.expectations.find((x) => x.endsWith("(llm)") && x.includes("flag")) ?? "";
     expect(line).toMatch(/Jakobi Meyers/);
     expect(line).toMatch(/xfp_gap/);
-    expect(line).toMatch(/not (?:make|made) him the top target/);
+    // changelog §R13, R13-1: one judge per condition — flagged, not the top target, a cited signal
+    // with its number, none invented
+    expect(c.expectations).toEqual(
+      expect.arrayContaining([
+        "The reply does not make Jakobi Meyers the top target on his recent points (llm)",
+        "Any usage signal the reply cites carries its number (llm)",
+        "The reply invents no usage signal (llm)",
+      ]),
+    );
     expect(c.expected_output).toMatch(/td-inflated/);
   });
 

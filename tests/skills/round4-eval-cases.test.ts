@@ -317,7 +317,8 @@ describe("round 3's eval-case rubrics state what the fixture gives (each PASS-if
     expect(llmLine(caseOf("start-sit", "SS-6-E"), "The reply lists each")).toMatch(/pct/);
     // the round-4 refix's VS-9: the lineup follows ESPN's number at the shipped weight, which the
     // fixture has — never "untuned in this version", which a tuned weight_espn makes false
-    expect(llmLine(caseOf("start-sit", "SS-6-E"), "The reply lists each")).toMatch(
+    // changelog §R13, R13-1: the reason the lineup follows ESPN's number is its own judge
+    expect(llmLine(caseOf("start-sit", "SS-6-E"), "The reply says the lineup follows")).toMatch(
       /`inputs\.weight_espn` 1\.0 on this fixture, the shipped blend/,
     );
     expect(JSON.stringify(caseOf("start-sit", "SS-6-E"))).not.toMatch(/untuned/);

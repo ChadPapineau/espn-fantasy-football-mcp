@@ -39,7 +39,8 @@
       "files": ["evals/fixtures/fx-10h/public-league"],
       "expectations": [
         "espn_check_auth was called exactly once (tool_used: min 1 max 1)",
-        "The reply says which case applies, and does not claim a blanket confirmation when the probe is not informative (llm)"
+        "The reply says which case applies (llm)",
+        "The reply does not claim a blanket confirmation when the probe is not informative (llm)"
       ]
     },
     {
@@ -51,7 +52,9 @@
       "files": ["evals/fixtures/fx-10h/drift-mRoster"],
       "expectations": [
         "espn_check_auth was not called (tool_used: min 0 max 0)",
-        "The reply explains the drift — ESPN changed the shape of a response the server checks (the roster view, mRoster) — says it is not a session problem, and lists what still works (llm)",
+        "The reply explains the drift — ESPN changed the shape of a response the server checks (the roster view, mRoster) (llm)",
+        "The reply says the drift is not a session problem (llm)",
+        "The reply lists what still works (llm)",
         "The reply does not walk through the setup steps (llm)"
       ]
     },
@@ -89,7 +92,9 @@
       "files": ["evals/fixtures/fx-10h/auth-rejected"],
       "expectations": [
         "espn_check_auth was called exactly once, and no other ESPN tool ran before it (tool_used: min 1 max 1, first)",
-        "The reply reports the probe's result and what it means, and never asks for a cookie value (llm)"
+        "The reply reports the probe's result (llm)",
+        "The reply says what the probe's result means (llm)",
+        "The reply never asks for a cookie value (llm)"
       ]
     },
     {
@@ -111,7 +116,8 @@
       "files": ["evals/fixtures/fx-10h"],
       "expectations": [
         "espn_check_auth was called exactly once, and no other ESPN tool ran before it (tool_used: min 1 max 1, first)",
-        "The reply says no cookies are stored yet and to run eff setup again in a terminal (llm)",
+        "The reply says no cookies are stored yet (llm)",
+        "The reply says to run eff setup again in a terminal (llm)",
         "The reply never says the session cannot be tested on this league (regex_absent: `cannot be tested|answers the same to anyone`)",
         "The reply never asks for a cookie value or for the setup command's output (llm)"
       ]
@@ -142,7 +148,8 @@
         "The reply gives the DevTools steps (regex: `DevTools`)",
         "The reply gives the one command (regex: `eff setup`)",
         "espn_check_auth was not called before the user said done (tool_used: min 0 max 0)",
-        "The reply asks the user to say when they have run eff setup, and never says the other Skills carry on keylessly on this league (llm)"
+        "The reply asks the user to say when they have run eff setup (llm)",
+        "The reply never says the other Skills carry on keylessly on this league (llm)"
       ]
     },
     {
@@ -164,7 +171,8 @@
       "files": ["evals/fixtures/fx-10h/private-league"],
       "expectations": [
         "espn_check_auth was called exactly once, and no other ESPN tool ran before it (tool_used: min 1 max 1, first)",
-        "The reply says the probe accepted the new session, and never asks for a cookie value (llm)"
+        "The reply says the probe accepted the new session (llm)",
+        "The reply never asks for a cookie value (llm)"
       ]
     },
     {
@@ -180,7 +188,10 @@
         "The reply gives the one command (regex: `eff setup`)",
         "espn_check_auth was not called: nothing is stored to probe (tool_used: min 0 max 0)",
         "The reply never says this league is public, in any wording (regex_absent: `(?<!\\b(?:whether|if|that|confirm|tell)\\s)\\b(?:this|the) league(?: is|['’]s) public\\b(?!\\s+(?:flag|setting|status|field)\\b)|(?<!\\b(?:whether|if|that)\\s)\\breads are keyless\\b`)",
-        "The reply says no session is stored, gives the setup steps and asks the user to say when they have run eff setup, and never says the other Skills read keylessly or carry on without a session on this league (llm)",
+        "The reply says no session is stored (llm)",
+        "The reply gives the setup steps (llm)",
+        "The reply asks the user to say when they have run eff setup (llm)",
+        "The reply never says the other Skills read keylessly or carry on without a session on this league (llm)",
         "The reply never asks for a cookie value or for the setup command's output (llm)"
       ]
     }

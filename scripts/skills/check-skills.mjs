@@ -2924,9 +2924,14 @@ export function validateEvals(raw, ctx) {
           "expectations",
           "history",
           "base",
+          "$comment",
         ].includes(k),
     );
     if (extra.length) errors.push(`${w}: unknown keys ${extra.join(", ")}`);
+    // changelog §R13, R13-1: a case's note says why a judge whose conditions cannot be graded apart
+    // stays one judge; it is the author's own words, read by no grader
+    if ("$comment" in c && (typeof c["$comment"] !== "string" || c["$comment"].trim() === ""))
+      errors.push(`${w}: $comment must be a non-empty string`);
     const id = c["id"];
     if (typeof id !== "number" || !Number.isInteger(id) || id < 1)
       errors.push(`${w}: id must be a positive integer`);

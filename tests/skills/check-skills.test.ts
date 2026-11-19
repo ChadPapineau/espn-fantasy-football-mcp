@@ -2027,6 +2027,19 @@ describe("evals.json — Lane 2 cases (plan 09 §5.2; research 06 §D.0)", () =>
       /expected_output must describe success/,
     ],
     ["an unknown case key", "retro", (j) => (cases(j)[0]!.phase = "1a"), /unknown keys phase/],
+    // changelog §R13, R13-1: a case's note says why a judge stays one; it is the author's own words
+    [
+      "a case note that is not a string",
+      "retro",
+      (j) => (cases(j)[0]!.$comment = 3),
+      /\$comment must be a non-empty string/,
+    ],
+    [
+      "an empty case note",
+      "retro",
+      (j) => (cases(j)[0]!.$comment = " "),
+      /\$comment must be a non-empty string/,
+    ],
     ["a wrong skill_name", "retro", (j) => (j.skill_name = "weekly"), /skill_name must be "retro"/],
     // apply is user-invoked (disable-model-invocation): the CLI refuses the model, so a case whose
     // prompt is natural language tests a run in which the Skill's procedure never loads (Stage C
@@ -2150,6 +2163,14 @@ describe("evals.json — Lane 2 cases (plan 09 §5.2; research 06 §D.0)", () =>
     const t = fresh();
     t.editJson(EVALS(skill), mutate);
     expect(errorsOf(t)).toMatch(re);
+  });
+
+  it("a case may carry a note ($comment) saying why a judge stays one (changelog §R13, R13-1)", () => {
+    const t = fresh();
+    t.editJson(EVALS("retro"), (j) => {
+      cases(j)[0]!.$comment = "R13-1: the example judge stays one — one fact said two ways.";
+    });
+    expect(errorsOf(t)).toBe("");
   });
 
   it("an injection case may name its base question (base), which the plugin-eval build then judges it beside", () => {

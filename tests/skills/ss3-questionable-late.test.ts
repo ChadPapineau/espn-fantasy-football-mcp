@@ -14,6 +14,7 @@ interface Case {
   expected_output: string;
   expectations: string[];
   files: string[];
+  $comment?: string;
 }
 const cases = (
   JSON.parse(readFileSync(path.join(ROOT, "skills/start-sit/evals/evals.json"), "utf8")) as {
@@ -38,13 +39,16 @@ describe("SS-3 on questionable-late follows the tool (V-6)", () => {
     expect(eo).not.toMatch(/option value of (?:waiting|the later game) is positive/i);
   });
 
-  it("its judge grades the decision before Sunday's first lock and no value in waiting", () => {
+  it("its judges grade the decision before Sunday's first lock and no value in waiting, one each (changelog §R13, R13-1)", () => {
     const llm = (ss3?.expectations ?? []).filter((x) => x.endsWith("(llm)"));
-    expect(llm).toHaveLength(1);
-    expect(llm[0]).toContain("has to be made before Sunday's first lock");
-    expect(llm[0]).toContain("it claims no option value from waiting");
+    expect(llm).toEqual([
+      "The reply says the start-or-sit choice on Cook has to be made before Sunday's first lock, because every replacement locks on Sunday and nothing can be changed once his status is known on Monday (llm)",
+      "The reply claims no option value from waiting (llm)",
+    ]);
+    // the first stays one judge, and the case says why: a statement with its reason
+    expect(ss3?.$comment ?? "").toMatch(/^R13-1: the before-Sunday judge stays one/);
     // round 3b's rubric graded "a conditional lineup", which the tool no longer offers here
-    expect(llm[0]).not.toContain("gives a conditional lineup");
+    for (const l of llm) expect(l).not.toContain("gives a conditional lineup");
   });
 
   it("keeps its tool-order and p_active graders", () => {
