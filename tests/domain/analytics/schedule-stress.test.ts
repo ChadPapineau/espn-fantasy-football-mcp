@@ -233,6 +233,44 @@ describe("the week-by-week stress test", () => {
     expect(dead.data.worst_weeks).not.toContain(15);
   });
 
+  // what tool-outputs.md's espn_analyze_schedule row says (the round-4 plugin eval's SP-1): the
+  // cost is the loss the streams leave, a fix's delta what they recover, and the worst weeks are
+  // ranked by the loss × P(alive) — never by how many starters are out
+  it("bye_cluster_cost is the loss left after the streams; worst_weeks ranks by that loss × p_alive", async () => {
+    const FULL = 108; // every week's full-strength lineup (the first test's arithmetic)
+    const lossOf = (o: Awaited<ReturnType<typeof analyzeSchedule>>, w: number): number =>
+      FULL - (o.data.weeks.find((x) => x.week === w)?.lineup_pts.mean ?? Number.NaN);
+    const streamed = await analyzeSchedule(rq());
+    const bare = await analyzeSchedule(rq({ stream: [] }));
+    const w9 = streamed.data.weeks.find((w) => w.week === 9);
+    const before = bare.data.weeks.find((w) => w.week === 9)?.bye_cluster_cost ?? Number.NaN;
+    expect(w9?.bye_cluster_cost).toBeCloseTo(lossOf(streamed, 9), 2);
+    expect(before).toBeCloseTo(lossOf(bare, 9), 2);
+    expect(w9?.bye_cluster_cost ?? Number.NaN).toBeLessThan(before);
+    // at P(alive) 1 the fix's delta (what the streams recover) and the cost left add up to the loss
+    // before the streams
+    const fix = streamed.data.fixes.find((f) => f.action.endsWith("week 9"));
+    expect(w9?.weight.p_alive).toBe(1);
+    expect((fix?.delta ?? Number.NaN) + (w9?.bye_cluster_cost ?? Number.NaN)).toBeCloseTo(
+      before,
+      1,
+    );
+    // week 9 loses three starters at P(alive) 0.3, week 11 one (the QB) at 1: week 11 ranks first
+    const pAlive = WEEKS.map((w) => ({ week: w, p: w === 9 ? 0.3 : 1 }));
+    const out = await analyzeSchedule(rq({ p_alive_by_week: pAlive }));
+    const ranked = out.data.weeks
+      .map((w) => ({ week: w.week, key: lossOf(out, w.week) * w.weight.p_alive }))
+      .filter((x) => x.key >= SCHEDULE.minDrop)
+      .sort((a, b) => b.key - a.key || a.week - b.week)
+      .slice(0, SCHEDULE.worstWeeks)
+      .map((x) => x.week);
+    expect(out.data.worst_weeks).toEqual(ranked);
+    expect(out.data.worst_weeks.slice(0, 2)).toEqual([11, 9]);
+    expect(out.data.weeks.find((w) => w.week === 9)?.bye_cluster_cost).toBeGreaterThan(
+      out.data.weeks.find((w) => w.week === 11)?.bye_cluster_cost ?? Number.NaN,
+    );
+  });
+
   it("include_playoffs: false drops the playoff weeks; IR occupants never start", async () => {
     const out = await analyzeSchedule(rq({ include_playoffs: false }));
     expect(out.data.weeks.map((w) => w.week)).toEqual([8, 9, 10, 11]);

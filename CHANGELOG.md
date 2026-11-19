@@ -396,6 +396,12 @@ minor version (plan 04 §4.4; plan 09 K6). One version covers the server, the Sk
   list, the clock and the scoreboards already did. `espn_analyze_lineup`'s schedule read, which
   degraded on a budget shortfall only, now also absorbs an outage and a session refusal. A bug
   still answers `INTERNAL`.
+- **The cheat-sheet did not say what `espn_analyze_schedule`'s costs measure (the round-4 plugin
+  eval's SP-1).** Its row in `tool-outputs.md` now says that `bye_cluster_cost` is the loss left
+  after the streams fill the holes (0 off a cluster of 2 or more starters out), that
+  `worst_weeks[]` is ranked by that loss × `p_alive` and never by the starters out, and that at
+  `p_alive` 1 a cluster week's fix `delta` plus its `bye_cluster_cost` is what the week lost before
+  the streams.
 - **Optional reads hid a bug as "unavailable", or failed the call on a session refusal (ruling
   R11-4; `docs/plan/changelog.md` §R11).** The reads that turned every error into "unavailable" —
   the seeding evidence's last-season settings, standings, schedule and league; the pro schedule

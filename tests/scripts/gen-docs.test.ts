@@ -24,6 +24,7 @@ import {
 } from "../../scripts/gen-tool-docs.js";
 import { ROOT, cli, regionBody, runTargets, withRegion } from "../../scripts/docs/regions.js";
 import { CONFIG_KEY_SPECS } from "../../src/config/schema.js";
+import { SCHEDULE } from "../../src/domain/analytics/scheduleStress.js";
 import { tempDir } from "../lint/helpers.js";
 
 const README = readFileSync(path.join(ROOT, "README.md"), "utf8");
@@ -230,6 +231,40 @@ describe("gen-tool-docs (plan 04 §6: the tool reference ← the registry)", () 
     expect(tools.lines.join("\n")).toContain("README.md: not current");
     expect(tools.lines.join("\n")).toContain(
       "espn_get_league: registered, but the cheat-sheet has no row for it",
+    );
+  });
+});
+
+// the round-4 plugin eval's SP-1 (docs/evals/stage-c-plugin-eval.md): a reply re-ranked the worst
+// weeks by how many starters were out, and could not reconcile a fix recovering 22.7 points with a
+// bye-cluster cost of 5.72 — the cost is what the streams leave (src/domain/analytics/
+// scheduleStress.ts; tests/domain/analytics/schedule-stress.test.ts holds the arithmetic), and the
+// cheat-sheet's row said neither
+describe("the cheat-sheet's espn_analyze_schedule row says what its numbers measure", () => {
+  const row = SHEET.split("\n").find((l) => l.startsWith("| (P1) `espn_analyze_schedule` |")) ?? "";
+  it("bye_cluster_cost: the loss left after the streams fill the holes, 0 on a week that is not a cluster", () => {
+    expect(row).not.toBe("");
+    expect(row).toContain(
+      "`bye_cluster_cost` is the points the week's lineup still loses against its full-strength lineup after its holes are filled from the stream baseline: the loss left after the fixes (the streams), never before them,",
+    );
+    expect(row).toContain(
+      `0 on a week that is not a bye cluster (fewer than ${String(SCHEDULE.clusterMin)} full-strength starters out)`,
+    );
+  });
+  it("worst_weeks[]: ranked by that loss × p_alive, never by the starters out", () => {
+    expect(row).toContain(
+      `\`worst_weeks[]\` holds at most ${String(SCHEDULE.worstWeeks)} weeks, ranked by the week's loss after the fixes × \`p_alive\``,
+    );
+    expect(row).toContain("largest first: the tool's order, never the count of starters out");
+    expect(row).toContain(`a weighted loss under ${String(SCHEDULE.minDrop)} is not a worst week`);
+  });
+  it("a fix's delta and the week's bye_cluster_cost add up to the loss before the streams", () => {
+    // the fixes' field list stays as check-skills pins it (the round-4c review's R4CS-4)
+    expect(row).toContain(
+      "`fixes[]` (`action`, `cost`, `delta` — the points the fix recovers, `deadline`)",
+    );
+    expect(row).toContain(
+      "so at `p_alive` 1 a cluster week's fix `delta` plus its `bye_cluster_cost` is what the week lost before the streams",
     );
   });
 });
