@@ -634,10 +634,13 @@ export const LLM_EXAMPLE_LABEL =
  * The multi-turn cases whose earlier assistant turn was a Skill's answer, by case name: the
  * history replays that turn's Skill call — the tool call, its result and the Skill's text, as a
  * session holds them — before the answer, so the follow-up turn runs in a session that already
- * loaded the Skill, as a real one would (round 3's triage, SC-7-E: a fidelity step).
+ * loaded the Skill, as a real one would (round 3's triage, SC-7-E: a fidelity step; round 4's, SC-6
+ * and SC-10: replayed as text, the follow-up turn ran without the Skill on Sonnet).
  */
 export const HISTORY_SKILL_CALLS = Object.freeze({
+  "SC-6": Object.freeze({ turn: 1, skill: "session-check" }),
   "SC-7-E": Object.freeze({ turn: 1, skill: "session-check" }),
+  "SC-10": Object.freeze({ turn: 1, skill: "session-check" }),
 });
 
 /** Where an injection case's base trajectory lives, relative to its case directory. */

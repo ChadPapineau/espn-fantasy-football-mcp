@@ -36,6 +36,18 @@
     "should_trigger": true
   },
   {
+    "query": "RotoWire says my tight end was limited in practice, but I think the official report said he didn't practise. Which is it?",
+    "should_trigger": true
+  },
+  {
+    "query": "What is ESPN's outlook saying about James Cook III, and should I do anything?",
+    "should_trigger": true
+  },
+  {
+    "query": "Last week you logged something about my RB1. What did it say, and should I act on it now?",
+    "should_trigger": true
+  },
+  {
     "query": "summarise the latest NFL news",
     "should_trigger": false
   },
@@ -69,6 +81,18 @@
   },
   {
     "query": "Which free agent has the best snap share to claim this week?",
+    "should_trigger": false
+  },
+  {
+    "query": "Should I trade my tight end for their RB2?",
+    "should_trigger": false
+  },
+  {
+    "query": "Is my lineup right for this week?",
+    "should_trigger": false
+  },
+  {
+    "query": "How many points does a reception score in my league?",
     "should_trigger": false
   }
 ]

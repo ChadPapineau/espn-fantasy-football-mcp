@@ -292,14 +292,15 @@ describe("round 3's eval-case rubrics state what the fixture gives (each PASS-if
     expect(line).toBeDefined();
     expect(c.expectations.join("\n")).not.toMatch(/— or, when no candidate carries a signal/);
   });
-  it("WK-1: as_of by a free grader; a row the tool holds needs no deadline", () => {
+  it("WK-1: as_of by a free grader; a row the tool holds needs no deadline (round 5: the deadlines are free graders too)", () => {
     const c = caseOf("weekly", "WK-1");
     expect(regexOf(c, "The reply prints the reads' as_of").test("as_of 2025-10-07")).toBe(true);
-    expect(llmLine(c, "Every action")).toMatch(/needs none/);
+    expect(c.expectations.join("\n")).toMatch(/a held row \(a pass or a hold\) is no move/);
   });
   it("ON-6: no onboarding walkthrough; session-check's steps are the hand-off", () => {
-    expect(llmLine(caseOf("onboard", "ON-6"), "The reply says ESPN rejected")).toMatch(
-      /no onboarding walkthrough/,
+    // round 5 (changelog §R12, R12-2): one judge per clause
+    expect(llmLine(caseOf("onboard", "ON-6"), "The reply gives no onboarding walkthrough")).toMatch(
+      /Session-check's own steps to replace the session/,
     );
   });
   it("SS-INJ-2: matches-base is the same players, verdict and action as the base", () => {
@@ -322,7 +323,8 @@ describe("round 3's eval-case rubrics state what the fixture gives (each PASS-if
     expect(JSON.stringify(caseOf("start-sit", "SS-6-E"))).not.toMatch(/untuned/);
   });
   it("WK-10 and WK-11: eff setup once, in the hand-off line (the round-4 refix's VS-5)", () => {
-    expect(llmLine(caseOf("weekly", "WK-10"), "The League activity section")).toMatch(
+    // round 5 (changelog §R12, R12-2): WK-10's clauses are one judge each
+    expect(llmLine(caseOf("weekly", "WK-10"), "The answer ends with the hand-off line")).toMatch(
       /gives eff setup once \(the hand-off line\)/,
     );
     expect(llmLine(caseOf("weekly", "WK-11"), "Wherever ESPN's 401 landed")).toMatch(
@@ -332,8 +334,8 @@ describe("round 3's eval-case rubrics state what the fixture gives (each PASS-if
 });
 
 describe("SC-7-E replays the earlier turn's session-check Skill call (round 3: a fidelity step)", () => {
-  it("is the only case so listed", () => {
-    expect(Object.keys(HISTORY_SKILL_CALLS)).toEqual(["SC-7-E"]);
+  it("is listed, with SC-6 and SC-10 since round 5 (round 4's triage: their follow-ups ran without the Skill)", () => {
+    expect(Object.keys(HISTORY_SKILL_CALLS).sort()).toEqual(["SC-10", "SC-6", "SC-7-E"]);
   });
 
   it("its history holds the Skill call, its result and the Skill's text before the earlier answer", () => {

@@ -48,11 +48,11 @@
       "name": "RT-4-E",
       "toolset": "core",
       "prompt": "show me the calibration of your win probabilities",
-      "expected_output": "Six lineup calls are logged over weeks 1–4, each with its one scored alternative (changelog §R10, R10-3), but none stored a win probability before kickoff, so p_win's Brier has n = 0 ('n too small (0 of 30)' in every week): the reply says the sample is too small and points to swap regret and projection CRPS instead, saying why each is empty or too small on this log (every call kept the lineup, so swap regret has n = 0; no projection was stored before kickoff, so CRPS has n = 0), without calibration wording for p_win.",
+      "expected_output": "Six lineup calls are logged over weeks 1–4, each with its one scored alternative (changelog §R10, R10-3), but none stored a win probability before kickoff, so p_win's Brier has n = 0 ('n too small (0 of 30)' in every week): the reply says the sample is too small and points to swap regret and projection CRPS as the metrics that fill up first, saying why each is empty on this log (every call kept the lineup, so swap regret has n = 0; no projection was stored before kickoff, so CRPS has n = 0), without calibration wording for p_win.",
       "files": ["evals/fixtures/fx-10h"],
       "expectations": [
         "The reply says the sample is too small (regex: `n too small|0 of 30|n = ?0`)",
-        "The reply names swap regret and projection CRPS as what to read instead, and says why each is empty or too small on this log (llm)",
+        "The reply names swap regret and projection CRPS as the metrics that fill up first, and says why each is empty on this log (llm)",
         "The reply never calls the win probability calibrated (llm)"
       ]
     },

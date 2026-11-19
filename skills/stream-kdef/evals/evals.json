@@ -49,7 +49,7 @@
       "expected_output": "In this move-to-last priority league the stream is a free-agent add after the waiver run, not a claim, with next_run_at named.",
       "files": ["evals/fixtures/fx-10h"],
       "expectations": [
-        "The reply says to add the defense as a free agent after the run (regex: `free[- ]agent add after the (waiver )?run|after the (waiver )?run`)",
+        "The reply says to add the defense as a free agent after the run (regex: `free[- ]agent add after the (waiver )?run|after the (waiver )?run|once the (waiver )?run clears`)",
         "The reply names the next run time from the league settings (llm)",
         "The reply does not spend waiver priority on the streamer (llm)"
       ]

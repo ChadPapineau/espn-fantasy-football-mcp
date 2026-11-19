@@ -612,14 +612,18 @@ describe("SC-1 in two turns (Stage C finding eval-sc1-single-turn-unsatisfiable)
       .trimEnd()
       .split("\n")
       .map((l) => JSON.parse(l) as Json);
-    expect(lines.map((l) => l.type)).toEqual(["user", "assistant"]);
+    // round 4's triage: the earlier turn's session-check call is replayed before its answer
+    // (HISTORY_SKILL_CALLS), so the follow-up turn runs in a session that loaded the Skill
+    expect(lines.map((l) => l.type)).toEqual(["user", "assistant", "user", "user", "assistant"]);
     expect(lines[0]!.parentUuid).toBeNull();
-    expect(lines[1]!.parentUuid).toBe(lines[0]!.uuid);
+    for (let i = 1; i < lines.length; i++) expect(lines[i]!.parentUuid).toBe(lines[i - 1]!.uuid);
     expect(lines[0]!.message).toEqual({
       role: "user",
       content: "it says ESPN rejected my session",
     });
-    const reply = lines[1]!.message as { role: string; content: { type: string; text: string }[] };
+    expect(JSON.stringify(lines[1]!.message)).toContain('"name":"Skill"');
+    expect(lines[3]!.isMeta).toBe(true);
+    const reply = lines[4]!.message as { role: string; content: { type: string; text: string }[] };
     expect(reply.role).toBe("assistant");
     expect(reply.content[0]!.text).toMatch(/Tell me when you have run eff setup/);
     expect(new Set(lines.map((l) => l.sessionId)).size).toBe(1);
