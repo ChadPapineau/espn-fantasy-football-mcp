@@ -1888,6 +1888,20 @@ The rest of round 4's triage (12 Skill-text and 8 eval-case defects on Sonnet, 1
 needs no ruling; round 5 fixes it as its triage proposes, and every variance case with a stated line
 is fixed under R12-1.
 
+## §R13 — rulings after round 5's fix round (2026-11-19)
+
+**Trigger:** the fix round that built §R12 (`b9cd228` … `c355819`), its independent verifiers and
+their refix left four scope questions open, recorded in `docs/evals/stage-c-backlog.md` and the
+streams' reports. The orchestrator ruled on 2026-11-19 under the same delegation as §R12; each
+ruling is reversible by the owner. They are built before round 5 runs, so round 5 evaluates them.
+
+| id | ruling | why |
+|---|---|---|
+| R13-1 (R12-2's split, its scope) | R12-2's split applies to every PASS-if line in the suite that joins conditions, not only the lines the fix round touched: each condition becomes its own judge and every condition is kept (R11-3: made exact or extended, never loosened). A line whose conditions cannot be graded apart (one fact stated two ways) stays one judge, and the case says why | The verifier found joined lines left (SS-12 03, SS-INJ-2 03, IC-INJ 03, RT-INJ 04 and 05, WK-8 07, WK-9 07, SC-11 06 and more). A joined judge fails a run on one condition and does not say which, so the triage cannot find the cause |
+| R13-2 (optional reads that say nothing, or degrade on the budget only) | An optional read that degrades on an outage says so with `fallbackWarning`'s "unavailable" line; on a session refusal it may stay silent where the answer loses nothing beyond what the call's session line already says. `leaguePremiumFit`'s schedule read gains its outage line. `espn_analyze_lineup`'s matchups read and `espn_analyze_waivers`' standings read, which degrade on the budget only, absorb an outage and a refusal through `optionalOrThrow` with `fallbackWarning` lines, as R11-4 says of every optional read; a bug still answers `INTERNAL`. `espn_analyze_lineup`'s pro-schedule read, widened in `b6954aa` past `STALE_ONLY` to `optionalOrThrow`'s full set, is confirmed under R11-4; so is `38c0c3c`'s E3 live, where a refused box score conditions nothing | R11-4 makes outage and refusal the two causes an optional read absorbs; a read that absorbs the budget but fails the call on an outage, or absorbs an outage without a line, breaks the house pattern the other reads follow |
+| R13-3 (R12-6's purpose) | Plan 09 §5.2's variant list also names `outlook-more-work`, `private-league`, `private-league-none` and `private-expiring`, and §3.6's AP-INJ names `inj-player-name` (R11-1, R12-6). The build's manifest stays the source of truth | R12-6 was built to its letter, but plan 09 still omits four variants the suite runs, against its stated purpose |
+| R13-4 (round 5's trigger watch) | Round 5's trigger run reports onboard neg-08 and waivers pos-01 by name, on both models, since the fix round cut or moved the phrases nearest to them | The fix round dropped `pickup` from waivers and moved the seed wording between schedule-plan and onboard |
+
 ## Reviews (re-run on every version bump of the named dependency)
 
 | date | dependency | verdict | evidence | open item |
