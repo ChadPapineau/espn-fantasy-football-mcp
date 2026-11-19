@@ -430,6 +430,36 @@ minor version (plan 04 §4.4; plan 09 K6). One version covers the server, the Sk
 
 ### Fixed
 
+- **Optional reads that said nothing on an outage, or failed the call on one (ruling R13-2;
+  `docs/plan/changelog.md` §R13).** An optional read that degrades now says so by cause, in the
+  fallbacks' fixed form: `<read> unavailable: …` on the call's budget or an outage, `<read> not
+  read: …` on a session refusal, beside the call's session line; a bug still answers `INTERNAL`.
+  `espn_analyze_lineup`'s matchups (`schedule unavailable: no opponent, objective mean, mode
+  neutral`) and `espn_analyze_waivers`' standings (`standings unavailable: waiver rank unknown
+  (cold-start premium at k = N/2)`) absorbed the budget only, so an outage or a refusal failed the
+  call; they now answer without the read. `espn_analyze_waivers`' fitted premium places its logged
+  waiver runs by the pro schedule's kickoffs and said nothing without it: `pro schedule
+  unavailable: the fitted premium's logged waiver runs grouped by Tuesday-to-Tuesday week`. The
+  sweep of the tools against R13-2 found eleven more reads that answered without their data and
+  said nothing; each now says what its answer goes without: the standings of
+  `espn_analyze_lineup` and of `espn_analyze_trade`'s offer (`standings unavailable: the season
+  read from the results`, as `espn_analyze_matchup`'s season mode says), of
+  `espn_analyze_injury_cascade`'s claim verdicts (`… waiver rank unknown (cold-start premium at
+  k = N/2)`), of `espn_analyze_roster` (`… adds_remaining counts no acquisition as used; the season
+  read from the results`, each clause where it applies: `adds_remaining` counted the acquisitions
+  used as 0) and of `espn_analyze_league_activity` (`standings unavailable: waiver-order movement
+  goes without them`; a refusal keeps its own line); `espn_analyze_evidence`'s rosters for a
+  rostered subject (`rosters unavailable: the lineup_slot and lineup_locked checks are not made`;
+  my roster's snapshot stands in only for my own player); `espn_analyze_retrospective`'s scoring
+  settings (`scoring settings unavailable: no forecast or attribution row is scored`); the seeding
+  evidence's last-season league (`last season's league unavailable: playoff_edited is null`); the
+  team names of `espn_search_players` and `espn_list_players` (`standings unavailable:
+  on_team_name is null`); `espn_search_players`' position filter (`league settings unavailable: the
+  position filter reads ESPN's slot catalogue`; a budget shortfall there is now `partial`); and
+  the order of `espn_get_roster` with `all: true` (`matchups unavailable: my opponent's roster is
+  not placed second`). `espn_analyze_lineup`'s widened pro-schedule read (`b6954aa`) and
+  `espn_analyze_matchup` live's refused box score that conditions nothing (`38c0c3c`) are confirmed
+  under R13-2, unchanged.
 - **An optional read's line called a session refusal "unavailable" (ruling R12-4;
   `docs/plan/changelog.md` §R12).** Every optional pro-schedule read now says its line by cause, as
   the fallbacks do: `pro schedule unavailable: …` on an outage (the call's budget, ESPN, a dataset
@@ -462,8 +492,8 @@ minor version (plan 04 §4.4; plan 09 K6). One version covers the server, the Sk
   `… final and corrections_window_open are conservative; no forecast or attribution row is
   scored`).
   `espn_analyze_lineup`'s schedule read, which degraded on a budget shortfall only, now also absorbs
-  an outage and a session refusal, as R11-4's optional reads do (`docs/evals/stage-c-backlog.md`
-  asks for that widening to be confirmed). A bug still answers `INTERNAL`.
+  an outage and a session refusal, as R11-4's optional reads do (a widening confirmed by ruling
+  R13-2). A bug still answers `INTERNAL`.
 - **`espn_analyze_matchup` live conditioned P(win) on a box score the session refused, and called
   a refused pro schedule "unavailable" (the round-5 verifier's F2; ruling R12-4).** A live fact the
   session refused is unread like one an outage lost, so nothing is conditioned on it: the pre-game

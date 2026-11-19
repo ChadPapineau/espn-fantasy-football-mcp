@@ -1156,12 +1156,14 @@ What the server stream of the §R12 fix round built and left open (`docs/plan/ch
   refusal: the session line names the read, and no line calls the refusal "unavailable". R12-4's
   first sentence ("every optional read's warning goes through `fallbackWarning`") can also be read as
   giving those sites a "not read: <what the answer goes without>" line, which would say a
-  consequence the session line does not. Not built: a ruling would decide it.
+  consequence the session line does not. Ruled: R13-2 — silence on a refusal stands where the
+  answer loses nothing beyond what the call's session line says; a read whose answer loses more
+  says "not read: …" (the R13 fix round's sites below).
 - **Two optional reads degrade on a budget shortfall only.** `espn_analyze_lineup`'s matchups
   ("schedule unavailable: no opponent, objective mean, mode neutral") and `espn_analyze_waivers`'
   standings ("standings unavailable: waiver rank unknown …") absorb only the call's budget signal, so
   an outage or a session refusal there fails the call. They are not pro-schedule reads, so R12-5 does
-  not name them; their lines are never reached on a refusal.
+  not name them; their lines are never reached on a refusal. Ruled: R13-2, built (below).
 - **The refix after the round-5 verifier (F1, F2, F4), built.** F1: `espn_get_scoreboard`,
   `espn_get_box_score` (one read for its game states and its flags), `espn_list_players`,
   `espn_get_injuries` and both of E13's schedule reads go through `optionalScheduleOf` and say what
@@ -1176,7 +1178,8 @@ What the server stream of the §R12 fix round built and left open (`docs/plan/ch
   was conditioned on points never read (0 so far, `live` non-null). F4: the schedule row says a
   fix's `cost` sums the analysed weeks, each weighted by `p_alive`.
   `tests/mcp/optional-read-lines.test.ts`, `tests/domain/analytics/matchup.test.ts` and
-  `tests/domain/analytics/schedule-stress.test.ts` hold them (each failing before the fix).
+  `tests/domain/analytics/schedule-stress.test.ts` hold them (each failing before the fix). Ruled:
+  R13-2 — F2's E3 live, where a refused box score conditions nothing, is confirmed as built.
 - **`espn_analyze_lineup`'s pro-schedule read absorbs more than R12-5 names (the round-5
   verifier's F3): a widening to confirm.** It degraded on a budget shortfall only; since `b6954aa`
   it absorbs what every other optional pro-schedule read absorbs (`optionalOrThrow`: an outage, a
@@ -1187,12 +1190,15 @@ What the server stream of the §R12 fix round built and left open (`docs/plan/ch
   absorbs a refusal. Asked of the orchestrator: confirm it under §R12, or narrow the catch to the
   budget and `STALE_ONLY`. Narrowing is one catch in `analyzeLineupTool`, and the lineup's case in
   `tests/mcp/optional-read-lines.test.ts` would then expect an outage and a refusal to fail the
-  call.
+  call. Ruled: R13-2 — confirmed under R11-4, unchanged; the lineup's cases in
+  `tests/mcp/optional-read-lines.test.ts` (the refusal, the outage, `STALE_ONLY` and a bug) hold it.
 - **One optional pro-schedule read still says nothing: `leaguePremiumFit`'s.** E5's league-fitted
   premium places its logged waiver runs in fantasy weeks by the schedule's kickoffs
   (`weeklyRunFeed`). It reads with `allow_stale: true`, so `STALE_ONLY` never reaches it and R12-5
   does not name it. On an outage it keys the runs without kickoffs and says no line. Left open: it
-  is a side input of a fit that states its own basis.
+  is a side input of a fit that states its own basis. Ruled: R13-2, built (below). (Its
+  `allow_stale: true` does not keep `STALE_ONLY` away in practice: the call's `rosReadingOf` makes
+  the memoised read first, without it, and the fit reads that same promise.)
 
 ## Found in round 5's eval-case fixes (2026-11-19)
 
@@ -1264,3 +1270,57 @@ Everything in round 4's eval-case triage is built; `tests/skills/round5-eval-cas
   4 587 of 4 600.
 - **Open, for the orchestrator:** R12-2's scope beyond the named lines (V5S-5) and R12-6's beyond its
   text (V5S-10), above.
+
+## Found in the R13 fix round's server sweep (2026-11-19)
+
+What the server stream built under R13-2 (`docs/plan/changelog.md` §R13) and what its sweep of
+`src/mcp/tools` left as it is. `tests/mcp/optional-read-lines-r13.test.ts` holds every site built
+here: on an outage (`ESPN_UPSTREAM_UNAVAILABLE`, `RATE_LIMITED`, `ESPN_DRIFT_DETECTED`) the call
+answers with the "unavailable" line; on a refusal (both codes) the "not read" line, exactly one
+session line and `partial: true`; on a bug `INTERNAL`; where the read absorbed the budget before,
+the budget too. Each site failed before its fix. A mutation pass over the lines, the catches and
+the causes (27 mutants) killed all but one, the evidence's snapshot standing in for a rival's player,
+which no world held a snapshot for; a case with my roster's snapshot now kills it.
+
+- **R13-2's named sites, built.** `espn_analyze_lineup`'s matchups and `espn_analyze_waivers`'
+  standings absorb an outage and a refusal through `optionalOrThrow`, with `fallbackWarning` lines;
+  `leaguePremiumFit`'s pro schedule says `pro schedule unavailable: the fitted premium's logged
+  waiver runs grouped by Tuesday-to-Tuesday week` (`not read` on a refusal: the session line names
+  the read, never what the fit goes without), and a bug in that read is thrown past the fit's own
+  guard. Through the tool the call's `rosReadingOf` makes the memoised read first and answers
+  `INTERNAL` there; the guard is held by a unit case whose first read is the fit's.
+- **The sweep's sites, built.** The reads that answered without their data and said nothing: the
+  standings of `espn_analyze_lineup`, `espn_analyze_trade`'s offer, `espn_analyze_injury_cascade`'s
+  verdicts, `espn_analyze_roster` (whose `adds_remaining` counted the acquisitions used as 0) and
+  `espn_analyze_league_activity`; `espn_analyze_evidence`'s rosters (a rival's player: my roster's
+  snapshot, which stood in for every subject, now stands in for my own players only);
+  `espn_analyze_retrospective`'s scoring settings; the seeding evidence's last-season league (its
+  `playoff_edited` flag); the team names of `espn_search_players` and `espn_list_players`;
+  `espn_search_players`' position filter (whose budget shortfall was also unsaid and not partial);
+  `espn_get_roster` `all: true`'s opponent order. E11's standings refusal keeps E11's own line (the
+  silent clause: that line says what the digest goes without); `tests/mcp/activity-lines.test.ts`,
+  whose every-combination case forbade any `standings unavailable` line (the round-4d verifier's F2,
+  written against a refusal), now forbids it on a refusal and beside the teams line and requires it
+  once on an outage beside readable rosters.
+- **Left as they are, each with its reason.** Not optional reads: `espn_analyze_waivers`' later
+  position pages of its candidate pool (pages of the call's required market, whose first page fails
+  the call on an outage; the budget stopping a pagination is plan 01 §4.2's partial answer);
+  `espn_search_players`' name index and the selectors' player universe (required: the budget answers
+  `STALE_ONLY` with the refresh hint); the local store, dataset, crosswalk and scoring guards
+  (`common.ts`, `espn-p1.ts`, `league.ts`, `p1-common.ts`, `datasets-p1.ts`, `projection-v2.ts`,
+  `market-p1.ts`' name keys, `retro-p3.ts`, `reclog.ts`' writes, `ops.ts`), which make no ESPN read.
+  Said already, in another form: `espn_analyze_schedule`'s standings once the bracket has started
+  (the simulator's note "the playoff bracket has started and its field is unknown (no standings
+  seeds) …"), `espn_analyze_league_activity`'s rosters ("N rosters unreadable: no needs for them"
+  when rival needs are asked; nothing else reads them), `espn_list_transactions`' pending claims
+  (`espn:mPendingTransactions unavailable`). The R10-12 sites that stay silent on a refusal
+  (`unavailableUnlessRefused`, the `!refused` guards) are R13-2's silent clause and unchanged.
+- **Open, for the orchestrator.** (1) `partial` on an outage: these lines leave `partial` as the house
+  contract sets it (`tool-outputs.md`: the budget, the deadline or the limiter held a read back, or a
+  session refusal), so an outage alone answers `partial: false` with its "unavailable" line, as
+  R12-4's pro-schedule lines do; plan 07 §2's "every analytics tool lists which inputs it can lose
+  and still answer (`partial: true`, …)" could be read as `partial: true` on any lost input, which
+  would also tell the Skills to repeat the call (`tool-outputs.md`'s partial paragraph). Not changed.
+  (2) Guards that absorb a bug in a computation, not a read, with or without a line — `leaguePremiumFit`'s
+  fit (logged only), E2's seeding simulator ("seeding simulator unavailable: …"), E1's v2 layer
+  ("v2-opportunity unavailable …") — are R11-4's class, not R13-2's; left for a ruling.

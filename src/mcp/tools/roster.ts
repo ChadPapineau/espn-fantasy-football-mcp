@@ -358,16 +358,25 @@ async function opponentOfWeek(
 ): Promise<number | null> {
   const mine = league.my_team?.team_id ?? null;
   if (mine === null) return null;
+  // an optional read (changelog §R13, R13-2): the budget, an outage or a session refusal orders the
+  // rosters without the opponent, said by cause — the session line names the read, not the order;
+  // a bug is INTERNAL (R11-4)
+  let view = "league settings";
+  const missing = (failure: unknown): null => {
+    warnings.push(fallbackWarning(failure, view, "my opponent's roster is not placed second"));
+    return null;
+  };
   try {
     const rules = await rulesOf(ctx, inputs);
+    view = "matchups";
     const got = await withinBudget(
       () => ctx.services.platform.getMatchups(leagueRef(ctx), readOpts(ctx)),
       warnings,
     );
-    if (got === null) return null;
+    if (got === null) return missing(null);
     return opponentIn(take(ctx, got, inputs), periodOf(rules, w), mine);
   } catch (e) {
-    if (isOptionalReadFailure(e)) return null;
+    if (isOptionalReadFailure(e)) return missing(e);
     throw e;
   }
 }

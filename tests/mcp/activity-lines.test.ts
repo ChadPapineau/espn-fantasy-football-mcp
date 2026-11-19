@@ -137,7 +137,15 @@ describe("E11's lines, every combination of the feed, standings and rosters (the
       // a refused read is never "unavailable" nor "unreadable" (the round-4d verifier's F2: a refused
       // rosters read was said again as "10 rosters unreadable: no needs for them"); one line per
       // fact: no line twice
-      for (const x of w) expect(x).not.toMatch(/^(?:standings|rosters) unavailable/);
+      for (const x of w) expect(x).not.toMatch(/^rosters unavailable/);
+      // the standings lost to an outage while the rosters named the teams: the waiver ranks are
+      // unknown, said once (changelog §R13, R13-2; E11 said nothing before); never for a refusal,
+      // which the reads line says, nor beside the teams line
+      expect(w.filter((x) => x.startsWith("standings unavailable"))).toEqual(
+        st === "unavailable" && ro === "read"
+          ? ["standings unavailable: waiver-order movement goes without them"]
+          : [],
+      );
       for (const r of refused)
         for (const x of w)
           if (x.includes(r)) expect(x).not.toMatch(/\b(?:unavailable|unreadable)\b/);

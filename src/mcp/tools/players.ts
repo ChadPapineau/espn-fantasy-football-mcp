@@ -21,11 +21,7 @@ import {
   type ProSchedule,
   type UntrustedText,
 } from "../../domain/league/types.js";
-import {
-  PLAYER_LIST_WARNINGS,
-  isUpstreamBudgetExhausted,
-  type PlayerStatusFilter,
-} from "../../providers/platform.js";
+import { PLAYER_LIST_WARNINGS, type PlayerStatusFilter } from "../../providers/platform.js";
 import {
   BOUNDS,
   NAME_SORT_OFFSET_REASON,
@@ -73,20 +69,23 @@ async function teamNames(
   inputs: InputStamp[],
   warnings: string[],
 ): Promise<ReadonlyMap<number, UntrustedText>> {
-  try {
-    const got = await withinBudget(
-      () => ctx.services.platform.getStandings(leagueRef(ctx), readOpts(ctx)),
-      warnings,
-    );
-    if (got === null) return new Map();
-    const st = take(ctx, got, inputs);
-    return new Map(st.teams.map((t) => [t.team_id, t.name]));
-  } catch (e) {
-    // the names are an extra: an outage or a refusal goes without them; a bug is INTERNAL
-    // (changelog §R11, R11-4)
-    optionalOrThrow(e);
+  // the names are an extra: the budget, an outage or a refusal goes without them, said by cause
+  // (changelog §R13, R13-2: the session line names the read, not the field); a bug is INTERNAL
+  // (changelog §R11, R11-4)
+  let failure: unknown = null;
+  const got = await withinBudget(
+    () => ctx.services.platform.getStandings(leagueRef(ctx), readOpts(ctx)),
+    warnings,
+  ).catch((e: unknown) => {
+    failure = e;
+    return optionalOrThrow(e);
+  });
+  if (got === null) {
+    warnings.push(fallbackWarning(failure, "standings", "on_team_name is null"));
     return new Map();
   }
+  const st = take(ctx, got, inputs);
+  return new Map(st.teams.map((t) => [t.team_id, t.name]));
 }
 
 /** Folds a name or query to space-separated lowercase ASCII tokens (`St. Brown` → `st brown`). */
@@ -256,7 +255,9 @@ export const searchPlayers = defineTool({
     if (q.length === 0)
       throw new EffError("VALIDATION", { field: "query", reason: "no_name_tokens" });
     const accepts =
-      args.position === undefined ? null : await searchPositions(ctx, args.position, inputs);
+      args.position === undefined
+        ? null
+        : await searchPositions(ctx, args.position, inputs, warnings);
     const index = await nameIndex(ctx, season, inputs, warnings, args);
     if (index.length === 0)
       throw new EffError("STALE_ONLY", {
@@ -380,14 +381,27 @@ export async function searchPositions(
   ctx: ToolContext,
   raw: string,
   inputs: InputStamp[],
+  warnings: string[],
 ): Promise<ReadonlySet<string>> {
-  let slots: { readonly slots: readonly { name: string; eligible_positions: readonly string[] }[] };
-  try {
-    slots = await slotsOf(ctx, inputs);
-  } catch (e) {
-    if (!isOptionalReadFailure(e) && !isUpstreamBudgetExhausted(e)) throw e;
-    slots = ESPN_SLOT_CATALOGUE;
-  }
+  // an optional read (changelog §R13, R13-2): the budget (its partial line), an outage or a session
+  // refusal reads the filter from ESPN's whole catalogue, said by cause; a bug is INTERNAL (R11-4)
+  let failure: unknown = null;
+  const read = await withinBudget(() => slotsOf(ctx, inputs), warnings).catch((e: unknown) => {
+    if (!isOptionalReadFailure(e)) throw e;
+    failure = e;
+    return null;
+  });
+  if (read === null)
+    warnings.push(
+      fallbackWarning(
+        failure,
+        "league settings",
+        "the position filter reads ESPN's slot catalogue",
+      ),
+    );
+  const slots: {
+    readonly slots: readonly { name: string; eligible_positions: readonly string[] }[];
+  } = read ?? ESPN_SLOT_CATALOGUE;
   const name = canonicalPosition(raw, leaguePositions(slots), "position");
   const out = new Set<string>();
   for (const s of slots.slots) {

@@ -94,6 +94,7 @@ import {
   isOptionalReadFailure,
   unavailableUnlessRefused,
   sessionRefusalOf,
+  fallbackWarning,
   type RosReading,
 } from "./common.js";
 import {
@@ -407,6 +408,28 @@ async function matchupsOf(
   return take(ctx, got, inputs);
 }
 
+/**
+ * The standings when this call can read them, or null with what the read failed on (null: the
+ * budget, its partial line said by withinBudget) — an outage or a session refusal; a bug is
+ * INTERNAL (changelog §R11, R11-4).
+ */
+async function standingsRead(
+  ctx: ToolContext,
+  inputs: InputStamp[],
+  warnings: string[],
+): Promise<{ readonly standings: Standings | null; readonly failure: unknown }> {
+  let failure: unknown = null;
+  const got = await withinBudget(
+    () => ctx.services.platform.getStandings(leagueRef(ctx), readOpts(ctx)),
+    warnings,
+  ).catch((e: unknown) => {
+    if (!isOptionalReadFailure(e)) throw e;
+    failure = e;
+    return null;
+  });
+  return { standings: got === null ? null : take(ctx, got, inputs), failure };
+}
+
 /** The standings when this call can read them (the simulator falls back to the results). */
 async function standingsOrNull(
   ctx: ToolContext,
@@ -414,18 +437,11 @@ async function standingsOrNull(
   warnings: string[],
   unavailable: string | null = null,
 ): Promise<Standings | null> {
-  const read = { refused: false };
-  const got = await withinBudget(
-    () => ctx.services.platform.getStandings(leagueRef(ctx), readOpts(ctx)),
-    warnings,
-  ).catch((e: unknown) => {
-    if (!isOptionalReadFailure(e)) throw e;
-    // a refusal is said by the call's session line, never as unavailable (changelog §R11, R11-4)
-    read.refused = sessionRefusalOf(e) !== null;
-    return null;
-  });
-  if (got === null && unavailable !== null && !read.refused) warnings.push(unavailable);
-  return got === null ? null : take(ctx, got, inputs);
+  const { standings, failure } = await standingsRead(ctx, inputs, warnings);
+  // a refusal is said by the call's session line, never as unavailable (changelog §R11, R11-4)
+  if (standings === null && unavailable !== null && sessionRefusalOf(failure) === null)
+    warnings.push(unavailable);
+  return standings;
 }
 
 /** E3 `espn_analyze_matchup`. */
@@ -1563,7 +1579,9 @@ export const analyzeRosterTool = defineTool({
       .filter((p) => p.status !== "ONTEAM")
       .map((p) => replacementPlayerOf(p, weeks, false, ros, b.w));
     const positions = [...new Set(mine.entries.map((e) => e.player.position))];
-    const standings = await standingsOrNull(ctx, inputs, warnings);
+    // the standings, an optional read said by cause (changelog §R13, R13-2): the acquisitions used
+    // (adds_remaining) and the season simulation's table read from them
+    const { standings, failure: stFailure } = await standingsRead(ctx, inputs, warnings);
     const mineStanding = standings?.teams.find((t) => t.team_id === team) ?? null;
     let season: {
       p_playoffs: number;
@@ -1608,6 +1626,13 @@ export const analyzeRosterTool = defineTool({
       }
       if (season === null && !mRead.refused)
         warnings.push("season simulation unavailable: competing read as yes");
+    }
+    if (standings === null) {
+      const lost: string[] = [];
+      if (b.rules.waiver.acquisition_limit !== null)
+        lost.push("adds_remaining counts no acquisition as used");
+      if (season !== null) lost.push("the season read from the results");
+      if (lost.length > 0) warnings.push(fallbackWarning(stFailure, "standings", lost.join("; ")));
     }
     const deadline = tradeDeadlineWeeks(b.rules.trade, schedule).first_week_after;
     const players: AuditPlayer[] = mine.entries.map((e) => {

@@ -105,6 +105,7 @@ import {
   optionalOrThrow,
   optionalScheduleOf,
   scheduleWarning,
+  fallbackWarning,
   type RosReading,
 } from "./common.js";
 import { rostersOf } from "./roster.js";
@@ -1175,10 +1176,16 @@ export const analyzeLineupTool = defineTool({
     const rosters = await rostersOf(ctx, w, inputs, warnings, args, team);
     const mine = rosters.find((r) => r.team.team_id === team);
     if (mine === undefined) throw new EffError("NOT_FOUND");
+    // an optional read (changelog §R13, R13-2; R11-4): a budget shortfall, an outage or a session
+    // refusal answers with no opponent, said by cause (fallbackWarning); a bug is INTERNAL
+    let mFailure: unknown = null;
     const mGot = await withinBudget(
       () => ctx.services.platform.getMatchups(leagueRef(ctx), readOpts(ctx, args)),
       warnings,
-    );
+    ).catch((e: unknown) => {
+      mFailure = e;
+      return optionalOrThrow(e);
+    });
     const matchups = mGot === null ? [] : take(ctx, mGot, inputs);
     const oppId = opponentIn(matchups, periodOf(rules, w), team);
     const opp = oppId === null ? null : (rosters.find((r) => r.team.team_id === oppId) ?? null);
@@ -1187,7 +1194,9 @@ export const analyzeLineupTool = defineTool({
     // matchup-multiweek-prior-points-ignored; the engine says the carried score)
     const banked = bankedPoints(matchups, rules, w, team);
     if (mGot === null)
-      warnings.push("schedule unavailable: no opponent, objective mean, mode neutral");
+      warnings.push(
+        fallbackWarning(mFailure, "schedule", "no opponent, objective mean, mode neutral"),
+      );
     // an optional read (changelog §R12, R12-4 and R12-5): a budget shortfall, an outage, a refusal
     // or a dataset past its hard limit answers without lock times, said by cause; a bug is INTERNAL
     const got = await optionalScheduleOf(ctx, league.ref.season, inputs, warnings, allowStale);
@@ -1262,14 +1271,22 @@ export const analyzeLineupTool = defineTool({
       opp === null
         ? null
         : present(opp.entries.map((e) => toLineup(e, gsisOf.get(e.player.ref.id) ?? null)));
+    // the season context's standings, an optional read said by cause (changelog §R13, R13-2): without
+    // them the season is read from the matchups' results (no divisions), as E3's season mode does
+    let stFailure: unknown = null;
     const stGot =
       mGot === null
         ? null
         : await withinBudget(
             () => ctx.services.platform.getStandings(leagueRef(ctx), readOpts(ctx)),
             warnings,
-          ).catch(optionalOrThrow);
+          ).catch((e: unknown) => {
+            stFailure = e;
+            return optionalOrThrow(e);
+          });
     const standings = stGot === null ? null : take(ctx, stGot, inputs);
+    if (mGot !== null && standings === null)
+      warnings.push(fallbackWarning(stFailure, "standings", "the season read from the results"));
     const reading =
       args.seeding_mode === "config"
         ? ctx.services.seedingMode
@@ -1842,6 +1859,14 @@ export async function storedSeasons(
 }
 
 /**
+ * What the fitted premium goes without when its pro schedule read fails (changelog §R13, R13-2): the
+ * rest of its scheduleWarning line — the logged runs keyed by Tuesday-to-Tuesday week (feedWeekOf's
+ * fallback), never by the fantasy week the kickoffs place them in.
+ */
+export const PREMIUM_FIT_UNSCHEDULED =
+  "the fitted premium's logged waiver runs grouped by Tuesday-to-Tuesday week";
+
+/**
  * The league-fitted premium (Phase 3, plan 10 C5; Stage C, changelog R6-3 — waiver-fit/history.ts
  * fitPremiumFromHistory). The league's previous seasons' transactions kept in `transactions_seen`
  * are its own feed: the demand curve (its drops and whether another team's claim took them) and the
@@ -1860,6 +1885,9 @@ export async function leaguePremiumFit(
   standings: Standings | null,
   warnings: string[],
 ): Promise<LeaguePremiumFit | null> {
+  // a bug in the pro schedule's optional read is INTERNAL (changelog §R11, R11-4), never absorbed by
+  // the fit's own guard below
+  const scheduleRead = { bug: false };
   try {
     const season = league.ref.season;
     const stored = await storedSeasons(ctx.services.transactionsSeen, season, warnings, turn);
@@ -1879,13 +1907,23 @@ export async function leaguePremiumFit(
     await turn();
     const repo = ctx.services.waiverRuns;
     // one observation per fantasy week (weeklyRunFeed), the pro schedule placing each run in its
-    // week (the call's memoised read — no request once the dataset is refreshed)
+    // week (the call's memoised read — no request once the dataset is refreshed). An optional read
+    // (changelog §R13, R13-2): a budget shortfall, an outage, a dataset past its hard limit or a
+    // session refusal groups the runs by Tuesday-to-Tuesday week, said by cause (scheduleWarning) —
+    // the session line names the read, not what the fit goes without; a bug is INTERNAL
     const logged = repo === undefined ? [] : repo.list(leagueRef(ctx).league_id, season);
     const sched =
       logged.length === 0
         ? null
-        : await withinBudget(() => scheduleOf(ctx, season, [], true), []).catch(optionalOrThrow);
-    const runs = weeklyRunFeed(logged, sched?.schedule ?? null);
+        : await optionalScheduleOf(ctx, season, [], warnings, true).catch((e: unknown) => {
+            scheduleRead.bug = true;
+            throw e;
+          });
+    if (sched !== null && sched.read === null) {
+      const line = scheduleWarning(sched.failure, PREMIUM_FIT_UNSCHEDULED);
+      if (!warnings.includes(line)) warnings.push(line);
+    }
+    const runs = weeklyRunFeed(logged, sched?.read?.schedule ?? null);
     const evidence = feeds.filter((f) => f.outcomes.length > 0 || f.claim_runs > 0);
     if (evidence.length === 0 && runs.length === 0) return null;
     const period = periodOf(rules, w) ?? w;
@@ -1912,6 +1950,7 @@ export async function leaguePremiumFit(
     }
     return fit;
   } catch (e) {
+    if (scheduleRead.bug) throw e;
     ctx.services.logger.warn("e5.premium_fit_unavailable", {
       error: e instanceof Error ? e.name : "unknown",
     });
@@ -2108,13 +2147,25 @@ export const analyzeWaiversTool = defineTool({
       slots,
       warnings,
     );
+    // an optional read (changelog §R13, R13-2; R11-4): a budget shortfall, an outage or a session
+    // refusal prices the claims at the cold-start rank, said by cause; a bug is INTERNAL
+    let stFailure: unknown = null;
     const stGot = await withinBudget(
       () => ctx.services.platform.getStandings(leagueRef(ctx), readOpts(ctx)),
       warnings,
-    );
+    ).catch((e: unknown) => {
+      stFailure = e;
+      return optionalOrThrow(e);
+    });
     const standings = stGot === null ? null : take(ctx, stGot, inputs);
     if (standings === null)
-      warnings.push("standings unavailable: waiver rank unknown (cold-start premium at k = N/2)");
+      warnings.push(
+        fallbackWarning(
+          stFailure,
+          "standings",
+          "waiver rank unknown (cold-start premium at k = N/2)",
+        ),
+      );
     const weeks = remainingWeeks(rules.playoffs, w);
     if (weeks.length === 0)
       throw new EffError("VALIDATION", { field: "week", reason: "season_over" });

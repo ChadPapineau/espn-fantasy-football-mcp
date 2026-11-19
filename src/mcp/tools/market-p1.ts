@@ -205,22 +205,29 @@ export function tradePlayerOf(
  */
 type RefusalSaid = "absorb" | "propagate";
 
-/** The standings when this call can read them. */
-async function standingsOrNull(
+/**
+ * The standings when this call can read them, or null with what the read failed on (null: the
+ * budget, its partial line said by withinBudget): an outage, or a session refusal unless the caller
+ * says refusals itself (`propagate`); a bug is INTERNAL (changelog §R11, R11-4). Each caller says
+ * what its answer goes without (changelog §R13, R13-2).
+ */
+async function standingsRead(
   ctx: ToolContext,
   inputs: InputStamp[],
   warnings: string[],
   refusal: RefusalSaid = "absorb",
-): Promise<Standings | null> {
+): Promise<{ readonly standings: Standings | null; readonly failure: unknown }> {
+  let failure: unknown = null;
   const got = await withinBudget(
     () => ctx.services.platform.getStandings(leagueRef(ctx), readOpts(ctx)),
     warnings,
   ).catch((e: unknown) => {
     if (refusal === "propagate" && sessionRefusalOf(e) !== null) throw e;
     if (!isOptionalReadFailure(e)) throw e;
+    failure = e;
     return null;
   });
-  return got === null ? null : take(ctx, got, inputs);
+  return { standings: got === null ? null : take(ctx, got, inputs), failure };
 }
 
 /** The pool page (available players by ESPN's rest-of-season projection), or none. */
@@ -627,7 +634,7 @@ export const analyzeTradeTool = defineTool({
       mFailure = e;
       return null;
     });
-    const standings = await standingsOrNull(ctx, inputs, warnings);
+    const { standings, failure: stFailure } = await standingsRead(ctx, inputs, warnings);
     // a deadline-stopped season run gives ΔU from fewer paths: its warning and flag reach the envelope
     const sims = { partial: false };
     // the readings with the weeks their +3 ppw marginal spans (the simulator's horizon: the as-of
@@ -694,6 +701,10 @@ export const analyzeTradeTool = defineTool({
       warnings.push(
         fallbackWarning(mFailure, "season simulation", "ΔU from the cold-start PF-per-win rate"),
       );
+    // the offer's season simulation without the standings reads the season from the results (no
+    // divisions), said by cause (changelog §R13, R13-2)
+    if (args.offer !== undefined && mGot !== null && standings === null)
+      warnings.push(fallbackWarning(stFailure, "standings", "the season read from the results"));
     if (args.risk !== "auto")
       warnings.push(
         "risk preference is not modelled: Δ and its [p10, p90] interval are reported for you to weigh",
@@ -1223,7 +1234,7 @@ export const analyzeInjuryCascadeTool = defineTool({
     });
     const mine = rosters?.find((r) => r.team.team_id === myTeam) ?? null;
     const myEntry = mine?.entries.find((e) => e.player.ref.id === inj.ref.id) ?? null;
-    const standings = await standingsOrNull(ctx, inputs, warnings);
+    const { standings, failure: stFailure } = await standingsRead(ctx, inputs, warnings);
     const nfl = ctx.services.datasets.nflGames.games(season, [b.w]);
     const nflIn = optionalDataset(nfl, ctx, allowStale);
     if (nflIn !== null) inputs.push(nflIn);
@@ -1289,6 +1300,16 @@ export const analyzeInjuryCascadeTool = defineTool({
     });
     if (mine === null && !rostersRead.refused)
       warnings.push("my roster unavailable: claim/pass verdicts are null");
+    // the claim/pass verdicts are E5's, priced at my waiver rank: without the standings at the
+    // cold-start rank, said by cause (changelog §R13, R13-2)
+    if (mine !== null && standings === null)
+      warnings.push(
+        fallbackWarning(
+          stFailure,
+          "standings",
+          "waiver rank unknown (cold-start premium at k = N/2)",
+        ),
+      );
     if (rzByWeek.size === 0)
       warnings.push("nflverse:pbp does not cover these weeks: the red-zone components are 0");
     return {
@@ -1667,13 +1688,27 @@ export const analyzeEvidenceTool = defineTool({
     let slot: number | null = null;
     let locked: boolean | null = null;
     if (p.status === "ONTEAM") {
+      // an optional read (changelog §R13, R13-2): without the rosters his slot and lock are unknown,
+      // so the checks that read them are not made — said by cause; a bug is INTERNAL (R11-4). My
+      // roster's snapshot stands in only for my own player (rostersOf says it): a rival's player is
+      // not on it
+      let rFailure: unknown = null;
       const rosters = await withinBudget(
-        () => rostersOf(ctx, b.w, inputs, warnings, args, myTeam),
+        () => rostersOf(ctx, b.w, inputs, warnings, args, isMine ? myTeam : null),
         warnings,
       ).catch((e: unknown) => {
         if (!isOptionalReadFailure(e)) throw e;
+        rFailure = e;
         return null;
       });
+      if (rosters === null)
+        warnings.push(
+          fallbackWarning(
+            rFailure,
+            "rosters",
+            "the lineup_slot and lineup_locked checks are not made",
+          ),
+        );
       const e = rosters?.flatMap((r) => r.entries).find((x) => x.player.ref.id === p.ref.id);
       if (e !== undefined) {
         slot = e.slot_id;
@@ -2168,7 +2203,8 @@ export const analyzeLeagueActivityTool = defineTool({
         return null;
       };
     // E11 says its reads' refusals in its own lines (orRefused): they propagate to it
-    const standings = await standingsOrNull(ctx, inputs, warnings, "propagate").catch(
+    const standings = await standingsRead(ctx, inputs, warnings, "propagate").then(
+      (r) => r.standings,
       orRefused("standings"),
     );
     const { transactions: txns, feedWeeks } = await transactionsOf(
@@ -2270,6 +2306,11 @@ export const analyzeLeagueActivityTool = defineTool({
       warnings.push(
         `partial: the league's teams were not read (${teamReadsUnsaid.join(" and ")} unavailable): by-team activity, waiver-order movement and rival needs are omitted`,
       );
+    // the rosters named the teams, but the standings failed otherwise than by a refusal (said above
+    // with what it costs): the waiver ranks are unknown, said (changelog §R13, R13-2). A rosters read
+    // that failed so is said by the domain ("N rosters unreadable: no needs for them")
+    else if (teams.length > 0 && standings === null && !refused.has("standings"))
+      warnings.push("standings unavailable: waiver-order movement goes without them");
     const out = analyzeLeagueActivity({
       since_days: args.since_days,
       transactions: txns,

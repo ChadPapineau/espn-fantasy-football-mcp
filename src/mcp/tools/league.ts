@@ -483,11 +483,21 @@ async function evidenceOf(
       if (mu !== null) {
         const matchups = take(ctx, mu, inputs);
         const prevRules = take(ctx, rules, inputs);
-        // the bracket-edit flag is best effort: unknown (null) when the league read fails
+        // the bracket-edit flag is best effort: unknown (null) when the league read fails, said by
+        // cause (changelog §R13, R13-2) — the session line names the read, not the flag; a bug is
+        // INTERNAL (R11-4)
+        let lgFailure: unknown = null;
         const lg = await withinBudget(
           () => ctx.services.platform.getLeague(ref, readOpts(ctx)),
           warnings,
-        ).catch(optionalOrThrow);
+        ).catch((e: unknown) => {
+          lgFailure = e;
+          return optionalOrThrow(e);
+        });
+        if (lg === null)
+          warnings.push(
+            fallbackWarning(lgFailure, "last season's league", "playoff_edited is null"),
+          );
         const league = lg === null ? null : take(ctx, lg, inputs);
         const reproduction = reproduceSeason(
           reproductionInputFrom({

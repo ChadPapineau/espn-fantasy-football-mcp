@@ -52,6 +52,7 @@ import {
 import { EffError } from "../errors.js";
 import { beforeSideEffect, defineTool, recentCall, type ToolContext } from "../define.js";
 import {
+  fallbackWarning,
   isOptionalReadFailure,
   leagueOf,
   leagueRef,
@@ -451,9 +452,24 @@ export const analyzeRetrospective = defineTool({
     // Phase 3 (plan 10 C9): the attribution rows of the re-fit window — v2 projections stored before
     // their game joined to the final box scores — and the applied overrides; ESPN's box scores of
     // earlier weeks are cached reads (final weeks), each within the call's budget
+    // an optional read (changelog §R13, R13-2): without the scoring settings no forecast or
+    // attribution row is scored, said by cause — the session line names the read, not what the
+    // retrospective goes without; a bug is INTERNAL (retroReadAbsorbed, R11-4)
+    let settingsFailure: unknown = null;
     const settings = await withinBudget(() => settingsOf(ctx, inputs), warnings).catch(
-      retroReadAbsorbed,
+      (e: unknown) => {
+        settingsFailure = e;
+        return retroReadAbsorbed(e);
+      },
     );
+    if (settings === null)
+      warnings.push(
+        fallbackWarning(
+          settingsFailure,
+          "scoring settings",
+          "no forecast or attribution row is scored",
+        ),
+      );
     const boxCache = new Map<Week, readonly BoxScoreMatchup[] | null>([[w, boxes]]);
     // the weeks whose box scores the session refused: not "unavailable" — the call's session line
     // says them (refusals.ts; the round-4c product account: an uncached mBoxscore's 401 read as
