@@ -1128,3 +1128,34 @@ round 3's eval-case triage is built.
 - **SC-6 and SC-10 replay SC-1's turn as text.** `HISTORY_SKILL_CALLS` lists SC-7-E only (round 3's
   fidelity step); the other two follow-up turns could replay the session-check call the same way.
 
+
+## Found in round 5's server fixes (2026-11-19)
+
+What the server stream of the §R12 fix round built and left open (`docs/plan/changelog.md` §R12).
+
+- **R12-4 and R12-5, built.** Every optional pro-schedule read goes through one helper
+  (`optionalScheduleOf` in `src/mcp/tools/common.ts`) and says its line through `fallbackWarning`:
+  "pro schedule unavailable: …" on a budget shortfall, an outage or a dataset past its hard limit
+  (`STALE_ONLY`), "pro schedule not read: …" on a session refusal; a bug answers `INTERNAL`. The
+  sites: `espn_get_roster`, the league clock, the live scoreboard, `espn_analyze_lineup`,
+  `scheduleOrEmpty` (E3, E8, E9) and `rosReadingOf` (the projections' rest-of-season reading, E4,
+  E5, E6, E7, E11). The scoreboard's, the box score's, the player list's and the injuries' schedule
+  reads already absorbed `STALE_ONLY` and say no line. `espn_analyze_trade`'s offer line ("season
+  simulation … ΔU from the cold-start PF-per-win rate") is the one other optional read whose line
+  said "unavailable" on a refused read (its matchups). `tests/mcp/optional-read-lines.test.ts`
+  holds each site.
+- **The pro schedule's view is never cookie-gated.** `getProSchedule` reads ESPN's keyless
+  `proTeamSchedules_wl`, so a refusal is not expected there in production; the "not read" form keeps
+  R12-4's house rule if one ever reaches it, and the tests inject it.
+- **The optional reads that say nothing on a refusal keep R10-12's form.** `unavailableUnlessRefused`
+  and the `!refused` guards (the free-agent pool, the outlooks, the positional ratings, the usage's
+  scoring settings, the box scores, the season simulations, E7's roster) print no line on a session
+  refusal: the session line names the read, and no line calls the refusal "unavailable". R12-4's
+  first sentence ("every optional read's warning goes through `fallbackWarning`") can also be read as
+  giving those sites a "not read: <what the answer goes without>" line, which would say a
+  consequence the session line does not. Not built: a ruling would decide it.
+- **Two optional reads degrade on a budget shortfall only.** `espn_analyze_lineup`'s matchups
+  ("schedule unavailable: no opponent, objective mean, mode neutral") and `espn_analyze_waivers`'
+  standings ("standings unavailable: waiver rank unknown …") absorb only the call's budget signal, so
+  an outage or a session refusal there fails the call. They are not pro-schedule reads, so R12-5 does
+  not name them; their lines are never reached on a refusal.

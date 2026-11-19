@@ -408,9 +408,50 @@ export function rosReadingFrom(
     : { schedule, season, nowMs };
 }
 
+/** An optional pro-schedule read: the schedule, or null with what it failed on (null: the budget). */
+export interface OptionalScheduleRead {
+  readonly read: ScheduleRead | null;
+  readonly failure: unknown;
+}
+
 /**
- * This call's RosReading: the season's pro schedule (scheduleOf — one memoised read per call) at the
- * call's instant, or null — said once — when the call cannot read it.
+ * The pro schedule as an OPTIONAL read (changelog §R12, R12-4 and R12-5): scheduleOf within this
+ * call's budget, or null — on a budget shortfall (its partial line said by withinBudget), an outage,
+ * a session refusal (said by the call's session line), fixture mode's `fixture_missing`, or a dataset
+ * past its hard limit (STALE_ONLY: lost data, an outage here, never a bug) — with what it failed on,
+ * for scheduleWarning. A bug is rethrown (optionalOrThrow), so it answers INTERNAL.
+ */
+export async function optionalScheduleOf(
+  ctx: ToolContext,
+  season: number,
+  inputs: InputStamp[],
+  warnings: string[],
+  allowStale = false,
+): Promise<OptionalScheduleRead> {
+  let failure: unknown = null;
+  const read = await withinBudget(
+    () => scheduleOf(ctx, season, inputs, allowStale),
+    warnings,
+  ).catch((e: unknown) => {
+    failure = e;
+    return optionalOrThrow(e);
+  });
+  return { read, failure };
+}
+
+/**
+ * The fixed line of an optional pro-schedule read that came back null, through fallbackWarning
+ * (changelog §R12, R12-4): `pro schedule unavailable: <rest>` on an outage (the budget, ESPN, a
+ * dataset past its hard limit), `pro schedule not read: <rest>` on a session refusal, which the
+ * call's session line says — a refusal is never called "unavailable".
+ */
+export function scheduleWarning(failure: unknown, rest: string): string {
+  return fallbackWarning(failure, "pro schedule", rest);
+}
+
+/**
+ * This call's RosReading: the season's pro schedule (optionalScheduleOf — one memoised read per call)
+ * at the call's instant, or null — said once (scheduleWarning) — when the call cannot read it.
  */
 export async function rosReadingOf(
   ctx: ToolContext,
@@ -419,16 +460,13 @@ export async function rosReadingOf(
   warnings: string[],
   allowStale: boolean,
 ): Promise<RosReading | null> {
-  const got = await withinBudget(() => scheduleOf(ctx, season, inputs, allowStale), warnings).catch(
-    (e: unknown) => {
-      if (!isOptionalReadFailure(e)) throw e;
-      return null;
-    },
-  );
-  const ros = rosReadingFrom(got?.schedule ?? null, season, ctx.nowMs);
+  const got = await optionalScheduleOf(ctx, season, inputs, warnings, allowStale);
+  const ros = rosReadingFrom(got.read?.schedule ?? null, season, ctx.nowMs);
   if (ros === null) {
-    const w =
-      "pro schedule unavailable: ESPN's rest-of-season total read from the first value week";
+    const w = scheduleWarning(
+      got.failure,
+      "ESPN's rest-of-season total read from the first value week",
+    );
     if (!warnings.includes(w)) warnings.push(w);
   }
   return ros;

@@ -103,6 +103,8 @@ import {
   weekOf,
   withinBudget,
   optionalOrThrow,
+  optionalScheduleOf,
+  scheduleWarning,
   type RosReading,
 } from "./common.js";
 import { rostersOf } from "./roster.js";
@@ -1186,16 +1188,16 @@ export const analyzeLineupTool = defineTool({
     const banked = bankedPoints(matchups, rules, w, team);
     if (mGot === null)
       warnings.push("schedule unavailable: no opponent, objective mean, mode neutral");
-    const sched = await withinBudget(
-      () => scheduleOf(ctx, league.ref.season, inputs, allowStale),
-      warnings,
-    );
+    // an optional read (changelog §R12, R12-4 and R12-5): a budget shortfall, an outage, a refusal
+    // or a dataset past its hard limit answers without lock times, said by cause; a bug is INTERNAL
+    const got = await optionalScheduleOf(ctx, league.ref.season, inputs, warnings, allowStale);
+    const sched = got.read;
     const schedule: ProSchedule = sched?.schedule ?? {
       season: league.ref.season,
       games: [],
       teams: [],
     };
-    if (sched === null) warnings.push("pro schedule unavailable: lock times unknown");
+    if (sched === null) warnings.push(scheduleWarning(got.failure, "lock times unknown"));
     const entries = [...mine.entries, ...(opp?.entries ?? [])];
     const subjects = entries.map((e) => ({
       p: e.player,

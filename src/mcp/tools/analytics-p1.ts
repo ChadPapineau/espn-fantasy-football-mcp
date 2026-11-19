@@ -84,7 +84,8 @@ import {
   readOpts,
   rosReadingFrom,
   rosReadingOf,
-  scheduleOf,
+  optionalScheduleOf,
+  scheduleWarning,
   take,
   teamOf,
   turn,
@@ -145,7 +146,11 @@ function emptySchedule(season: number): ProSchedule {
   return { season, games: [], teams: [] };
 }
 
-/** The pro schedule, or the empty one with a warning when this call cannot read it. */
+/**
+ * The pro schedule, or the empty one with a warning when this call cannot read it — an optional
+ * read (changelog §R12, R12-4 and R12-5): a dataset past its hard limit is absorbed as an outage,
+ * and the line says "not read" on a session refusal; a bug is INTERNAL.
+ */
 async function scheduleOrEmpty(
   ctx: ToolContext,
   season: number,
@@ -153,14 +158,9 @@ async function scheduleOrEmpty(
   warnings: string[],
   allowStale: boolean,
 ): Promise<ProSchedule> {
-  const s = await withinBudget(() => scheduleOf(ctx, season, inputs, allowStale), warnings).catch(
-    (e: unknown) => {
-      if (!isOptionalReadFailure(e)) throw e;
-      return null;
-    },
-  );
-  if (s === null) warnings.push("pro schedule unavailable: lock times and byes unknown");
-  return s?.schedule ?? emptySchedule(season);
+  const s = await optionalScheduleOf(ctx, season, inputs, warnings, allowStale);
+  if (s.read === null) warnings.push(scheduleWarning(s.failure, "lock times and byes unknown"));
+  return s.read?.schedule ?? emptySchedule(season);
 }
 
 /** Subjects (platform player + crosswalk gsis id) of roster entries. */

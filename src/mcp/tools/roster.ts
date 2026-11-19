@@ -38,9 +38,10 @@ import {
   opponentIn,
   ownershipRow,
   periodOf,
+  optionalScheduleOf,
   readOpts,
   rulesOf,
-  scheduleOf,
+  scheduleWarning,
   slotsOf,
   snapshotStandIn,
   take,
@@ -398,14 +399,18 @@ export const getRoster = defineTool({
     const slots = await slotsOf(ctx, inputs);
     const team = args.all ? null : teamOf(league, args.team_id);
     const rosters = await rostersOf(ctx, w, inputs, warnings, args, team);
-    const sched = await withinBudget(
-      () => scheduleOf(ctx, league.ref.season, inputs, args.allow_stale === true),
+    // optional: an outage, a refusal or a dataset past its hard limit answers without kickoffs, said
+    // by cause (changelog §R12, R12-4 and R12-5); a bug is INTERNAL
+    const got = await optionalScheduleOf(
+      ctx,
+      league.ref.season,
+      inputs,
       warnings,
-    ).catch((e: unknown) => {
-      if (!isOptionalReadFailure(e)) throw e;
-      return null;
-    });
-    if (sched === null) warnings.push("pro schedule unavailable: kickoffs and lock times unknown");
+      args.allow_stale === true,
+    );
+    const sched = got.read;
+    if (sched === null)
+      warnings.push(scheduleWarning(got.failure, "kickoffs and lock times unknown"));
     const gs = sched === null ? null : weekGameState(sched.schedule, w, ctx.nowMs);
     let data: RosterToolData;
     let order: readonly Roster[] = rosters;

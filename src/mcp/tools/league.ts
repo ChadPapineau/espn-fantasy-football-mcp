@@ -94,6 +94,8 @@ import {
   weekOf,
   withinBudget,
   optionalOrThrow,
+  optionalScheduleOf,
+  scheduleWarning,
   fallbackWarning,
 } from "./common.js";
 import {
@@ -600,16 +602,19 @@ export async function leagueDigest(
   if (include.has("clock")) {
     let final = false;
     let window = true;
-    const sched = await withinBudget(() => scheduleOf(ctx, seasonY, inputs), warnings).catch(
-      optionalOrThrow,
-    );
+    // optional, its line by cause (changelog §R12, R12-4): "not read" on a session refusal
+    const got = await optionalScheduleOf(ctx, seasonY, inputs, warnings);
+    const sched = got.read;
     if (sched !== null) {
       const st = weekGameState(sched.schedule, clockWeek(league.clock), ctx.nowMs);
       final = st.final;
       window = st.corrections_window_open;
     } else {
       warnings.push(
-        "pro schedule unavailable: current_week_final and corrections_window_open are conservative",
+        scheduleWarning(
+          got.failure,
+          "current_week_final and corrections_window_open are conservative",
+        ),
       );
     }
     data.clock = {
@@ -999,12 +1004,11 @@ export const getLiveScoreboard = defineTool({
       matchups = matchups.filter((m) => m.home.team_id === t || m.away?.team_id === t);
       if (matchups.length === 0) throw new EffError("NOT_FOUND");
     }
-    const sched = await withinBudget(
-      () => scheduleOf(ctx, league.ref.season, inputs),
-      warnings,
-    ).catch(optionalOrThrow);
+    const got = await optionalScheduleOf(ctx, league.ref.season, inputs, warnings);
+    const sched = got.read;
     const st = sched === null ? null : weekGameState(sched.schedule, w, ctx.nowMs);
-    if (st === null) warnings.push("pro schedule unavailable: game window unknown");
+    // its line by cause (changelog §R12, R12-4): "not read" on a session refusal
+    if (st === null) warnings.push(scheduleWarning(got.failure, "game window unknown"));
     // each side's starters by game state (plan 07 A4 `players`), from the week's rosters and the same
     // pro schedule the game window reads (no schedule: null, the warning above says why); read
     // after the live view and the schedule, so a cold call's budget goes to those first

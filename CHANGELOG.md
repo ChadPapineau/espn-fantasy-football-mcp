@@ -375,6 +375,27 @@ minor version (plan 04 §4.4; plan 09 K6). One version covers the server, the Sk
 
 ### Fixed
 
+- **An optional read's line called a session refusal "unavailable" (ruling R12-4;
+  `docs/plan/changelog.md` §R12).** Every optional pro-schedule read now says its line by cause, as
+  the fallbacks do: `pro schedule unavailable: …` on an outage (the call's budget, ESPN, a dataset
+  past its hard limit) and `pro schedule not read: …` on a session refusal, which the call's session
+  line says — in `espn_get_roster`, `espn_get_league`'s clock, `espn_get_live_scoreboard`,
+  `espn_analyze_lineup`, the schedule of `espn_analyze_matchup`, `espn_analyze_schedule` and
+  `espn_analyze_roster`, and the rest-of-season reading of `espn_get_projections`,
+  `espn_analyze_waivers`, `espn_analyze_replacement`, `espn_analyze_trade`,
+  `espn_analyze_injury_cascade` and `espn_analyze_league_activity`. `espn_analyze_trade`'s offer
+  without the season simulation says `season simulation not read: ΔU from the cold-start PF-per-win
+  rate` when the session refused the matchups. The outage lines are unchanged.
+- **A stale pro schedule failed `espn_get_roster` and other optional schedule reads (ruling R12-5;
+  `docs/plan/changelog.md` §R12).** A pro schedule past its hard limit (`STALE_ONLY`) is lost data,
+  an outage for an optional read: `espn_get_roster`, `espn_analyze_lineup`, the schedule of
+  `espn_analyze_matchup`, `espn_analyze_schedule` and `espn_analyze_roster`, and the rest-of-season
+  reading of `espn_get_projections`, `espn_analyze_waivers`, `espn_analyze_replacement`,
+  `espn_analyze_trade`, `espn_analyze_injury_cascade` and `espn_analyze_league_activity` now answer
+  with the "pro schedule unavailable" line where they failed the call, as the injuries, the player
+  list, the clock and the scoreboards already did. `espn_analyze_lineup`'s schedule read, which
+  degraded on a budget shortfall only, now also absorbs an outage and a session refusal. A bug
+  still answers `INTERNAL`.
 - **Optional reads hid a bug as "unavailable", or failed the call on a session refusal (ruling
   R11-4; `docs/plan/changelog.md` §R11).** The reads that turned every error into "unavailable" —
   the seeding evidence's last-season settings, standings, schedule and league; the pro schedule

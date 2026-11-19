@@ -121,6 +121,7 @@ import {
   ACTIVITY_READ_LABEL,
   isOptionalReadFailure,
   unavailableUnlessRefused,
+  fallbackWarning,
   type ActivityLeagueRead,
   take,
   teamOf,
@@ -617,11 +618,13 @@ export const analyzeTradeTool = defineTool({
       ["e6", b.league.ref.season, b.w, me, b.settings.settings_hash].join("|"),
     );
     // each side's season readings (marginal values on) for ΔU: me and the partner only
+    let mFailure: unknown = null;
     const mGot = await withinBudget(
       () => ctx.services.platform.getMatchups(leagueRef(ctx), readOpts(ctx, args)),
       warnings,
     ).catch((e: unknown) => {
       if (!isOptionalReadFailure(e)) throw e;
+      mFailure = e;
       return null;
     });
     const standings = await standingsOrNull(ctx, inputs, warnings);
@@ -685,8 +688,12 @@ export const analyzeTradeTool = defineTool({
     const others: TradeTeam[] = [];
     for (const r of rosters)
       if (r.team.team_id !== me) others.push(await teamOfRoster(r, r.team.team_id === partnerId));
+    // by cause (changelog §R12, R12-4): "not read" when the session refused the matchups, which
+    // the call's session line says
     if (args.offer !== undefined && mGot === null)
-      warnings.push("season simulation unavailable: ΔU from the cold-start PF-per-win rate");
+      warnings.push(
+        fallbackWarning(mFailure, "season simulation", "ΔU from the cold-start PF-per-win rate"),
+      );
     if (args.risk !== "auto")
       warnings.push(
         "risk preference is not modelled: Δ and its [p10, p90] interval are reported for you to weigh",
