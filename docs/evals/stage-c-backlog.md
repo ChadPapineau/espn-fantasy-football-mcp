@@ -1162,7 +1162,7 @@ What the server stream of the §R12 fix round built and left open (`docs/plan/ch
   standings ("standings unavailable: waiver rank unknown …") absorb only the call's budget signal, so
   an outage or a session refusal there fails the call. They are not pro-schedule reads, so R12-5 does
   not name them; their lines are never reached on a refusal.
-- **The refix after the round-5 verifier (F1, F2), built.** F1: `espn_get_scoreboard`,
+- **The refix after the round-5 verifier (F1, F2, F4), built.** F1: `espn_get_scoreboard`,
   `espn_get_box_score` (one read for its game states and its flags), `espn_list_players`,
   `espn_get_injuries` and both of E13's schedule reads go through `optionalScheduleOf` and say what
   the answer goes without, by cause ("provisional and corrections_window_open are conservative";
@@ -1173,9 +1173,10 @@ What the server stream of the §R12 fix round built and left open (`docs/plan/ch
   `live_refused` (`src/domain/analytics/matchup.ts`): it is unread, so nothing is conditioned, and
   "live conditioning unavailable" names only the facts an outage lost. This also closes what R11-4's
   `!boxRead.refused` guard opened: a refused box score was dropped from the unread list, and P(win)
-  was conditioned on points never read (0 so far, `live` non-null).
-  `tests/mcp/optional-read-lines.test.ts` and `tests/domain/analytics/matchup.test.ts` hold them
-  (each failing before the fix).
+  was conditioned on points never read (0 so far, `live` non-null). F4: the schedule row says a
+  fix's `cost` sums the analysed weeks, each weighted by `p_alive`.
+  `tests/mcp/optional-read-lines.test.ts`, `tests/domain/analytics/matchup.test.ts` and
+  `tests/domain/analytics/schedule-stress.test.ts` hold them (each failing before the fix).
 - **`espn_analyze_lineup`'s pro-schedule read absorbs more than R12-5 names (the round-5
   verifier's F3): a widening to confirm.** It degraded on a budget shortfall only; since `b6954aa`
   it absorbs what every other optional pro-schedule read absorbs (`optionalOrThrow`: an outage, a

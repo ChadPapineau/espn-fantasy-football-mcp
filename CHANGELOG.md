@@ -458,7 +458,9 @@ minor version (plan 04 §4.4; plan 09 K6). One version covers the server, the Sk
   after the streams fill the holes (0 off a cluster of 2 or more starters out), that
   `worst_weeks[]` is ranked by that loss × `p_alive` and never by the starters out, and that at
   `p_alive` 1 a cluster week's fix `delta` plus its `bye_cluster_cost` is what the week lost before
-  the streams.
+  the streams. A fix's `cost` is the cheapest bench drop's loss summed over the weeks the call
+  analyses, each weighted by its `p_alive`, so it changes with `weeks` where a week's own row does
+  not; its `delta` is weighted by the week's `p_alive` (the round-5 verifier's F4).
 - **Optional reads hid a bug as "unavailable", or failed the call on a session refusal (ruling
   R11-4; `docs/plan/changelog.md` §R11).** The reads that turned every error into "unavailable" —
   the seeding evidence's last-season settings, standings, schedule and league; the pro schedule

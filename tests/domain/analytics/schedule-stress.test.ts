@@ -271,6 +271,75 @@ describe("the week-by-week stress test", () => {
     );
   });
 
+  // the rest of the row (the round-5 verifier's F4): a fix's `delta` and `cost` are weighted by
+  // P(alive), and the cost is summed over the weeks the call analyses, so it changes with `weeks`
+  // where a week's own row does not. The oracle solves each week's lineup with solveWeek, apart
+  // from the tool's own drop-cost arithmetic
+  it("a fix's delta and cost are weighted by p_alive; the cost sums the analysed weeks", async () => {
+    // the second RB starter shares the week-9 bye too, so every bench player starts some week (the
+    // QB in week 11, the rest in week 9) and the cheapest bench drop costs more than 0
+    const all = roster().map((p) => (p.player_id === 3 ? sp(3, "RB", 13, 2, 3, 9) : p));
+    const bench = all.filter((p) => p.slot_id === 20);
+    // the bench is full (5 of 5): an add costs the cheapest bench drop
+    expect(bench).toHaveLength(5);
+    // the lineup (no streams) of `ps` in week w: each player's mean that week, 0 on his bye
+    const lineup = (ps: readonly SchedulePlayer[], w: number): number =>
+      solveWeek(
+        referenceSlots(),
+        ps.map((p) => {
+          const pw = p.weeks.find((x) => x.week === w);
+          const v = pw === undefined || pw.bye ? 0 : Math.max(0, pw.dist.mean);
+          return { player: p, value: v, dist: pw?.dist ?? dist(0, 0) };
+        }),
+        [],
+      ).mean;
+    // what a bench player's drop loses in week w
+    const lossOf = (d: SchedulePlayer, w: number): number =>
+      lineup(all, w) -
+      lineup(
+        all.filter((p) => p.player_id !== d.player_id),
+        w,
+      );
+    const pAlive = new Map<number, number>([
+      [8, 1],
+      [9, 0.5],
+      [10, 1],
+      [11, 1],
+      [15, 0.6],
+      [16, 0.35],
+      [17, 0.18],
+    ]);
+    const costOver = (weeks: readonly number[]): number =>
+      Math.min(
+        ...bench.map((d) => weeks.reduce((s, w) => s + (pAlive.get(w) ?? 1) * lossOf(d, w), 0)),
+      );
+    const p_alive_by_week = [...pAlive].map(([week, p]) => ({ week, p }));
+    const streamed = await analyzeSchedule(rq({ players: all, p_alive_by_week }));
+    const bare = await analyzeSchedule(rq({ players: all, p_alive_by_week, stream: [] }));
+    const mean = (o: Awaited<ReturnType<typeof analyzeSchedule>>, w: number): number =>
+      o.data.weeks.find((x) => x.week === w)?.lineup_pts.mean ?? Number.NaN;
+    const fix = streamed.data.fixes.find((f) => f.action.endsWith("week 9"));
+    expect(streamed.data.weeks.find((w) => w.week === 9)?.weight.p_alive).toBe(0.5);
+    // what the streams recover in week 9, weighted by its P(alive) 0.5
+    const gain = mean(streamed, 9) - mean(bare, 9);
+    expect(gain).toBeGreaterThan(1);
+    expect(fix?.delta).toBeCloseTo(0.5 * gain, 2);
+    // the cheapest bench drop's loss, each week weighted by its P(alive), over every analysed week
+    const cost = costOver(WEEKS);
+    expect(cost).toBeGreaterThan(0.5);
+    expect(fix?.cost).toBeCloseTo(cost, 2);
+    // weeks 9 and 10 only: the cost is the sum over those weeks (the bench QB, who starts only in
+    // week 11, is then free to drop), while week 9's own row and its fix's delta are unchanged
+    const two = await analyzeSchedule(rq({ players: all, p_alive_by_week, weeks: [9, 10] }));
+    const fix2 = two.data.fixes.find((f) => f.action.endsWith("week 9"));
+    expect(fix2?.cost).toBeCloseTo(costOver([9, 10]), 2);
+    expect(fix2?.cost).not.toBeCloseTo(fix?.cost ?? Number.NaN, 2);
+    expect(fix2?.delta).toBeCloseTo(fix?.delta ?? Number.NaN, 6);
+    expect(two.data.weeks.find((w) => w.week === 9)).toEqual(
+      streamed.data.weeks.find((w) => w.week === 9),
+    );
+  });
+
   it("include_playoffs: false drops the playoff weeks; IR occupants never start", async () => {
     const out = await analyzeSchedule(rq({ include_playoffs: false }));
     expect(out.data.weeks.map((w) => w.week)).toEqual([8, 9, 10, 11]);

@@ -267,6 +267,15 @@ describe("the cheat-sheet's espn_analyze_schedule row says what its numbers meas
       "so at `p_alive` 1 a cluster week's fix `delta` plus its `bye_cluster_cost` is what the week lost before the streams",
     );
   });
+  // the round-5 verifier's F4: the cost sums the weeks the call analyses (scheduleStress.ts sums it
+  // over its rows, each weighted by p_alive), so it changes with `weeks` where a week's row does
+  // not; tests/domain/analytics/schedule-stress.test.ts holds both weightings and the sum
+  it("a fix's cost is summed over the weeks the call analyses, weighted by p_alive", () => {
+    expect(row).toContain(
+      "a fix's `cost` is the cheapest bench drop's loss over the weeks the call analyses (it changes with `weeks`), each week weighted by its `p_alive` (0 when the bench has room), and its `delta` is weighted by the week's `p_alive`",
+    );
+    expect(row).not.toContain("over the horizon");
+  });
 });
 
 describe("regions.ts", () => {
