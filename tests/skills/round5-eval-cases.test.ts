@@ -883,7 +883,9 @@ describe("R12-2's split on the lines the round-5 verifier named", () => {
       "weekly",
       "WK-11",
       [
-        "Wherever ESPN's 401 landed, the reply presents only what was read before it, labelled partial (llm)",
+        // changelog §R13, R13-1 (the R13 refix verifier's F2): what was read and its label, one each
+        "Wherever ESPN's 401 landed, the reply presents only what was read before it (llm)",
+        "Wherever ESPN's 401 landed, the reply labels what it presents partial (llm)",
         "The reply says every later section or input was not read (llm)",
         "The reply invents none of what was not read: no score, lineup, projection, waiver or activity figure the tools did not return (llm)",
         "Confidence & freshness says the briefing is partial because ESPN rejected the stored session (llm)",

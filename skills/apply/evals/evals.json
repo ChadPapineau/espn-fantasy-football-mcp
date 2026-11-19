@@ -15,7 +15,8 @@
         "The steps name the FLEX slot (regex: `\\bFLEX\\b`)",
         "The steps name the bench slot (regex: `\\bBE\\b`)",
         "The steps name the IR slot (regex: `\\bIR\\b`)",
-        "Every player in the numbered steps is quoted with his player_id (llm)",
+        "Every player in the numbered steps is quoted (llm)",
+        "Every player in the numbered steps carries his player_id (llm)",
         "Each numbered step carries a deadline (llm)",
         "The reply never says or implies that the change was made — its read-only line ('this version never changes the team') says the opposite (llm)"
       ],

@@ -281,7 +281,11 @@ describe("round 3's eval-case rubrics state what the fixture gives (each PASS-if
     const c = caseOf("news-check", "NC-6");
     expect(c.expected_output).toMatch(/carries no injection flag/);
     expect(c.expected_output).not.toMatch(/carries no flag/);
-    expect(llmLine(c, "The reply quotes the outlook")).toMatch(/espn\.player\.season_outlook/);
+    // changelog §R13, R13-1 (the R13 refix verifier's F2): the quotation and its source tag, one each
+    expect(llmLine(c, "The reply quotes the outlook")).toMatch(/balanced offense/);
+    expect(llmLine(c, "The outlook's text carries its source tag")).toMatch(
+      /espn\.player\.season_outlook/,
+    );
   });
   it("WV-8: WV-2's no-signal branch, on the base pool (WV-2 itself is on td-inflated: VS-8)", () => {
     const c = caseOf("waivers", "WV-8");
@@ -314,7 +318,18 @@ describe("round 3's eval-case rubrics state what the fixture gives (each PASS-if
     expect(e).toMatch(/no_move/);
   });
   it("SS-6-E: every flagged starter with ESPN's number, ours and the tool's pct", () => {
-    expect(llmLine(caseOf("start-sit", "SS-6-E"), "The reply lists each")).toMatch(/pct/);
+    // changelog §R13, R13-1 (the R13 refix verifier's F2): the list, the three numbers and their
+    // labels are one judge each
+    expect(llmLine(caseOf("start-sit", "SS-6-E"), "The reply lists each")).toMatch(
+      /James Cook III among them \(llm\)$/,
+    );
+    expect(
+      llmLine(
+        caseOf("start-sit", "SS-6-E"),
+        "The reply gives each flagged starter the cross-check's",
+      ),
+    ).toMatch(/ESPN's number, ours and the tool's pct/);
+    expect(llmLine(caseOf("start-sit", "SS-6-E"), "The reply labels each number")).toMatch(/pct/);
     // the round-4 refix's VS-9: the lineup follows ESPN's number at the shipped weight, which the
     // fixture has — never "untuned in this version", which a tuned weight_espn makes false
     // changelog §R13, R13-1: the reason the lineup follows ESPN's number is its own judge
