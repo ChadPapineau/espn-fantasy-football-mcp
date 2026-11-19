@@ -1865,6 +1865,29 @@ ruling is reversible by the owner and supersedes the plan text it names. Round 4
 The rest of round 3's triage (22 Skill-text and 10 eval-case defects) needs no ruling; round 4
 fixes it as its triage proposes.
 
+## §R12 — rulings after the plugin eval's round 4 (2026-11-19)
+
+**Trigger:** round 4 of the plugin eval (`docs/evals/stage-c-plugin-eval.md`, "Run of 2026-11-18,
+round 4 (after §R11)") met the `llm` bar on both models for the first time and failed B15 and B11
+Lane 2 on the free-grader and trigger bars, with no product defect. Its triage needed no ruling for
+its own fixes; the fix round's open questions and the variance class did. The orchestrator ruled on
+2026-11-19, under the owner's delegation of 2026-11-04 and his choice of 2026-11-18 to keep fixing
+until the bar is met; each ruling is reversible by the owner and supersedes the plan text it names.
+Round 5 builds them.
+
+| id | ruling | why |
+|---|---|---|
+| R12-1 (a free-graded line some run drops; plan 09 §5.2's "every free grader passes") | The bar counts every run on both models, so a free-graded line that a run omits or rewords is a Skill-text target, not variance to wait out: the Skill states the line as a fixed line, given verbatim and held by a check-skills pin, and the regex accepts that fixed line and plan 09 §3's term for it, never a different meaning. A regex that rejects the Skill's own fixed line is an eval-case defect and is corrected to accept it | Round 4's variance class holds 4 Sonnet and 7 Opus free-grader failures, each a stated word a run dropped or reworded ("priors are hand-set", "mismatch", "role holds", "implied total", "unconfirmed", "followed", a deadline per move). A line the Skill only paraphrases is a line some run will word differently |
+| R12-2 (a PASS-if line against the Skill's output contract; WK-10) | A PASS-if line never forbids what the Skill's output contract prints for that ask, and never requires what the contract forbids. Where they conflict, the case's plan 09 §3 requirement decides: if it asks for the narrowed answer, the Skill gains the narrowed-ask rule; otherwise the PASS-if line names the blocks the contract always prints as allowed. A PASS-if line that joins several conditions is split into one judge per condition. R11-3 still holds: a line is made exact or extended, never loosened | WK-10's six-part line failed every run, 0 of 3 each, and two of its runs print weekly's Deadlines block and Not-actionable list, which weekly's output always gives and the line's "no other section" may forbid. A judge cannot grade a line the Skill is written to break |
+| R12-3 (the session line and the hand-off; the round-4 verifier's VS-5) | When an answer carries orient's hand-off line to session-check, the tool's session line is said without its own command: `eff setup` appears once, in the hand-off line. The output contract's `TEMPLATE_PARTIAL_SESSION_LINE` says so, and a check-skills pin holds it | Quoting the tool's line word for word and then the hand-off line gives the command twice, against orient's "`eff setup` once" |
+| R12-4 (the house form of an optional read's warning; `roster.ts`'s and `league.ts`'s pro-schedule lines) | Every optional read's warning goes through `fallbackWarning`: "not read" on a session refusal, "unavailable" on an outage. No warning says "unavailable" unconditionally | R11-4 gave optional reads two causes the session line tells apart; a line that calls a refusal "unavailable" contradicts the session line beside it |
+| R12-5 (STALE_ONLY on an optional pro-schedule read; `espn_get_roster`) | A dataset past its hard limit (`STALE_ONLY`) is an outage for an optional read: every optional pro-schedule read absorbs it with the "unavailable" line, `espn_get_roster`'s included, as `a40f590` did for the injuries read. R11-4's "outage" reads with this; a bug still answers `INTERNAL` | `espn_get_roster` failed the whole call on a stale schedule that every other pro-schedule read absorbs; a stale optional dataset is lost data, not a bug |
+| R12-6 (fixture variants and cases added after plan 09 was written) | Plan 09 §3 lists WV-8, and §5.2's variant list names `td-inflated` and `inj-player-name` in place of `inj-tradeblock` (R11-1). The build's manifest stays the source of truth; research 06 §D.0 is a research record and stays as written | The suite and the plan disagreed on what is tested; a reader of plan 09 should find every case and variant the suite runs |
+
+The rest of round 4's triage (12 Skill-text and 8 eval-case defects on Sonnet, 11 and 7 on Opus)
+needs no ruling; round 5 fixes it as its triage proposes, and every variance case with a stated line
+is fixed under R12-1.
+
 ## Reviews (re-run on every version bump of the named dependency)
 
 | date | dependency | verdict | evidence | open item |
