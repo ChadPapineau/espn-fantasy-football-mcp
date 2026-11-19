@@ -802,9 +802,10 @@ export const ROUND3_FIXED = Object.freeze({
   },
   "session-check": {
     "SKILL.md": {
-      // changelog §R11, R11-2: the answer to "how do I get an ESPN API key"
+      // changelog §R11, R11-2: the answer to "how do I get an ESPN API key" (given only when asked:
+      // ROUND4_FIXED's apiKeyAsked, the round-5 verifier's V5S-1)
       apiKey:
-        "**An ESPN API key.** ESPN offers no API key for a fantasy league: this server reads the league with the session cookies the user enters in a terminal through `eff setup` — say so, then go on with the status.",
+        "ESPN offers no API key for a fantasy league: this server reads the league with the session cookies the user enters in a terminal through `eff setup` — say so, then go on with the status.",
     },
   },
 });
@@ -851,6 +852,9 @@ export const ROUND4_FRONTMATTER = Object.freeze({
   },
   "session-check": { description: ["When the assistant or its tools stop working"] },
   trade: { description: ["a buy-low or sell-high target"] },
+  // the round-5 verifier's V5S-9: schedule-plan's one word for a seed question, cut in b9cd228,
+  // restored (onboard's trigger neg-08 asks who holds a seed; round 4 kept it quiet with this word)
+  "schedule-plan": { when_to_use: ["playoff seed"] },
 });
 
 /**
@@ -877,8 +881,10 @@ export const ROUND4_FIXED = Object.freeze({
       costAfterFixes:
         "`bye_cluster_cost` is the loss left after the fixes, not the hole before them",
       // SP-1 (Opus, R12-1): the season simulation runs on a bye question too
+      // (the round-5 verifier's V5S-2: the tool runs its own season simulation, so no reason the
+      // tool contradicts is given — analytics-p1.ts calls runSeason itself)
       matchupFirst:
-        "Step 3.4 runs on every question, a bye question included, and before step 4: without the season simulation `espn_analyze_schedule` weights every week 1 (P(alive) unknown).",
+        "Step 3.4 runs on every question, a bye question included, and before step 4 — the playoff odds the answer gives come from it.",
       // SP-CORE (Opus, R12-1): nothing after the core-toolset stop
       coreSilent:
         "Nothing else runs under `core`, and nothing else is said: no playoff percentage — ESPN's `playoff_pct_espn` included — no standings and no number from any read.",
@@ -894,6 +900,11 @@ export const ROUND4_FIXED = Object.freeze({
       // SS-8 (R12-1): no move of any kind for a locked player
       lockedNoMove:
         'A locked player gets no move of any kind in this answer — no swap, no bench, no IR move, not even one "once next week opens".',
+      // SS-12, SS-INJ-2 (the round-5 verifier's V5S-6): §4 step 3's conditional swap only while the
+      // reported player's slot is unlocked; a locked one gets the locked line instead
+      lockedReportRule:
+        "When X's slot is unlocked, give a conditional (\"if ESPN shows X as Out, put Y in — Y's game kicks off at 16:25 ET, so that swap is still open\"); when it is locked (`lineup_locked: true`), give no conditional and no swap",
+      lockedReportLine: '"<name>\'s slot is locked, so no swap is possible for him this week."',
       // SS-9, SS-11-E (R12-1): the live split, the word before each count
       liveSplit: '"Your starters: final <n>, live <n>, pending <n>"',
     },
@@ -939,8 +950,17 @@ export const ROUND4_FIXED = Object.freeze({
       handOffSteps:
         'step 4 reads "In a **terminal** (not in this chat), run the command in the last line and paste each value when it asks; the input is hidden and stored in the keychain."',
       // ON-6: eff setup once in a stop
+      // (the round-5 verifier's V5S-1: the API-key note is left out too — orient's stop holds its
+      // lines and nothing else)
       handOffOnce:
-        "leave out the status line's command and the 30-day reminder: `eff setup` appears once, in the hand-off line.",
+        "leave out the status line's command, the 30-day reminder and the API-key note: `eff setup` appears once, in the hand-off line.",
+      // ON-6, WK-9, SS-13 (the round-5 verifier's V5S-8): step 5 in a stop names the command by the
+      // last line too
+      handOffStep5:
+        'step 5 reads "Tell me when you have run it — nothing else is needed from you, and never the values or the command\'s output."',
+      // ON-6 (the round-5 verifier's V5S-1): the API-key note only when the user asks about a key
+      apiKeyAsked: "**An ESPN API key.** Only when the user asks about an API key:",
+      apiKeyUnasked: "Unasked, the answer carries no API-key note.",
     },
   },
   "news-check": {
@@ -998,6 +1018,9 @@ export const ROUND4_FIXED = Object.freeze({
       // TR-3 (R12-1): the tool's own motive words
       standingQuote:
         'quote each one word for word, in quotation marks after "the tool\'s standing line:", and never restate it in other words or add a reason it does not give',
+      // TR-3 (the round-5 verifier's V5S-8): no verdict before the devil's-advocate label
+      noVerdictFirst:
+        "no verdict of any kind (yours or the tool's, \"against the trade\" included) comes before **Devil's advocate:**.",
     },
   },
   onboard: {
@@ -1025,8 +1048,29 @@ export const ROUND4_FIXED = Object.freeze({
       // WK-10 (R12-2): the narrowed ask prints League activity alone
       activityOnly:
         "**The League-activity-only answer** (step 0's scope): the League activity section, then Confidence & freshness and Attribution — no other section of the briefing, no **Deadlines** block and no **Not actionable here** list",
+      // WK-1 (the round-5 verifier's V5S-8): the cause of WK-1 03's Opus failures
+      neverThisWeekVs: '(never "This week: vs …")',
+      // WK-1 (the round-5 verifier's V5S-4): the IR move is a row with its Deadline, and a move
+      // named outside a table gives its time on its line (plan 09 §3.2: every action names a deadline)
+      irRow:
+        "each IR move is a row in it, its Deadline the next run (`next_run_at`), never only a prose line",
+      outsideTable:
+        "A move named outside a table — the top swap, a line under a table — gives its time on the same line, in Eastern Time.",
     },
   },
+});
+
+/**
+ * Text the round-5 verifier's findings withdrew from round 4's fixes: session-check's unconditional
+ * API-key note (V5S-1), schedule-plan's reason the tool contradicts (V5S-2: espn_analyze_schedule
+ * runs its own season simulation) and start-sit's conditional swap for a locked player (V5S-6).
+ */
+export const ROUND4_ABSENT = Object.freeze({
+  "session-check": { "SKILL.md": ["**An ESPN API key.** ESPN offers no API key"] },
+  "schedule-plan": {
+    "SKILL.md": ["without the season simulation `espn_analyze_schedule` weights every week 1"],
+  },
+  "start-sit": { "SKILL.md": ['Then give a conditional ("if ESPN shows X as Out'] },
 });
 
 /**
@@ -3645,6 +3689,14 @@ export function checkSkills(opts = {}) {
       for (const [k, line] of Object.entries(lines))
         if (!text.includes(line))
           errors.push(`${rel}/${file}: round 4's fixed line "${k}" is missing: "${line}"`);
+    }
+    const absent4 = /** @type {Record<string, Record<string, string[]>>} */ (ROUND4_ABSENT)[skill];
+    for (const [file, gone] of Object.entries(absent4 ?? {})) {
+      const p = path.join(dir, file);
+      const text = file === "SKILL.md" ? body : existsSync(p) ? readFileSync(p, "utf8") : "";
+      for (const t of gone)
+        if (text.includes(t))
+          errors.push(`${rel}/${file}: text the round-5 verifier withdrew is still there: "${t}"`);
     }
     // a P1 Skill under `core` stops in Step 0 and says how to turn it on (plan 10 B10; ADV OBJ-18)
     if (p1Skill && !body.includes(TOOLSET_STOP)) {

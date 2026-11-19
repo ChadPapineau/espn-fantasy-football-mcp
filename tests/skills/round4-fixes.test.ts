@@ -10,6 +10,7 @@ import path from "node:path";
 import { afterAll, afterEach, beforeAll, describe, expect, it } from "vitest";
 import {
   ORIENT_SENTENCES,
+  ROUND4_ABSENT,
   ROUND4_FIXED,
   ROUND4_FRONTMATTER,
   SKILLS_LISTING_MAX,
@@ -264,5 +265,101 @@ describe("the session line beside the hand-off (changelog §R12, R12-3)", () => 
     const quoted = [...para.matchAll(/"([^"]+)"/g)].map((m) => m[1] ?? "");
     expect(quoted.length).toBeGreaterThanOrEqual(2);
     for (const q of quoted) expect(q).not.toContain("eff setup");
+  });
+});
+
+// The round-5 verifier's findings on round 4's Skill-text fixes (V5S-1, V5S-2, V5S-4, V5S-6, V5S-8,
+// V5S-9): each fixed line it asked for is held, the text it withdrew stays out, and the sentences it
+// found unpinned fail the check when cut (the it.each over ROUND4_FIXED above runs each cut).
+describe("the round-5 verifier's Skill-text findings", () => {
+  const f = ROUND4_FIXED as Fixed;
+  const line = (skill: string, k: string) => f[skill]?.["SKILL.md"]?.[k] ?? "";
+  const absent = ROUND4_ABSENT as Record<string, Record<string, string[]>>;
+
+  it("V5S-1: session-check's API-key note is given only when asked, and never in a take-over from a stop", () => {
+    const body = read("skills/session-check/SKILL.md");
+    const para = body.split("\n").find((l) => l.startsWith("**An ESPN API key.**")) ?? "";
+    expect(para.startsWith(line("session-check", "apiKeyAsked"))).toBe(true);
+    expect(para).toContain(line("session-check", "apiKeyUnasked"));
+    expect(line("session-check", "handOffOnce")).toContain("the API-key note");
+    const takeOver =
+      body
+        .split("\n")
+        .find((l) => l.startsWith("**Taking over from another Skill's stop at Step 0**")) ?? "";
+    expect(takeOver).toContain(line("session-check", "handOffOnce"));
+    expect(absent["session-check"]?.["SKILL.md"]).toContain(
+      "**An ESPN API key.** ESPN offers no API key",
+    );
+  });
+
+  it("V5S-1: the unconditional API-key paragraph back fails the check", () => {
+    const t = fresh();
+    t.edit(
+      "skills/session-check/SKILL.md",
+      "**An ESPN API key.** Only when the user asks about an API key: ESPN offers",
+      "**An ESPN API key.** ESPN offers",
+    );
+    expect(errorsOf(t)).toContain(
+      'skills/session-check/SKILL.md: text the round-5 verifier withdrew is still there: "**An ESPN API key.** ESPN offers no API key"',
+    );
+  });
+
+  it("V5S-2: schedule-plan's order rule gives no reason the tool contradicts — espn_analyze_schedule runs its own season simulation", () => {
+    expect(line("schedule-plan", "matchupFirst")).toBe(
+      "Step 3.4 runs on every question, a bye question included, and before step 4 — the playoff odds the answer gives come from it.",
+    );
+    const src = read("src/mcp/tools/analytics-p1.ts");
+    // the tool reads the matchups itself and calls runSeason; weight 1 only when that read fails,
+    // said by its own warning
+    expect(src).toMatch(/const sim = await runSeason\(ctx, \{/);
+    expect(src).toContain(
+      'warnings.push("season simulation unavailable: every week weighted 1 (P(alive) unknown)")',
+    );
+    const t = fresh();
+    t.edit(
+      "skills/schedule-plan/SKILL.md",
+      "before step 4 — the playoff odds the answer gives come from it.",
+      "before step 4: without the season simulation `espn_analyze_schedule` weights every week 1 (P(alive) unknown).",
+    );
+    expect(errorsOf(t)).toContain(
+      "skills/schedule-plan/SKILL.md: text the round-5 verifier withdrew is still there",
+    );
+  });
+
+  it("V5S-6: start-sit's report line gives a conditional swap only on an unlocked slot", () => {
+    const body = read("skills/start-sit/SKILL.md");
+    const step3 = body.split("\n").find((l) => l.startsWith("3. **Availability comes from")) ?? "";
+    expect(step3).toContain(line("start-sit", "lockedReportRule"));
+    expect(step3).toContain(line("start-sit", "lockedReportLine"));
+    expect(step3).not.toContain('Then give a conditional ("if ESPN shows X as Out');
+    // step 6's rule and step 3's agree: no swap for a locked player anywhere in the answer
+    expect(body).toContain(line("start-sit", "lockedNoMove"));
+  });
+
+  it("V5S-4: weekly's IR move is a row with its Deadline, and a move outside a table gives its time", () => {
+    const body = read("skills/weekly/SKILL.md");
+    const injuries = body.split("### Injuries and byes\n")[1]?.split("\n")[0] ?? "";
+    expect(injuries).toContain(line("weekly", "irRow"));
+    expect(injuries).toMatch(/with a \*\*Move\*\* and a \*\*Deadline\*\* column/);
+    expect(body).toContain(line("weekly", "outsideTable"));
+  });
+
+  it("V5S-8: the three sentences the verifier found unpinned are fixed lines", () => {
+    expect(line("session-check", "handOffStep5")).toBe(
+      'step 5 reads "Tell me when you have run it — nothing else is needed from you, and never the values or the command\'s output."',
+    );
+    expect(line("trade", "noVerdictFirst")).toBe(
+      "no verdict of any kind (yours or the tool's, \"against the trade\" included) comes before **Devil's advocate:**.",
+    );
+    expect(line("weekly", "neverThisWeekVs")).toBe('(never "This week: vs …")');
+  });
+
+  it("V5S-9: schedule-plan's when_to_use names a playoff seed again, inside the listing ceiling", () => {
+    const fm = ROUND4_FRONTMATTER as Record<string, Record<string, string[]>>;
+    expect(fm["schedule-plan"]?.when_to_use).toContain("playoff seed");
+    const v = parseFrontmatter(read("skills/schedule-plan/SKILL.md")).data.when_to_use;
+    expect(typeof v === "string" ? phrases(v).map((p) => p.join(" ")) : []).toContain(
+      "playoff seed",
+    );
   });
 });

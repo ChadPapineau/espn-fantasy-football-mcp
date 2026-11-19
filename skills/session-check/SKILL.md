@@ -28,7 +28,7 @@ Conventions: Step 0 in [orient](references/orient.md) (this Skill is where its c
 ### 1. Step 0 — the status is the diagnosis
 Run Step 0 of [orient](references/orient.md): `espn_get_status` with `include_checks: true` — zero ESPN requests. Skip the routing rows that hand over to this Skill. **A follow-up turn is different:** when the user says they ran `eff setup` after this Skill gave the steps, the probe comes first — call `espn_check_auth` (§4) before any other tool, `espn_get_status` included: the status the earlier turn read stands, and the probe's answer carries the new state. Read `credential` (`state`, `present`, `store`, `age_days`, `last_accepted_at`, `last_rejected_at`, `stale_warning`) and `drift.status`.
 
-**An ESPN API key.** ESPN offers no API key for a fantasy league: this server reads the league with the session cookies the user enters in a terminal through `eff setup` — say so, then go on with the status.
+**An ESPN API key.** Only when the user asks about an API key: ESPN offers no API key for a fantasy league: this server reads the league with the session cookies the user enters in a terminal through `eff setup` — say so, then go on with the status. Unasked, the answer carries no API-key note.
 
 ### 2. Branch on what the status says
 
@@ -49,7 +49,7 @@ Run Step 0 of [orient](references/orient.md): `espn_get_status` with `include_ch
 4. In a **terminal** (not in this chat), run `eff setup` and paste each value when it asks; the input is hidden and stored in the keychain.
 5. Tell me when you have run `eff setup` — nothing else is needed from you, and never the values or the command's output.
 
-**Taking over from another Skill's stop at Step 0** (orient's **A stop at Step 0**: that answer ends with orient's hand-off line, which carries the command): step 4 reads "In a **terminal** (not in this chat), run the command in the last line and paste each value when it asks; the input is hidden and stored in the keychain." and step 5 reads "Tell me when you have run it — nothing else is needed from you, and never the values or the command's output."; leave out the status line's command and the 30-day reminder: `eff setup` appears once, in the hand-off line.
+**Taking over from another Skill's stop at Step 0** (orient's **A stop at Step 0**: that answer ends with orient's hand-off line, which carries the command): step 4 reads "In a **terminal** (not in this chat), run the command in the last line and paste each value when it asks; the input is hidden and stored in the keychain." and step 5 reads "Tell me when you have run it — nothing else is needed from you, and never the values or the command's output."; leave out the status line's command, the 30-day reminder and the API-key note: `eff setup` appears once, in the hand-off line.
 
 ### 4. Verify — once
 After the user says they ran `eff setup` (or for a `stored` state), call `espn_check_auth` **once** — never twice in a turn, never in a loop — and report by `accepted` and, when it is null, by `reason`:

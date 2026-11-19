@@ -69,7 +69,7 @@ At most one page: each section one table, under the six section headings printed
 
 **The header** prints the data time: the `as_of` of the reads the briefing rests on (the roster, the projections and the pool — `meta.as_of`, or each input's `as_of` in `data.inputs[]`), in Eastern Time; on an invalid roster it comes right after the Roster INVALID block, never above it.
 
-**Every action carries its deadline.** Each table whose rows are actions — the lineup, the waiver brief, K and D/ST, and every move under Injuries and byes — has a **Deadline** column: a lineup move's `lock_at` (the player's kickoff), a claim's `next_run_at`, an add now's lock time (before his game locks), an add after the run's `next_run_at`, an IR move's next run (before it, so the freed seat counts). A row with no move says "—". Every move row gives its time in that column, in Eastern Time — never a blank, never "this week". The **Deadlines** block below stays as the summary.
+**Every action carries its deadline.** Each table whose rows are actions — the lineup, the waiver brief, K and D/ST, and every move under Injuries and byes — has a **Deadline** column: a lineup move's `lock_at` (the player's kickoff), a claim's `next_run_at`, an add now's lock time (before his game locks), an add after the run's `next_run_at`, an IR move's next run (before it, so the freed seat counts). A row with no move says "—". Every move row gives its time in that column, in Eastern Time — never a blank, never "this week". A move named outside a table — the top swap, a line under a table — gives its time on the same line, in Eastern Time. The **Deadlines** block below stays as the summary.
 
 ### Last week
 Result, score, the retrospective headline (or "provisional").
@@ -84,7 +84,7 @@ The claim brief or the scramble brief, with the premium band, verdicts, the drop
 Per position: hold or stream, the top option with its two-week look-ahead and how to act on its verdict (add now, or after the run), ESPN's projection beside ours.
 
 ### Injuries and byes
-Flagged players and byes for the next three weeks.
+The flagged players in one table with a **Move** and a **Deadline** column — each IR move is a row in it, its Deadline the next run (`next_run_at`), never only a prose line; then the byes for the next three weeks.
 
 ### League activity
 Rivals' moves, losing claims, the waiver order.

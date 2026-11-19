@@ -1,7 +1,7 @@
 ---
 name: schedule-plan
 description: Plans the roster across byes and the playoffs in the user's ESPN league — lineup holes and fixes, playoff and first-round-bye odds, the seed race, and what a win or a block of points is worth.
-when_to_use: bye week, byes, playoff odds, am I making the playoffs, first-round bye, wins or points, weeks 15-17, plan ahead, down the stretch, coast, playoff schedule
+when_to_use: bye week, byes, playoff odds, am I making the playoffs, playoff seed, first-round bye, wins or points, weeks 15-17, plan ahead, down the stretch, coast, playoff schedule
 argument-hint: "[weeks, or a playoff question]"
 disallowed-tools:
   - mcp__espn-fantasy-football__espn_commit_lineup
@@ -38,7 +38,7 @@ Run Step 0 of [orient](references/orient.md). If `server.toolset` is `core`, sto
 1. `espn_project_players` for the user's team with `horizon: "ros"`.
 2. `espn_analyze_replacement` with `horizon: "ros"` — what a lineup hole costs.
 3. `espn_get_standings` — the race as it stands; ESPN's `playoff_pct_espn` per team, labelled.
-4. `espn_analyze_matchup` with `mode: "season"`, `seeding_mode` as step 1 decided, and `horizon: "through_playoffs"` when the question is about seeds, byes or the title. Step 3.4 runs on every question, a bye question included, and before step 4: without the season simulation `espn_analyze_schedule` weights every week 1 (P(alive) unknown).
+4. `espn_analyze_matchup` with `mode: "season"`, `seeding_mode` as step 1 decided, and `horizon: "through_playoffs"` when the question is about seeds, byes or the title. Step 3.4 runs on every question, a bye question included, and before step 4 — the playoff odds the answer gives come from it.
 
 ### 4. The schedule stress test
 `espn_analyze_schedule` with `include_playoffs: true` (and `weeks` only when the user named some).
