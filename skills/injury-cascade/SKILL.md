@@ -51,6 +51,8 @@ Run Step 0 of [orient](references/orient.md). If `server.toolset` is `core`, sto
 ## Output additions
 - `expected_weeks` — p25, p50, p75 — with its `basis` (`report` or `prior`).
 - The beneficiaries: quoted name and `player_id`, `delta_opportunity` (targets, carries, red-zone), `delta_proj_by_week`, `p_role_holds` in a column headed **P(role holds)** (that label, never reworded), the evidence grade (`team_games`, `usage_confirmed`, `market_move`), availability and the verdict.
+- When every beneficiary is rostered (none is on waivers or a free agent), this fixed line, verbatim with the names filled in: "No beneficiary is available to claim: <names> are rostered." — and no claim, pass or add.
+- A teammate on the wire whom the cascade does not rank (he is not among its beneficiaries), when the answer names him, gets this fixed line, verbatim with his values filled in: "<name> (<status>, <availability>): not a beneficiary — no verdict." — `<status>` ESPN's `injury_status`, `<availability>` "on waivers" or "free agent" — and nothing else: never "worth a look", never a claim, pass or add, and never an availability check left to the user.
 - When `hypothesis_only` is true, say it in words: "a hypothesis — no team evidence, no usage confirmation and no market move yet".
 - `ir_consequence` for the user's roster: whether the injured player is IR-eligible (`OUT` or `INJURY_RESERVE` only), the move to IR, and the bench spot it frees — with this fixed line, verbatim: "Activate him only after the waiver run, never the night before a pending claim."
 - The pass-down back note (`pass_down_back_note`): half-PPR raises the receiving back.
