@@ -46,7 +46,7 @@
       "files": ["evals/fixtures/fx-10h"],
       "expectations": [
         "The skill called espn_get_standings before espn_analyze_trade (tool_order)",
-        "Under trade's fixed lead 'Why they would accept (the tool's standing lines):', the reply quotes the tool's standing line 'a long shot under the record-first reading: future value matters more to them' word for word as the partner's reason (llm)",
+        "The reply quotes the tool's standing line 'a long shot under the record-first reading: future value matters more to them' word for word as the partner's reason (trade's fixed lead 'Why they would accept (the tool's standing lines):' followed by that line does) (llm)",
         "The reply never gives the partner a motive the tool does not state (llm)",
         "The reply states the tool's verdict (fair) with its interval (llm)",
         "The reply gives the tool's verdict before its own recommendation (llm)",

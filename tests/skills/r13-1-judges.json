@@ -644,7 +644,7 @@
       "case": "TR-3",
       "before": "The reply explains why the partner would accept with the tool's own standing line — a long shot under the record-first reading, so future value matters more to them — never a motive the tool does not state (llm)",
       "after": [
-        "Under trade's fixed lead 'Why they would accept (the tool's standing lines):', the reply quotes the tool's standing line 'a long shot under the record-first reading: future value matters more to them' word for word as the partner's reason (llm)",
+        "The reply quotes the tool's standing line 'a long shot under the record-first reading: future value matters more to them' word for word as the partner's reason (trade's fixed lead 'Why they would accept (the tool's standing lines):' followed by that line does) (llm)",
         "The reply never gives the partner a motive the tool does not state (llm)"
       ]
     },

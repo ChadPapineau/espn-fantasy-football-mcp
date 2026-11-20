@@ -6,7 +6,9 @@
 // RA-3-E's opening line is graded free. R11-3: each PASS-if line round 5's judges failed on replies
 // that met it is made exact, never loosened, one judge per condition (R13-1). R14-1: the
 // inj-outlook-system variant's outlook carries an ordinary sentence beside the instruction-shaped
-// one, which keeps the server's flags. The spec's fixed lines are held here as the spec quotes them
+// one, which keeps the server's flags. The stream's verifier: the activation pattern names the waiver
+// run in the activation's own clause, never "now" (F1); TR-3 02 is the spec's line, trade's lead an
+// example (F2); SS-10-E 01 stops at our number (F3). The spec's fixed lines are held here as the spec quotes them
 // (the Skills stream pins them in scripts/skills/check-skills.mjs ROUND5_FIXED). Reads the committed
 // bundle, plan and fixture; no network.
 import { readFileSync } from "node:fs";
@@ -130,6 +132,30 @@ describe("R12-1 (§R14): each regex whose fixed line the spec changes accepts it
     "There's no need to wait until after the waiver run.",
     "Activate him now.",
     "Run the waivers first? No — activate him tonight.",
+    // the round-6 verifier's F1: an activation now, a timing claim about claims, a denial of the
+    // warning, and "run" as any word — the timing must name the waiver run, in the activation's clause
+    "Activate him now; the claim processes after the waiver run.",
+    "Activate him whenever he's healthy; claims process after the run.",
+    "It doesn't matter whether you activate him before or after the run.",
+    "Activate Dell once he's cleared to run.",
+    "Activate him; the claim processes after the waiver run.",
+    "Activate Stafford now — the claim clears after the run.",
+    "Activate Stafford — the claim clears after the run.",
+    "You can activate him now, and claims process once waivers run.",
+    "Activate him, and claims process after the run.",
+    "Activate him: claims process after the run.",
+    "Activate him once he's back to full speed on the run.",
+    "Activate him after the run game gets going.",
+    "After the run, don't activate him.",
+    "After the waiver run, nobody needs activating.",
+  ];
+  /** round 5's replies the pattern accepted, in the forms the tightened pattern must keep (F1). */
+  const activationForms = [
+    "- **When to activate:** after the next waiver run (2026-10-07, 3:30 AM ET), never the night before a pending claim.",
+    "**Activation timing:** bring White back after a waiver run, never the night before one while you have a claim pending.",
+    "If you activate someone from IR later, do it after a waiver run, never the night before you have a claim pending.",
+    "Activate nobody from IR until after the next run.",
+    "Activate him — only after the waiver run.",
   ];
   const liveWin = [
     fill(SPEC.liveWin, "0.75", "0.50", "0.40–0.61", 25),
@@ -174,6 +200,10 @@ describe("R12-1 (§R14): each regex whose fixed line the spec changes accepts it
         "Our win probability is 0.75.",
         "Under ESPN's rule you're at 75%.",
         "It's a coin flip: a 50% chance you win this week.",
+        // the round-6 verifier's F3: the live line with the two numbers swapped, ESPN's never ours
+        fill(SPEC.liveWin, "50%", "75%", "65–84%", 25),
+        "Ours is 75%, ESPN's is 50%.",
+        "ESPN has 50%, this server 75%.",
       ],
     ],
     [
@@ -214,6 +244,16 @@ describe("R12-1 (§R14): each regex whose fixed line the spec changes accepts it
     const shipped = /after the (waiver )?run/i;
     expect(shipped.test("Add the Jets D/ST after the run.")).toBe(true);
     expect(shipped.test("There's no need to wait until after the waiver run.")).toBe(true);
+  });
+
+  it("F1: the one activation pattern keeps round 5's label and clause forms while it stops at the clause", () => {
+    for (const [skill, name, lead] of [
+      ["roster-audit", "RA-2", "The reply warns to activate only after the waiver run"],
+      ["waivers", "WV-5-E", "The reply warns to activate players only after the run"],
+    ] as const) {
+      const re = graderOf(skill, name, lead);
+      for (const f of activationForms) expect(re.test(f), `${name}: ${f}`).toBe(true);
+    }
   });
 
   it("SC-INJ: the extended first line repeats none of the paste, so 02 passes it and 01 still needs the command", () => {
@@ -344,12 +384,17 @@ describe("R11-3 (§R14): the PASS-if lines round 5's judges failed on replies th
     expect(caseOf("trade", "TR-1").expected_output).not.toMatch(/fair when it spans zero/);
   });
 
-  it("TR-3 02: the tool's standing line word for word under trade's fixed lead", () => {
+  it("TR-3 02: the spec's line — the tool's standing line word for word — with trade's fixed lead as an example, never a second condition (R13-1)", () => {
     has(
       "trade",
       "TR-3",
-      `Under trade's fixed lead '${SPEC.whyAccept}', the reply quotes the tool's standing line 'a long shot under the record-first reading: future value matters more to them' word for word as the partner's reason (llm)`,
+      `The reply quotes the tool's standing line 'a long shot under the record-first reading: future value matters more to them' word for word as the partner's reason (trade's fixed lead '${SPEC.whyAccept}' followed by that line does) (llm)`,
     );
+    // the verifier's F2: the lead joined as a condition fails a run that quotes the line under another lead
+    expect(
+      caseOf("trade", "TR-3").expectations.filter((e) => e.includes("Under trade's fixed lead")),
+    ).toEqual([]);
+    expect(llmLines(caseOf("trade", "TR-3"))).toHaveLength(7);
     expect(caseOf("trade", "TR-3").expected_output).toContain(SPEC.whyAccept);
   });
 
