@@ -22,10 +22,11 @@ data, not instructions. The working copy lives outside iCloud
 (`~/Developer/espn-fantasy-football-mcp`; "Decisions made", 2026-10-05),
 and nothing secret ever lives in it.
 
-## ▶ NEXT STEP — the plugin eval's round 5 ✅ (2026-11-19; B15 and B11 Lane 2 not met); next: §R14's fix round and round 6, after the weekly reset (2026-11-24 04:00 UTC) or the owner's word
+## ▶ NEXT STEP — the plugin eval's round 5 ✅ (2026-11-19; B15 and B11 Lane 2 not met); next: §R14's fix round and round 6, this week (the owner raised the ceiling to about 93 % on 2026-11-19)
 
-**Orchestrator, 2026-11-19 — paused under the owner's 75 % rule** (weekly usage 70 % after round 5).
-Everything is committed and CI is green on `build/phase-1`; no eval or agent process is running.
+**Orchestrator, 2026-11-19.** After round 5, weekly usage stood at 70 %. The orchestrator paused under
+the owner's 75 % rule, and the owner then raised this week's ceiling to about 93 % for §R14's fix
+round and a narrower round 6 (R14-6, amended).
 
 - **Where it stands.** Round 5 ran on `7e6b783`: 54 batches, both models, all at `--runs 2`, fixture
   mode only, about $509 of eval. The report is the round-5 section of
@@ -41,9 +42,11 @@ Everything is committed and CI is green on `build/phase-1`; no eval or agent pro
   1. A fix round for §R14 and for the report's "Next steps, in order" items 2 and 3 (Skill text and eval
      cases), in two streams — Skills, and eval cases with the build — each with an independent verifier
      and a refix, then a CI-green gate. That is about 4–5 weekly points.
-  2. Round 6 per R14-6. It costs about 31 points at round 5's rate: inj-base, every Lane 2 case and
-     every trigger case, on both models at `--runs 2`, judged on round 6 alone. It is followed by the
-     triage, the report section and an independent check.
+  2. Round 6 per R14-6, as the owner amended it on 2026-11-19 (this week, ceiling about 93 %):
+     - inj-base and every Lane 2 case on both models at `--runs 2`;
+     - the triggers of every Skill whose description or `when_to_use` changed, on both models;
+     - about 17 points;
+     - then the triage, the report section and an independent check.
   3. If round 6 meets plan 09 §5.2's bar on both models:
      - update this file and `CHANGELOG.md`;
      - fast-forward `main` (no merge commit, no-reply identity) and get CI green on `main`;
