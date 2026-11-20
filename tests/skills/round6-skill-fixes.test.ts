@@ -175,7 +175,7 @@ describe("round 5's fixed lines (changelog §R14; R12-1)", () => {
 });
 
 describe("each line where its rule prints it", () => {
-  it("roster-audit and waivers: the activation line wherever an IR activation is offered", () => {
+  it("roster-audit and waivers: the activation line wherever an IR move is offered", () => {
     const ra = read("skills/roster-audit/SKILL.md");
     expect(lineWith(ra, "`activation_timing_warning`")).toContain(
       `${line("roster-audit", "activateRule")} ${ACTIVATION_LINE}`,
