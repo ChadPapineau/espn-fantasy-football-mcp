@@ -1419,3 +1419,108 @@ left open.
   SS-6-E's new judges).
 - **Not held:** a join in words the heuristic does not know, on a new line, passes the sweep
   unsplit; the test header says so (F3).
+
+## Found in round 6's Skill fixes (2026-11-19)
+
+What the Skills stream of the §R14 fix round built (`docs/plan/changelog.md` §R14), its verifier's
+refix (`6e83abb`) and what stays open.
+
+- **Built (`4896a2b`).** Every Skill-text item of round 5's Next steps item 2, plus R14-1, R14-2,
+  R14-3 and R14-5. They are held by check-skills: `ROUND5_FIXED` (43 pins; 45 after the verifier's
+  refix), `ROUND5_FRONTMATTER`, `ROUND5_LEAD`, `ROUND5_FRONTMATTER_ABSENT` and `ROUND5_ABSENT`.
+  `tests/skills/round6-skill-fixes.test.ts` cuts and rewords each pin.
+- **Built after the verifier (`6e83abb`; `tests/skills/round6-skill-verify.test.ts`).** V-SK-1:
+  roster-audit's and waivers' activation line prints wherever an IR move is offered, as the round-5
+  report's fix entry asks, not only for an IR activation. V-SK-2: start-sit's neutral mode gives its
+  reason without "close to even", a word its own coin-flip rule bans (pin `neutralReason`). V-SK-4:
+  news-check's guardrail and flagged-outlook sentence allow R14-1's Withheld line in place of
+  quoting (news-check's `outlookFlag` replaces round 3's; the untrusted-text guard is amended for
+  R14-1). `ROUND5_ABSENT` holds the old wordings out.
+- **Round 4's pins withdrawn:** news-check's `outlookWhole` (R14-1 allows a withheld passage) and
+  trade's `standingQuote` (replaced by the fixed lead with the lines alone). `ROUND5_ABSENT` holds
+  both texts out.
+- **The listing has 2 characters of headroom (4 598 of 4 600).** Any later frontmatter addition
+  needs a cut in the same Skill, or a trigger run of every Skill it touches (R14-6).
+- **To watch in round 6's trigger run (news-check and onboard only, R14-6):**
+  - news-check pos-01 ("I heard … is it true?") still matches "I heard", but "is it true" left the
+    listing.
+  - onboard pos-06 ("Did the settings change …") now matches "settings change".
+  - onboard pos-07 ("Is the scoring right for a half-PPR league?") matches "is the scoring right";
+    "half-PPR" is gone.
+  - onboard pos-05 and the NC-6 / NC-INJ outlook prompt are the targets.
+  - news-check neg-03 matches none of news-check's phrases.
+- **Wording the Skills stream fixed where the spec only described the line** (recorded for the
+  eval-case stream; no PASS-if line depends on either):
+  - injury-cascade's "<name> (<status>, <availability>): not a beneficiary — no verdict."
+  - retro's "Swap regret and projection CRPS fill up first — each reaches n ≥ 30 within weeks — so
+    this review leads with those; `p_win` stays n too small all season (about 14 matchups)."
+- **start-sit's live line under `core` (SS-10-E is a core case):** ours is the lineup tool's
+  pre-game `p_win_before` with its `p_win_interval`, said to be pre-game.
+- **Open, for the orchestrator: R14-3's reach.** Besides the description's "practice or official
+  report", news-check's `when_to_use` also dropped "practice report", read as a lookup of the
+  official report under the ruling. NC-2's prompt still routes to news-check through "reports say".
+  If R14-3 meant only the description, "practice report" can come back, within the listing's 2
+  characters of headroom only with a cut elsewhere in news-check.
+
+## Found in round 6's eval-case fixes (2026-11-19)
+
+What the eval-case stream of the §R14 fix round built (`3c0e431`, refixed in `23124ad`);
+`tests/skills/round6-eval-cases.test.ts` holds it. Every item of round 5's report's Next steps item
+3 is built, and every fixed line the spec quotes is committed (`4896a2b`) and tied to
+`ROUND5_FIXED` by the test.
+
+- **§R14's rulings R14-1 to R14-5, built.** R14-1: news-check's Withheld line and quote-or-withhold
+  rule (`4896a2b`, `6e83abb`), the `inj-outlook-system` variant's ordinary sentence and NC-INJ's two
+  judges (`3c0e431`). R14-2: stream-kdef's verdict lines decided by the `rec` (`4896a2b`) and KD-1's
+  expected output showing the hold (`3c0e431`). R14-3: news-check's description and `when_to_use`
+  (`4896a2b`). R14-4: TR-1 10 as two judges on its fixture's instance (`3c0e431`). R14-5: the shared
+  Logged note line in news-check and retro (`4896a2b`), graded by NC-7 06 and RT-INJ 09
+  (`3c0e431`). R14-6 is round 6's scope, not yet run.
+- **Built after the verifier (`23124ad`; F1–F3).** RA-2 03 and WV-5-E 04 still share one
+  activation pattern, now tighter: the waiver run must come straight after "after" or "once",
+  inside the activation's own clause, and the pattern refuses now, today, tonight, "before or" and
+  a negation after the run (R12-1). TR-3 02 is the round-5 report's line, the tool's standing line
+  word for word as the partner's reason, with trade's fixed lead an example (R13-1). SS-10-E 01
+  stops at our number. Round 5's accepted replies still pass both regexes (61 and 29).
+- **The gate's cross-check (2026-11-20, on `23124ad`).** Every quoted fixed line held by
+  check-skills (`ROUND3_FIXED`, `ROUND4_FIXED`, `ROUND5_FIXED`), filled in, passes each regex that
+  grades it, in bold, quoted, list-item and table-cell forms, and trips no `regex_absent` grader
+  where it is printed. The one hit is by design: waivers' round-4 Premium label trips WV-3-E 05 on
+  the FAAB fixture, where waivers now prints no premium line. planSuite reports 0 errors over 310
+  cases.
+- **KD-1 05 still accepts either verdict.** R14-2 makes the tool's rec decide the verdict and says
+  KD-1 05 accepts stream-kdef's fixed line. On this fixture the rec holds (`no_move: true`), so a
+  stream verdict is wrong, but KD-1 has no llm grader and 05 grades only that a verdict is given, in
+  either form. Whether 05 should require the hold on this fixture is open; KD-INJ's matches-base
+  compares against a passing KD-1 base.
+- **RA-2 03 and WV-5-E 04 now need an activation word.** A run that gives the warning in other
+  words without "activate" ("bring him back only after the run") fails. Both Skills print the fixed
+  line, so under R12-1 that is a Skill-text target.
+- **Bases for round 6's inj-base pass to re-take:** KD-INJ's (R14-2) and NC-INJ's (R14-1). For
+  NC-INJ, the variant's outlook changed and the judges now accept the withheld line; its base case
+  NC-6, on the base fixture, is unchanged.
+- **SS-10-E 01 checks the fixture's value** (0.75 or 75 %), not only the line's shape; a reply that
+  writes ESPN's number as 0.750 fails. The tool gives 0.75.
+- **TR-1 10's interval (p10 −220.8, p90 −29.1)** is the round-5 report's read of the fixture; this
+  round did not re-read it with a tool call.
+- **Plan 09 §3.13's NC-INJ line was edited with the case.** It now reads that the outlook's ordinary
+  sentence is always quoted and its instruction-shaped passage quoted as data or withheld on
+  news-check's fixed line (R14-1), so that the PASS-if line states no less than plan 09 (R11-3).
+  R14-1 does not name plan 09; the orchestrator may confirm the edit.
+- **Open, for the orchestrator:** whether trade's fixed lead should be graded on TR-3 with its own
+  free grader. The round-5 report's TR-3 fix grades only the quote; the verifier offered a grader
+  for the lead as an option, not a requirement.
+
+## Found in round 6's verifier findings on the eval cases (2026-11-19)
+
+- **V-SK-3, partly open at `23124ad`.** RA-2 03 and WV-5-E 04 still pass "Don't activate him after
+  the run." and "Claim Tate; once the run clears he is yours, and you can activate the IR slot later
+  in the season." (re-checked on `23124ad` at the gate). The verifier's proposal: a don't / do not /
+  never lookbehind before activat…, and the time words required to modify the activation in the
+  same clause.
+- **V-SK-5, open.** KD-4-E 01 passes R14-2's hold verdict line ("Verdict: hold <starter> — <rec's
+  reason>") through its bare `after the (waiver )?run` branch when the rec's reason mentions the
+  run, as this fixture's does ("no clear move: 2 on the scramble list after the run"). The
+  verifier's proposal: anchor it on a free-agent add after the run.
+- Both are in `evals.json`, which the Skills stream may not touch; whether they go to the eval-case
+  stream's next refix is the orchestrator's call.
