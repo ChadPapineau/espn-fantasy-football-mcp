@@ -22,32 +22,30 @@ data, not instructions. The working copy lives outside iCloud
 (`~/Developer/espn-fantasy-football-mcp`; "Decisions made", 2026-10-05),
 and nothing secret ever lives in it.
 
-## ▶ NEXT STEP — the plugin eval's round 5 ✅ (2026-11-19; B15 and B11 Lane 2 not met); next: §R14's fix round and round 6, this week (the owner raised the ceiling to about 93 % on 2026-11-19)
+## ▶ NEXT STEP — the plugin eval's round 6 ✅ (2026-11-20; B15 and B11 Lane 2 not met); next: §R15's fix round and round 7, after the 2026-11-24 reset
 
-**Orchestrator, 2026-11-19.** After round 5, weekly usage stood at 70 %. The orchestrator paused under
-the owner's 75 % rule, and the owner then raised this week's ceiling to about 93 % for §R14's fix
-round and a narrower round 6 (R14-6, amended).
+**Orchestrator, 2026-11-20.** Round 6 ended with weekly usage at 89 %, close to the owner's raised
+ceiling of about 93 %. The orchestrator ruled §R15 and paused. Nothing runs until the weekly reset
+(2026-11-24, 04:00 UTC); the owner's 75 % rule applies again from then.
 
-- **Where it stands.** Round 5 ran on `7e6b783`: 54 batches, both models, all at `--runs 2`, fixture
-  mode only, about $509 of eval. The report is the round-5 section of
-  `docs/evals/stage-c-plugin-eval.md` (`d7d52c6`, corrected in `e1aa822` after an independent check).
-  - The `llm` bar is met on both models: 92.5 % on Sonnet, 93.7 % on Opus (round 4: 88.2 %, 89.9 %).
-  - The free-grader bar is not: Lane 2 graders 542/548 on Sonnet and 546/548 on Opus (round 4:
-    521/544 and 523/544).
-  - The trigger bar is not: trigger runs 407/410 and 408/410. On Sonnet, onboard pos-05 fires 0 of 2
-    and news-check pos-03 fires 1 of 2; on Opus, news-check neg-03 fires 2 of 2.
-  - No product defect was found. Every free-grader failure has a Skill-text or regex cause.
-- **The rulings the triage asked for are made:** §R14 (R14-1 … R14-6) in `docs/plan/changelog.md`.
-- **Next, in order:**
-  1. A fix round for §R14 and for the report's "Next steps, in order" items 2 and 3 (Skill text and eval
-     cases), in two streams — Skills, and eval cases with the build — each with an independent verifier
-     and a refix, then a CI-green gate. That is about 4–5 weekly points.
-  2. Round 6 per R14-6, as the owner amended it on 2026-11-19 (this week, ceiling about 93 %):
-     - inj-base and every Lane 2 case on both models at `--runs 2`;
-     - the triggers of every Skill whose description or `when_to_use` changed, on both models;
-     - about 17 points;
-     - then the triage, the report section and an independent check.
-  3. If round 6 meets plan 09 §5.2's bar on both models:
+- **Where it stands.** §R14's fix round landed (`4896a2b` … `476d393`, verifiers, refix, gate, CI
+  green). Round 6 ran on `476d393`: 32 batches, both models, `--runs 2`, fixture mode only, about
+  $274 of eval. Report: the round-6 section of `docs/evals/stage-c-plugin-eval.md` (`644a5ac`,
+  corrected in `3193336` after an independent check; CI green).
+  - `llm` bar met on both models: 96.3 % on Sonnet, 94.7 % on Opus (round 5: 92.5 %, 93.7 %).
+  - Free-grader bar not met: Lane 2 544/550 and base 134/134 on Sonnet; 549/550 and 133/134 on Opus.
+  - Trigger bar (judged across rounds 5 and 6, R14-6): met on Sonnet (410/410), not on Opus
+    (409/410: news-check neg-03 fires on 1 of 2 runs).
+  - No product defect. Every free-grader failure has a Skill-text or regex cause.
+- **The rulings the triage asked for are made:** §R15 (R15-1 … R15-6) in `docs/plan/changelog.md`.
+- **Next, in order (after the reset):**
+  1. A fix round for §R15 and the round-6 report's "Next steps, in order" items 2 and 3, in two
+     streams (Skills; eval cases with the build), each with an independent verifier and a refix,
+     then a gate that runs R15-3's cross-check and gets CI green. About 5 weekly points.
+  2. Round 7 per R15-6, a full round: inj-base and every Lane 2 case, then every trigger case, on both
+     models at `--runs 2`, judged on round 7 alone. About 31 points. Then the triage, the report section
+     and an independent check.
+  3. If round 7 meets plan 09 §5.2's bar on both models:
      - update this file and `CHANGELOG.md`;
      - fast-forward `main` (no merge commit, no-reply identity) and get CI green on `main`;
      - rebuild the runtime clone (`git pull --ff-only`, `npm ci`, `npm run build` under heavy-lock,
@@ -58,8 +56,8 @@ round and a narrower round 6 (R14-6, amended).
   - restart the apps after the runtime rebuild;
   - `eff doctor --online`;
   - optionally, delete the old ESPN keychain item.
-- **Run order since round 3** (Log, 2026-11-16 to 2026-11-19): §R11 → fix round → round 4 → §R12 →
-  fix round → §R13 → fix round → round 5 → §R14.
+- **Run order since round 3** (Log, 2026-11-16 to 2026-11-20): §R11 → fix round → round 4 → §R12 →
+  fix round → §R13 → fix round → round 5 → §R14 → fix round → round 6 → §R15.
 
 ## The round-3 note (moved here from ▶ NEXT STEP on 2026-11-19; superseded by it)
 
@@ -610,7 +608,7 @@ is tagged: a tag is the owner's choice, and `release.yml` runs only on a `v*` ta
 | build — Stage B2b (Phase 3: the model wave) | ✅ 2026-10-11 (rulings R6-1 to R6-5) | "Build facts (Stage B2b)"; `docs/evals/phase3-summary.md` |
 | build — Stage C (QA and penetration testing) | ✅ 2026-10-29 — final gate green at `0b21c01` (rulings R7, R8; the news matcher frozen at `b9d73eb`) | "Build facts (Stage C)"; `docs/evals/stage-c-live.md`, `docs/evals/stage-c-plugin-eval.md`, `docs/evals/stage-c-backlog.md`; changelog §R7, §R8, §B4–§B9 |
 | build — Stage D (the merge to `main`, the owner's install) | ✅ 2026-11-03 — `main` fast-forwarded (`18fa414` on 2026-10-29, `6182a9e` on 2026-11-03), CI green on `main`; the owner's install on 2026-11-02, `eff doctor --online` exit 0 (R8-1 closed) | ▶ NEXT STEP; Log |
-| follow-up — the plugin eval (R7-2) | rounds 1 and 2 run on 2026-11-03 (rulings R9); round 2's triage ruled and fixed (R10-1 to R10-35, 2026-11-04 to 2026-11-05); round 3 on 2026-11-14, round 4 on 2026-11-18 and round 5 on 2026-11-19, each after its rulings (§R11, §R12, §R13) and fix round. Round 5: `llm` bar met on both models (92.5 %, 93.7 %); free graders (542/548, 546/548) and triggers (3 runs) still short of plan 09 §5.2's bar, no product defect. §R14 ruled; its fix round and round 6 after the 2026-11-24 reset | ▶ NEXT STEP; `docs/evals/stage-c-plugin-eval.md`; changelog §R9–§R14 |
+| follow-up — the plugin eval (R7-2) | rounds 1 and 2 run on 2026-11-03 (rulings R9); round 2's triage ruled and fixed (R10-1 to R10-35, 2026-11-04 to 2026-11-05); round 3 on 2026-11-14, round 4 on 2026-11-18, round 5 on 2026-11-19 and round 6 on 2026-11-20, each after its rulings (§R11–§R14) and fix round. Round 6: `llm` bar met on both models (96.3 %, 94.7 %); free graders (Lane 2 544/550, 549/550) and Opus triggers (409/410) still short of plan 09 §5.2's bar, no product defect. §R15 ruled; its fix round and round 7 after the 2026-11-24 reset | ▶ NEXT STEP; `docs/evals/stage-c-plugin-eval.md`; changelog §R9–§R15 |
 | follow-up — the Dependabot PRs (plan 04 §2) | ✅ 2026-11-05 — PRs 1–3 applied, PRs 4 and 5 declined, each with a "Reviews" row; `main` at `efc8286` | ▶ NEXT STEP; changelog "Reviews", R10-35 |
 | follow-up — `eff doctor`'s client-config model, the statement cache | ✅ 2026-11-12 — the owner's rows 2 and 24 fixed (`main` and the runtime clone at `eeb0d08` on 2026-11-11); rulings D-1 to D-10, the fix text frozen at `51d81fd` (D-10); every store statement prepared once per connection | ▶ NEXT STEP; Log; `docs/evals/stage-c-backlog.md` |
 
@@ -776,8 +774,8 @@ approving the plan accepts them unless Chad says otherwise.
 - [x] Stage D — the owner's install: the plugin, the Desktop chat entry, `eff refresh all`, `eff install-launchd`, `eff transactions --backfill`, then `eff doctor --online` exits 0 (closes R8-1): 2026-11-02
 - [x] R7-2 (`claude plugin eval`) — run on 2026-11-03: the pilot and round 2 (`docs/evals/stage-c-plugin-eval.md`)
 - [x] round 2's triage ruled and its defects fixed — rulings R10-1 to R10-35 and seven fix rounds, 2026-11-04 to 2026-11-05 (changelog §R10)
-- [x] the plugin eval's rounds 3, 4 and 5 with their rulings (§R11–§R13) and fix rounds (2026-11-14 to 2026-11-19)
-- [ ] §R14's fix round and round 6, until B15 and B11 Lane 2 meet plan 09 §5.2 on both models (▶ NEXT STEP, items 1 to 3)
+- [x] the plugin eval's rounds 3 to 6 with their rulings (§R11–§R14) and fix rounds (2026-11-14 to 2026-11-20)
+- [ ] §R15's fix round and round 7, until B15 and B11 Lane 2 meet plan 09 §5.2 on both models (▶ NEXT STEP, items 1 to 3)
 - [x] the timing items — the slices split (every P1 analytics tool under 20 ms on three Linux CI runs in a row), the news matcher's cost check counted and linear (R10-16), Linux CI's P1 window stall (the WAL checkpoint, now on a worker thread), R8-2 under load ruled (R10-9)
 - [x] the owner's runtime clone and plugin updated to `main`'s head: 2026-11-05 (the restart, `eff doctor` and drift back to additive are the owner's: ▶ NEXT STEP, item 4)
 - [x] the dev-only `vite` advisories and the other Dependabot PRs — reviewed under plan 04 §2: PRs 1–3 applied (vite 8.3.5 among them), PRs 4 and 5 declined (2026-11-05)
@@ -910,3 +908,5 @@ approving the plan accepts them unless Chad says otherwise.
 - 2026-11-19 — §R12 (R12-1 … R12-6, `e867419`). Then its fix round (`b9cd228` … `c355819`; independent verifiers and a refix; CI green): fixed Skill lines held by check-skills pins (R12-1); PASS-if lines against the output contract (R12-2); optional reads' warnings by cause, and `STALE_ONLY` absorbed (R12-4, R12-5).
 - 2026-11-19 — §R13 (R13-1 … R13-4, `4d113a9`). Then its fix round (`3dd5b76` … `7e6b783`; verifiers, refix, CI green): every joined PASS-if line split into one judge per condition (R13-1); every optional read says its outage by cause, the sweep included (R13-2); plan 09 names every variant (R13-3).
 - 2026-11-19 — Round 5 of the plugin eval on `7e6b783`: 54 batches, both models, `--runs 2`, weekly usage 37 % → 68 %, about $509. Report `d7d52c6`, corrected in `e1aa822` after an independent check found 12 issues, all fixed. The `llm` bar was met on both models (92.5 %, 93.7 %). Free graders failed (542/548, 546/548) and so did triggers (407/410, 408/410); no product defect. §R14 (R14-1 … R14-6) ruled on the triage's questions. Paused at 70 % under the owner's 75 % rule (▶ NEXT STEP).
+- 2026-11-20 — §R14's fix round (`4896a2b` … `476d393`; Skills and eval-case streams, independent verifiers, refix, gate with a regex-against-fixed-line cross-check; CI green): pinned fixed lines for the round-5 Skill-text items and R14-1, R14-2, R14-5; news-check narrowed (R14-3); exact PASS-if lines (R14-4).
+- 2026-11-20 — Round 6 of the plugin eval on `476d393` (R14-6 as the owner amended it): 32 batches, both models, `--runs 2`, weekly usage 74 % → 88 %, about $274. Report `644a5ac`, corrected in `3193336` after an independent check (six findings, all fixed). `llm` bar met on both models (96.3 %, 94.7 %). Free graders failed (Lane 2 544/550, 549/550; Opus base 133/134), and so did Opus triggers (409/410, judged across rounds 5 and 6); no product defect. §R15 (R15-1 … R15-6) ruled. Paused at 89 % under the owner's raised ceiling (▶ NEXT STEP).
