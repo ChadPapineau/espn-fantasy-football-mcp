@@ -190,7 +190,9 @@ describe("WV-2 on td-inflated: a touchdown-inflated candidate the tool does not 
   it("the no-signal branch is its own case on the base pool", () => {
     const c = waiversCase("WV-8");
     expect(c.files).toEqual(["evals/fixtures/fx-10h"]);
-    expect(c.expectations.join("\n")).toMatch(/usage branch found none/);
+    expect(c.expectations.join("\n")).toMatch(
+      /no detailed candidate's `signals\[\]` carries a signal/,
+    );
   });
 });
 

@@ -7,7 +7,7 @@
       "name": "TR-1",
       "toolset": "full",
       "prompt": "Team 10 offered me their RB1 for my WR1 and my tight end. Is it fair?",
-      "expected_output": "Both sides valued rest-of-season with intervals: delta_me and delta_partner with p10 and p90 and the basis, delta_u for both teams under the reading in use, the roster spot the 2-for-1 frees for the user and the drop it forces on the partner, with its value (consolidation.implied_drop), a devil's-advocate paragraph before the verdict, the verdict with its interval (fair when it spans zero), the trade deadline, and a log id.",
+      "expected_output": "Both sides valued rest-of-season with intervals: delta_me and delta_partner with p10 and p90 and the basis, delta_u for both teams under the reading in use, the roster spot the 2-for-1 frees for the user and the drop it forces on the partner, with its value (consolidation.implied_drop), a devil's-advocate paragraph before the verdict, the tool's verdict, decline, with the user's interval as the tool gives it (delta_me p10 about −220.8, p90 about −29.1, mean about −131.6: wholly below zero), called neither fair nor a coin flip (changelog §R14, R14-4), the trade deadline, and a log id.",
       "files": ["evals/fixtures/fx-10h"],
       "expectations": [
         "The skill called espn_project_players before espn_analyze_trade, then espn_record_recommendation (tool_order)",
@@ -19,7 +19,8 @@
         "The reply names the roster spot the 2-for-1 frees or the drop it forces (llm)",
         "The reply gives the value of that roster spot or drop (llm)",
         "A devil's-advocate paragraph comes before the verdict (llm)",
-        "A verdict whose interval spans zero is called fair or a coin flip (llm)"
+        "The reply gives the tool's verdict, decline, with the user's interval as the tool gives it (on this fixture delta_me p10 −220.8, p90 −29.1) (llm)",
+        "The reply calls the tool's verdict neither fair nor a coin flip (llm)"
       ]
     },
     {
@@ -41,11 +42,11 @@
       "name": "TR-3",
       "toolset": "full",
       "prompt": "Team 08 wants my RB2 for their WR1. Why would they do that, and should I?",
-      "expected_output": "Team 08 is 1–3 with the league's lowest points for while Team 02 is 3–1; Team 08's WR1 is Garrett Wilson and the user's RB2 is James Cook III. The tool's why_they_accept reads: their lineup gains about 35 points, it fills their weakest starting position (RB), and \"a long shot under the record-first reading: future value matters more to them\" (changelog §R10, R10-4: the server's standing line stands) — the reply explains the partner's motive with that line, read back as the tool gives it. The user's side is judged on its own Δ (mean about −44, p10 about −104, p90 about +23) and ΔU; the tool's verdict is fair (the interval spans zero): the reply states it with its interval before its own recommendation and, if it recommends declining instead, says why in so many words; the deadline is stated.",
+      "expected_output": "Team 08 is 1–3 with the league's lowest points for while Team 02 is 3–1; Team 08's WR1 is Garrett Wilson and the user's RB2 is James Cook III. The tool's why_they_accept reads: their lineup gains about 35 points, it fills their weakest starting position (RB), and \"a long shot under the record-first reading: future value matters more to them\" (changelog §R10, R10-4: the server's standing line stands) — the reply explains the partner's motive with that line, read back word for word as the tool gives it under trade's fixed lead, 'Why they would accept (the tool's standing lines):'. The user's side is judged on its own Δ (mean about −44, p10 about −104, p90 about +23) and ΔU; the tool's verdict is fair (the interval spans zero): the reply states it with its interval before its own recommendation and, if it recommends declining instead, says why in so many words; the deadline is stated.",
       "files": ["evals/fixtures/fx-10h"],
       "expectations": [
         "The skill called espn_get_standings before espn_analyze_trade (tool_order)",
-        "The reply explains why the partner would accept with the tool's own standing line — a long shot under the record-first reading, so future value matters more to them (llm)",
+        "Under trade's fixed lead 'Why they would accept (the tool's standing lines):', the reply quotes the tool's standing line 'a long shot under the record-first reading: future value matters more to them' word for word as the partner's reason (llm)",
         "The reply never gives the partner a motive the tool does not state (llm)",
         "The reply states the tool's verdict (fair) with its interval (llm)",
         "The reply gives the tool's verdict before its own recommendation (llm)",

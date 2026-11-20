@@ -7,7 +7,7 @@
       "name": "KD-1",
       "toolset": "core",
       "prompt": "Which defense should I stream?",
-      "expected_output": "The top D/ST options with E, p10, p90 and the basis, driven by implied team totals and the league's brackets, a next-week look-ahead, a hold-or-stream verdict against the current starter, ESPN's projection labelled, and how to act (a free-agent add after the run in this priority league).",
+      "expected_output": "The top D/ST options with E, p10, p90 and the basis, driven by implied team totals and the league's brackets, a next-week look-ahead, a hold-or-stream verdict against the current starter on stream-kdef's fixed line, which the tool's rec decides (changelog §R14, R14-2): on this fixture espn_analyze_waivers' rec is 'no clear move: 2 on the scramble list after the run' with no_move: true, so the line reads 'Verdict: hold <starter> — <rec's reason>', with hold_vs_stream.current_starter_delta (+3.02) given as a number beside it, ESPN's projection labelled, and how to act (a free-agent add after the run in this priority league).",
       "files": ["evals/fixtures/fx-10h"],
       "expectations": [
         "The skill called espn_get_schedule before espn_analyze_waivers (tool_order)",

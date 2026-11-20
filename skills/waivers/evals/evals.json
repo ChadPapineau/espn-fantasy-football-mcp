@@ -7,7 +7,7 @@
       "name": "WV-1",
       "toolset": "core",
       "prompt": "Who should I pick up this week and is it worth my waiver spot?",
-      "expected_output": "At k = 2 with W = 12 (the usable weeks after this week's claim; the premium about 27 points — changelog R5-1): mode_used priority; a claim, pass or marginal verdict per candidate; the premium with its band printed beside it and each candidate's surplus; the ordered claim list — or, when no candidate clears the premium (an empty claim_list, as on this fixture's pool), that said plainly — with marginal candidates apart; the scramble list; next_run_at; the drop on a line of its own — 'Drop: Tank Dell — re-add risk 28.15 % owned' (conditional_drop.re_add_risk.percent_owned) with his value; the value-basis line; a log id.",
+      "expected_output": "At k = 2 with W = 12 (the usable weeks after this week's claim; the premium about 27 points — changelog R5-1): mode_used priority; a claim, pass or marginal verdict per candidate; the premium with its band printed beside it and each candidate's surplus; the ordered claim list — or, when no candidate clears the premium (an empty claim_list, as on this fixture's pool), that said plainly — with the marginal candidates apart on waivers' fixed line, 'Marginal (your call): <list>', which reads 'Marginal (your call): none' when marginal is empty (as it is once the procedure's standings read has run on this fixture); the scramble list; next_run_at; the drop on a line of its own — 'Drop: Tank Dell — re-add risk 28.15 % owned' (conditional_drop.re_add_risk.percent_owned) with his value; the value-basis line; a log id.",
       "files": ["evals/fixtures/fx-10h"],
       "expectations": [
         "The skill called espn_list_players before espn_analyze_waivers, and espn_record_recommendation last (tool_order)",
@@ -16,7 +16,7 @@
         "The reply prints the premium and the surplus (regex: `premium[\\s\\S]*surplus|surplus[\\s\\S]*premium`)",
         "The reply prints the premium band beside the premium (llm)",
         "The reply gives the ordered claim list — or says plainly that it is empty when no candidate clears the premium (llm)",
-        "The reply gives the marginal candidates apart from the claim list (llm)",
+        "The reply gives the marginal candidates apart from the claim list — or, when there are none, says so plainly (waivers' fixed line 'Marginal (your call): none' does) (llm)",
         "The reply gives a scramble list (llm)",
         "The reply gives the next run time (llm)",
         "The reply names a drop (llm)",
@@ -74,13 +74,13 @@
       "name": "WV-5-E",
       "toolset": "core",
       "prompt": "Who should I pick up, and who do I drop for him?",
-      "expected_output": "On ir-open an OUT player sits on the bench and an IR slot is open: the reply offers the IR move as the drop alternative and warns to activate after the run. It shows the surplus with and without the IR move (s and s_with_ir_move) — on this fixture the two are equal for every candidate (9.957 for the top one), because the conditional drop, Tank Dell, is himself IR-eligible and worth 0 rest of season, so one value said to hold either way passes.",
+      "expected_output": "On ir-open an OUT player sits on the bench and an IR slot is open: the reply offers the IR move as the drop alternative and warns to activate after the run — waivers' activation line, 'Activate him only after the waiver run, never the night before a pending claim.' (plan 09 §3.8's \"activate after the run\" caution). It shows the surplus with and without the IR move (s and s_with_ir_move) — on this fixture the two are equal for every candidate (9.957 for the top one), because the conditional drop, Tank Dell, is himself IR-eligible and worth 0 rest of season, so one value said to hold either way passes.",
       "files": ["evals/fixtures/fx-10h/ir-open"],
       "expectations": [
         "The reply ties the surplus to the IR move — both values, or one said to hold either way (regex: `s_with_ir_move|with(out)? (?:(?:the|an) )?IR move|either way|same (with|without)|same (value|surplus)|IR move (?:changes|alters) no(?:ne of [^.\\n]{0,30}?)?\\s*surplus|IR move (?:doesn['’]t|does not|won['’]t|will not) change (?:any(?:one)?['’]s |the |their |its |any )?surplus`)",
         "The reply shows both surplus values, or one value said to hold with and without the IR move when they are equal (llm)",
         "The reply offers moving the OUT player to IR instead of a drop (llm)",
-        "The reply warns to activate players only after the run (regex: `after the (waiver )?run`)"
+        "The reply warns to activate players only after the run (regex: `(?<!\\bno need to\\s)(?<!n['’]t need to\\s)\\b(?:re)?activat\\w*\\b[^.\\n]{0,60}?(?<!\\bnot\\s)\\b(?:after|once)\\b[^.\\n]{0,40}?\\b(?:(?:waiver )?run|waivers? (?:process(?:es)?|clears?|runs?))\\b|(?<!\\bno need to wait until\\s)(?<!\\bnot\\s)\\b(?:after|once)\\b[^.\\n]{0,40}?\\b(?:(?:waiver )?run|waivers? (?:process(?:es)?|clears?|runs?))\\b[^.\\n]{0,40}?\\b(?:re)?activat\\w*`)"
       ]
     },
     {
@@ -134,15 +134,15 @@
       "name": "WV-8",
       "toolset": "full",
       "prompt": "Who should I pick up this week and is it worth my waiver spot?",
-      "expected_output": "WV-2's no-signal branch, on the base pool: under the full toolset the usage branch runs, and the detailed candidates carry no signal (signals[] empty), which the reply says, inventing none; no candidate's points ran 2 or more a game ahead of his expected points, so none is flagged as touchdown-inflated (WV-2's touchdown-inflated candidate is on td-inflated); value_basis is the ensemble (ESPN's projection beside it); the premium rule and its band are unchanged.",
+      "expected_output": "WV-2's no-signal branch, on the base pool: under the full toolset the usage branch runs, and the detailed candidates carry no signal (signals[] empty), which the reply says on waivers' fixed line, 'Usage signals: none for <names> (`signals[]` empty)', inventing none: §4.4's usage numbers (KC Concepcion's xfp_gap_sum +11.6 and Wan'Dale Robinson's −4.09 over 3 games) may be cited with their values, and are not signals; no candidate's points ran 2 or more a game ahead of his expected points, so none is flagged as touchdown-inflated (WV-2's touchdown-inflated candidate is on td-inflated); value_basis is the ensemble (ESPN's projection beside it); the premium rule and its band are unchanged.",
       "files": ["evals/fixtures/fx-10h"],
       "expectations": [
         "The skill called espn_get_player_usage before espn_analyze_waivers (tool_order)",
         "The skill called espn_analyze_waivers before espn_record_recommendation (tool_order)",
         "The reply cites the usage signals with numbers, or says the usage branch found none (regex: `snap|target share|xfp_gap|expected points|usage signal|signals?\\b`)",
-        "On this fixture's pool no detailed candidate carries a usage signal: the reply says the usage branch found none (signals[] empty) (llm)",
+        "The reply says that no detailed candidate's `signals[]` carries a signal — each is empty on this fixture's pool (waivers' fixed line 'Usage signals: none for <names> (`signals[]` empty)' does) (llm)",
         "On this fixture's pool no detailed candidate carries a usage signal: the reply flags no candidate as touchdown-inflated (llm)",
-        "On this fixture's pool no detailed candidate carries a usage signal: the reply invents no signal (llm)",
+        "The reply invents no signal: waivers §4.4's usage numbers, which the reply may cite by value, are not signals (on this fixture, KC Concepcion's xfp_gap_sum +11.6 and Wan'Dale Robinson's −4.09 over 3 games) (llm)",
         "The value basis line says the ensemble is used, with ESPN's projection beside it (llm)"
       ]
     }

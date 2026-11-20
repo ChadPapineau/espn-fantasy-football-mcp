@@ -12,7 +12,7 @@
       "expectations": [
         "The skill called espn_analyze_matchup before espn_analyze_schedule (tool_order)",
         "The skill called espn_analyze_schedule before espn_record_recommendation (tool_order)",
-        "The reply mentions the bye weeks (regex: `\\bw(?:ee)?ks?\\.? ?\\d+\\b[^\\n]{0,80}(?<!\\bno\\s)\\bbyes?\\b|(?<!\\bno\\s)\\bbyes?\\b(?![^\\n]{0,20}?\\b(?:are|is|look)\\s+(?:fine|ok|okay|clear)\\b)[^\\n]{0,80}\\bw(?:ee)?ks?\\.? ?\\d+\\b|\\bweek\\b[^\\n]*\\|[^\\n]*\\bbyes?\\b[^\\n]*\\n(?:[\\s|:-]+\\n)\\s*\\|\\s*\\d+\\s*\\|`)",
+        "The reply mentions the bye weeks (regex: `\\bw(?:ee)?ks?\\.? ?\\d+\\b[^\\n]{0,80}(?<!\\bno\\s)\\bbyes?\\b|(?<!\\bno\\s)\\bbyes?\\b(?![^\\n]{0,20}?\\b(?:are|is|look)\\s+(?:fine|ok|okay|clear)\\b)[^\\n]{0,80}\\bw(?:ee)?ks?\\.? ?\\d+\\b|\\bweek\\b[^\\n]*\\|[^\\n]*\\bbyes?\\b[^\\n]*\\n(?:[\\s|:-]+\\n)\\s*\\|\\s*(?:\\*\\*)?\\d+(?:\\*\\*)?\\s*\\|`)",
         "The reply gives a per-week table with each week's bye-cluster cost (llm)",
         "The reply names the worst weeks as the tool ranks them (worst_weeks: week 7 first on this fixture) (llm)",
         "The reply says what each fix recovers (delta about 25.2 and 22.7 points) (llm)",
@@ -69,13 +69,13 @@
       "name": "SP-5-E",
       "toolset": "full",
       "prompt": "Am I making the playoffs? Do I need wins or points?",
-      "expected_output": "The seeding reading is unconfirmed and last season gives no evidence: both readings are simulated (seeding_mode both passed explicitly) and shown side by side with their divergence; the reply asks which applies and offers onboard to record it; it asserts no single answer.",
+      "expected_output": "The seeding reading is unconfirmed and last season gives no evidence: both readings are simulated (seeding_mode both passed explicitly) and shown side by side with their divergence; the reply asks which applies on schedule-plan's fixed question, 'Which reading does your league use: ESPN's rule (record first) or points only? `espn-fantasy-football:onboard` records it.', and says whether wins or points matter more only under a named reading (a playoff chance the two readings share, about 93–94 %, may be given once).",
       "files": ["evals/fixtures/fx-10h/seeding-unknown"],
       "expectations": [
         "espn_analyze_matchup was called with both readings (tool_used: input_match seeding_mode both)",
         "The reply shows both readings side by side (llm)",
         "The reply asks which seeding reading applies (llm)",
-        "The reply does not assert a single answer (llm)"
+        "Whenever the reply says whether wins or points matter more, it names the seeding reading that answer holds under (llm)"
       ]
     },
     {

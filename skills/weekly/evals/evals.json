@@ -7,7 +7,7 @@
       "name": "WK-1",
       "toolset": "core",
       "prompt": "Prep me for week 5",
-      "expected_output": "Six sections each in one table — last week, this week's matchup and lineup, waivers (the claim brief with a claim, pass or marginal verdict per candidate and the premium band), K and D/ST, injuries and byes, league activity — with a p10/p90 pair and its basis, the reads' as_of in the header, a Deadline column in every table whose rows are actions — the lineup, the waiver brief, K and D/ST and the IR move under Injuries and byes — with a time on every move row (a lineup move's lock_at, a claim's next_run_at, an add now's lock time, an IR move's next run — the IR move a row of the Injuries and byes table) and '—' only on a row with no move, every move named outside a table with its time on its line, the Deadlines block as their summary, and the league settings read at most once.",
+      "expected_output": "Six sections each in one table — last week, this week's matchup and lineup, waivers (the claim brief with a claim, pass or marginal verdict per candidate and the premium band), K and D/ST, injuries and byes, league activity — with a p10/p90 pair and its basis, the reads' as_of in the header, a Deadline column headed 'Deadline (ET)' (weekly's fixed header) in every table whose rows are actions — the lineup, the waiver brief, K and D/ST and the IR move under Injuries and byes — with a time on every move row (a lineup move's lock_at, a claim's next_run_at, an add now's lock time, an IR move's next run — the IR move a row of the Injuries and byes table) and '—' only on a row with no move, every move named outside a table with its time on its line, the Deadlines block as their summary, and the league settings read at most once.",
       "files": ["evals/fixtures/fx-10h"],
       "expectations": [
         "espn_get_league was called at most once (tool_used: min 0 max 1)",
@@ -164,7 +164,7 @@
         "The reply says ESPN rejected the stored session (regex: `\\b(?:session|cookies?|login)\\b[^.\\n]{0,80}?(?<!\\bnot\\s)(?<!n['’]t\\s)(?<!\\bnever\\s)\\b(?:rejected|rejecting|refused|refusing|stopped accepting)\\b|(?<!\\bnot\\s)(?<!n['’]t\\s)(?<!\\bnever\\s)\\b(?:rejected|rejecting|refused|refusing|stopped accepting)\\b[^.\\n]{0,40}?\\b(?:session|cookies?|login)\\b`)",
         "The answer hands over to the session-check Skill (regex: `\\bsession-check\\b`)",
         "The reply never prints the public-league Session line, in any wording (regex_absent: `(?<!\\b(?:whether|if|that|confirm|tell)\\s)\\b(?:this|the) league(?: is|['’]s) public\\b(?!\\s+(?:flag|setting|status|field)\\b)|(?<!\\b(?:whether|if|that)\\s)\\breads are keyless\\b`)",
-        "The League activity section rests on the server's persisted history — empty on this seed: 0 adds, drops, claims and trades in the 7-day window (llm)",
+        "The League activity section reports the server's persisted history — 0 adds, drops, claims and trades in the 7-day window, empty on this seed (llm)",
         "The League activity section gives no transaction, standing or waiver-order figure the tools did not return (llm)",
         "The League activity section says what the session-refusal lines leave out: by-team activity, waiver-order movement and rival needs (llm)",
         "Confidence & freshness says the section is partial because ESPN rejected the stored session (llm)",

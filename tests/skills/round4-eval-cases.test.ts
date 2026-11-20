@@ -275,7 +275,8 @@ describe("round 3's eval-case rubrics state what the fixture gives (each PASS-if
     const c = caseOf("news-check", "NC-2");
     expect(c.expected_output).toMatch(/consistent/);
     expect(c.expected_output).toMatch(/the next official injury report/);
-    expect(llmLine(c, "The reply lists what would confirm")).toMatch(/what_would_confirm/);
+    // round 5's report (NC-2 05): the tool's items are what would settle it
+    expect(llmLine(c, "The reply names the tool's")).toMatch(/what_would_confirm/);
   });
   it("NC-6: no injection flag (the flag the tool reads from usage is quiet_role_change)", () => {
     const c = caseOf("news-check", "NC-6");
@@ -290,8 +291,10 @@ describe("round 3's eval-case rubrics state what the fixture gives (each PASS-if
   it("WV-8: WV-2's no-signal branch, on the base pool (WV-2 itself is on td-inflated: VS-8)", () => {
     const c = caseOf("waivers", "WV-8");
     expect(c.files).toEqual(["evals/fixtures/fx-10h"]);
+    // round 5's report (WV-8 04, R12-2): the empty signals[] said, never "found none" of the usage
     const line = c.expectations.find(
-      (x) => x.includes("usage branch found none") && x.includes("(llm)"),
+      (x) =>
+        x.includes("no detailed candidate's `signals[]` carries a signal") && x.includes("(llm)"),
     );
     expect(line).toBeDefined();
     expect(c.expectations.join("\n")).not.toMatch(/— or, when no candidate carries a signal/);

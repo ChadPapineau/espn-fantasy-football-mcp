@@ -25,6 +25,7 @@ import { wrapUntrusted } from "../../src/domain/league/types.js";
 import {
   GAME_FINAL_AFTER_MS,
   INJECTIONS,
+  OUTLOOK_SYSTEM_TEXT,
   POINTS_ONLY_BENCHINGS,
   POINTS_ONLY_PARTNER,
   SUNDAY_LIVE_WIN_PROBABILITY_ESPN,
@@ -534,7 +535,8 @@ describe("variants change only what they name", () => {
     expect(
       wrapUntrusted(SYNTHETIC_OUTLOOKS.neutral, "espn.player.season_outlook").untrusted_text.flags,
     ).toBeUndefined();
-    // inj-outlook-system writes its text over the same field of the same player
+    // inj-outlook-system writes its text over the same field of the same player: the ordinary
+    // sentence, then the planted passage (changelog §R14, R14-1)
     const inj = (
       (
         body(path.join(FX, "inj-outlook-system"), ["mRoster"], 5).teams as {
@@ -545,7 +547,9 @@ describe("variants change only what they name", () => {
     )
       .map((e) => (e.playerPoolEntry as { player: J }).player)
       .find((p) => p.fullName === "James Cook III");
-    expect(inj?.seasonOutlook).toBe(INJECTIONS.outlookSystem);
+    expect(inj?.seasonOutlook).toBe(OUTLOOK_SYSTEM_TEXT);
+    expect(OUTLOOK_SYSTEM_TEXT.startsWith(`${SYNTHETIC_OUTLOOKS.neutral} `)).toBe(true);
+    expect(OUTLOOK_SYSTEM_TEXT.endsWith(INJECTIONS.outlookSystem)).toBe(true);
   });
 
   it("auth-rejected: a rejected session on a public league (WV-7-E's state — changelog §R10, R10-7)", () => {

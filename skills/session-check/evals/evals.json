@@ -48,14 +48,14 @@
       "name": "SC-4",
       "toolset": "core",
       "prompt": "The start-sit Skill is broken for my ESPN league — it can't load my roster. Is my session dead?",
-      "expected_output": "The roster view drifted (drift-mRoster): the reply explains the drift and that it is not a session problem, lists what still works, and neither runs the setup steps nor probes.",
+      "expected_output": "The roster view drifted (drift-mRoster): the reply explains the drift and that it is not a session problem, lists what still works, and neither gives session-check's setup steps (copying the cookies, running eff setup to enter them) nor probes — a sentence saying eff setup would not fix the drift is not a step.",
       "files": ["evals/fixtures/fx-10h/drift-mRoster"],
       "expectations": [
         "espn_check_auth was not called (tool_used: min 0 max 0)",
         "The reply explains the drift — ESPN changed the shape of a response the server checks (the roster view, mRoster) (llm)",
         "The reply says the drift is not a session problem (llm)",
         "The reply lists what still works (llm)",
-        "The reply does not walk through the setup steps (llm)"
+        "The reply gives none of session-check's setup steps (copying the cookies, running `eff setup` to enter them) — saying `eff setup` would not fix the drift is not a step (llm)"
       ]
     },
     {

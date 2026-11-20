@@ -137,7 +137,7 @@
       "name": "SS-10-E",
       "toolset": "core",
       "prompt": "am I going to win this week?",
-      "expected_output": "On sunday-live ESPN's live win probability for Team 02 is 0.75 while this server's pre-game estimate (espn_analyze_lineup's p_win, about 0.50 with its interval) is more than 0.15 below it: the reply shows both, each labelled, states the difference (about 0.25) and that the two are different numbers (ESPN's live, ours pre-game), and does not present ours as a calibrated number in v1.",
+      "expected_output": "On sunday-live ESPN's live win probability for Team 02 is 0.75 while this server's pre-game estimate (espn_analyze_lineup's p_win, about 0.50 with its interval) is more than 0.15 below it: the reply shows both, each labelled, on start-sit's live line ('ESPN's win probability: <win_probability_espn>; ours: <p_win> [<interval>] — <N> points apart'), states the difference (about 0.25) and that the two are different numbers (ESPN's live, ours pre-game), and does not present ours as a calibrated number in v1.",
       "files": ["evals/fixtures/fx-10h/sunday-live"],
       "expectations": [
         "The reply shows ESPN's win probability labelled as ESPN's (regex: `ESPN(?!['’]s rule)['’]?s?\\b[^.\\n]{0,60}(?:0?\\.75\\b|75(?:\\.0)? ?%)|(?:0?\\.75\\b|75(?:\\.0)? ?%)[^.\\n]{0,40}\\bESPN(?!['’]s rule)`)",

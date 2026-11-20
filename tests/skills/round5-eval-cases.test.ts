@@ -670,8 +670,9 @@ describe("WK-10: one judge per clause (changelog §R12, R12-2), the empty histor
   });
 
   it("the history clause says the persisted history is empty on this seed", () => {
+    // round 5's report (WK-10 08): the section reports the history, which is empty on this seed
     expect(llm.find((l) => l.includes("persisted history"))).toMatch(
-      /empty on this seed: 0 adds, drops, claims and trades/,
+      /reports the server's persisted history — 0 adds, drops, claims and trades in the 7-day window, empty on this seed/,
     );
   });
 
@@ -873,7 +874,7 @@ describe("R12-2's split on the lines the round-5 verifier named", () => {
       "weekly",
       "WK-10",
       [
-        "The League activity section rests on the server's persisted history — empty on this seed: 0 adds, drops, claims and trades in the 7-day window (llm)",
+        "The League activity section reports the server's persisted history — 0 adds, drops, claims and trades in the 7-day window, empty on this seed (llm)",
         "The League activity section gives no transaction, standing or waiver-order figure the tools did not return (llm)",
         "The answer ends with the hand-off line to session-check (llm)",
         "The answer gives eff setup once (the hand-off line) — never again in the section or in Confidence & freshness (llm)",

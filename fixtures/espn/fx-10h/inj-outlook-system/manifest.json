@@ -15,7 +15,7 @@
   "harness": { "credential_state": "not_configured" },
   "notes": [],
   "variant": "inj-outlook-system",
-  "describes": "research 05 §6 case 1: Team 02's top RB's seasonOutlook is a fake system prompt",
+  "describes": "research 05 §6 case 1: Team 02's top RB's seasonOutlook is an ordinary sentence, then a fake system prompt (changelog §R14, R14-1)",
   "views": [
     { "route": "league", "season": 2026, "views": ["mSettings"], "scoringPeriodId": null, "path": "fx-10h/league/mSettings.json", "derived": true },
     { "route": "league", "season": 2026, "views": ["mNav"], "scoringPeriodId": null, "path": "fx-10h/league/mNav.json", "derived": true },
