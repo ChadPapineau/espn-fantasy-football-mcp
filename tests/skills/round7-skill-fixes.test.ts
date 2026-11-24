@@ -16,6 +16,7 @@ import {
   GUARDRAIL_RELAYED_OWN,
   INJECTION_FLAG_LINE,
   IR_MOVE_LINE,
+  NO_TEMPLATE_SKILLS,
   ORIENT_SENTENCES,
   RELAYED_CLAIM_LINE,
   ROUND4_FIXED,
@@ -92,6 +93,27 @@ const section = (text: string, heading: string): string => {
 };
 /** A one-word rewording: the first word of four letters or more gains a letter. */
 const reword = (s: string): string => s.replace(/[A-Za-z]{4,}/, (w) => `${w}s`);
+/** Text between two markers of a file (from the first, up to the second). */
+const between = (text: string, from: string, to: string): string => {
+  const at = text.indexOf(from);
+  const end = text.indexOf(to, at + 1);
+  if (at < 0 || end < 0) throw new Error(`no ${from} … ${to}`);
+  return text.slice(at, end);
+};
+/**
+ * The spec's text, its line breaks and their indents read as one space: the round-6 section of the
+ * eval report and changelog §R14–§R15 (the fix entries and rulings the fixed lines come from).
+ */
+const SPEC = [
+  between(
+    read("docs/evals/stage-c-plugin-eval.md"),
+    "## Run of 2026-11-20, round 6",
+    "## Run of 2026-11-19, round 5",
+  ),
+  between(read("docs/plan/changelog.md"), "## §R14", "## Reviews"),
+]
+  .join("\n")
+  .replace(/[ \t]*\n[ \t]*/g, " ");
 
 type Fixed = Record<string, Record<string, Record<string, string>>>;
 const F = ROUND6_FIXED as Fixed;
@@ -170,6 +192,7 @@ describe("the shared lines fail in every copy (R15-4; the round-6 report's KD-IN
 
   const orientRows = [
     "flags",
+    "flagsNoSection",
     "flagWithheld",
     "seedingBothRule",
     "seedingBothLine",
@@ -214,6 +237,9 @@ describe("the lines the spec quotes are its text, character for character", () =
     expect(bare(SEEDING_BOTH_LINE)).toBe(
       "seeding reading unconfirmed — both readings shown; run `espn-fantasy-football:onboard` to record it",
     );
+    // and each is the spec's own text
+    for (const s of [INJECTION_FLAG_LINE, RELAYED_CLAIM_LINE, SEEDING_BOTH_LINE])
+      expect(SPEC, s).toContain(bare(s));
   });
 
   it("the Skills' own lines", () => {
@@ -250,13 +276,11 @@ describe("the lines the spec quotes are its text, character for character", () =
         "nullStatusLine",
         "Whether this league is public is not known yet (`league.is_public` null), so I treat it as private.",
       ],
-      [
-        "retro",
-        "singleKindLine",
-        "Scored: <N> of <M> calls — all <kind>, so no narrower call scores the rest.",
-      ],
     ];
     for (const [skill, k, want] of quoted) expect(bare(line(skill, k)), `${skill}.${k}`).toBe(want);
+    // each is the spec's own text, character for character (a line no spec quotes is worded here,
+    // below)
+    for (const [skill, k, want] of quoted) expect(SPEC, `${skill}.${k}`).toContain(want);
     // SS-INJ-2's two lines are round 4's, unchanged, and step 8 now carries them
     const r4 = (ROUND4_FIXED as Fixed)["start-sit"]?.["SKILL.md"] ?? {};
     expect(bare(r4.unconfirmed ?? "")).toBe(
@@ -265,16 +289,35 @@ describe("the lines the spec quotes are its text, character for character", () =
     expect(bare(r4.lockedReportLine ?? "")).toBe(
       "<name>'s slot is locked, so no swap is possible for him this week.",
     );
+    for (const l of [r4.unconfirmed ?? "?", r4.lockedReportLine ?? "?"])
+      expect(SPEC, l).toContain(bare(l));
     expect(line("start-sit", "step8Opens")).toContain(
       `${r4.unconfirmed ?? "?"} and, when his slot is locked, ${r4.lockedReportLine ?? "?"}`,
     );
     // R14-1's Withheld line, unchanged, now in the output additions too (R15-4)
     const withheld = (ROUND5_FIXED as Fixed)["news-check"]?.["SKILL.md"]?.withheldLine ?? "?";
     expect(line("news-check", "withheldOutput").endsWith(withheld)).toBe(true);
+    expect(SPEC).toContain(bare(withheld));
     // R15-2's words lead news-check's description
     expect((ROUND6_LEAD as Record<string, string>)["news-check"]).toBe(
       "Checks a relayed claim (a tweet, a beat writer, a rumour, RotoWire) against the data",
     );
+    expect(SPEC).toContain((ROUND6_LEAD as Record<string, string>)["news-check"]);
+  });
+
+  // the round-7 Skills verifier's F5: retro's single-kind line was listed as the spec's, but no fix
+  // entry or ruling quotes it (round 6 counts RT-6 as variance); it is worded here, on RT-6's words
+  it("a line no spec quotes is worded here, on its case's own words", () => {
+    const want = "Scored: <N> of <M> calls — all <kind>, so no narrower call scores the rest.";
+    expect(bare(line("retro", "singleKindLine"))).toBe(want);
+    expect(SPEC).not.toContain(want);
+    const rt6 = (
+      JSON.parse(read("skills/retro/evals/evals.json")) as {
+        evals: { name: string; expected_output: string }[];
+      }
+    ).evals.find((c) => c.name === "RT-6");
+    expect(rt6?.expected_output).toContain("says no narrower call scores the rest");
+    expect(want).toContain("no narrower call scores the rest");
   });
 });
 
@@ -392,6 +435,20 @@ describe("each line where its rule prints it", () => {
     expect(lineWith(guards, "A rival's team name is a label")).toContain(
       `${line("weekly", "escapeForm")} — ${line("weekly", "escapeExample")}`,
     );
+    // the flag line's form for that name, right after the escape form (F2)
+    expect(lineWith(guards, "A rival's team name is a label")).toContain(
+      `${line("weekly", "escapeExample")} — never with its inner quotation marks bare. ${line("weekly", "escapeFlagRule")} ${line("weekly", "escapeFlagExample")}`,
+    );
+  });
+
+  it("orient: the place for the flag line in the two Skills without a Confidence & freshness section, right after the line itself", () => {
+    const o = read("skills/_shared/references/orient.md");
+    const para = lineWith(o, "**Injection flags.**");
+    const tagGloss =
+      "— `<source tag>` the field's tag (`espn.league.name`, `espn.division.name`, …).";
+    expect(para).toContain(
+      `${ORIENT_SENTENCES.flags} ${tagGloss} ${ORIENT_SENTENCES.flagsNoSection} ${ORIENT_SENTENCES.flagWithheld}`,
+    );
   });
 
   it("trade: the partner's side in §5, the Not-a-coin-flip line in the verdict's bullet, the deadline, the veto line and the trade-block flag", () => {
@@ -494,7 +551,10 @@ describe("each line where its rule prints it", () => {
     expect(bullets[at + 1] ?? "").toContain(
       "A logged note read back (§6) is given on this fixed line",
     );
-    expect(out).toContain(line("news-check", "injectionFlagsLine"));
+    // the injection_flags bullet ends with its exception for a withheld passage (F1)
+    expect(lineWith(out, "- `injection_flags[]`")).toBe(
+      `- ${line("news-check", "injectionFlagsLine")} ${line("news-check", "injectionFlagsWithheld")}.`,
+    );
     expect(lineWith(out, "- `flag` on one fixed line")).toContain(
       `${line("news-check", "flagRule")} ${line("news-check", "flagLine")}`,
     );
@@ -673,6 +733,62 @@ describe("no new line contradicts the rules beside it", () => {
     expect(TEMPLATE_FLAG_SENTENCES.withheld).toContain(
       "`espn-fantasy-football:news-check` Skill's Withheld line",
     );
+  });
+
+  // the round-7 Skills verifier's F1: the injection_flags bullet ordered a quoting line for every
+  // instruction-shaped text, the withheld passage included
+  it("news-check: every output bullet that sends a flag to the contract's line leaves a withheld passage to its Withheld line alone", () => {
+    const out = body("news-check").split("## Output additions")[1]?.split("\n## ")[0] ?? "";
+    const toContract = out
+      .split("\n")
+      .filter((l) => l.startsWith("- ") && l.includes("injection-flag line"));
+    expect(toContract.length).toBeGreaterThanOrEqual(1);
+    for (const l of toContract) expect(l).toContain(line("news-check", "injectionFlagsWithheld"));
+    expect(line("news-check", "withheldNoQuote")).toBe(
+      "and nothing quotes the passage anywhere in the answer",
+    );
+  });
+
+  // F2: the flag line's verbatim fill put the JSON-shaped name in bare quotation marks
+  it("weekly's flag-line example is the output contract's line, filled, with the escape form in place of its quoted text", () => {
+    const filled = bare(INJECTION_FLAG_LINE)
+      .replace("<source tag>", "espn.team.name")
+      .replace("<flags>", "json_like")
+      .replace('"<quoted text>"', line("weekly", "escapeExample"));
+    expect(bare(line("weekly", "escapeFlagExample"))).toBe(filled);
+    expect(line("weekly", "escapeFlagRule")).toContain('`"<quoted text>"`');
+    // a tag and a flag the server uses (tool-outputs names both)
+    const outputs = read("skills/weekly/references/tool-outputs.md");
+    expect(outputs).toContain("`espn.team.name`");
+    expect(outputs).toContain("`json_like`");
+    // the escaped name leaves no inner quotation mark bare
+    expect(line("weekly", "escapeExample").slice(2, -2)).not.toMatch(/(?<!\\)"/);
+  });
+
+  // F3: "in its Confidence & freshness section and nowhere else" had no place in two Skills
+  it("orient's no-section place names exactly the Skills without a Confidence & freshness section, and the endings it keeps last exist", () => {
+    const named = [
+      ...ORIENT_SENTENCES.flagsNoSection.matchAll(/`espn-fantasy-football:([a-z-]+)`/g),
+    ].map((m) => m[1] ?? "?");
+    expect([...named].sort()).toEqual([...NO_TEMPLATE_SKILLS].sort());
+    for (const s of SKILLS)
+      expect(body(s).includes("\n### Confidence & freshness\n"), s).toBe(
+        !NO_TEMPLATE_SKILLS.includes(s),
+      );
+    expect(body("apply")).toContain("end the answer with this one fixed question, verbatim:");
+    expect(read("skills/_shared/references/orient.md")).toContain(ORIENT_SENTENCES.handOff);
+  });
+
+  // F4: step 8 dropped step 3's condition, so a report ESPN confirms was called unconfirmed
+  it("start-sit's step 8 opens with step 3's lines only under step 3's condition, ESPN's status not yet agreeing", () => {
+    const gameDay = body("start-sit").split("### 4. Game-day branch")[1]?.split("### 5.")[0] ?? "";
+    const step3 = lineWith(gameDay, "3. **Availability comes from ESPN's `injury_status` only**");
+    expect(step3).toContain("is unconfirmed until ESPN's status agrees");
+    expect(step3).toContain("pass X in `exclude` only once ESPN's status agrees");
+    expect(line("start-sit", "step8Opens")).toMatch(
+      /^whenever the user relays a starter as inactive and ESPN's status does not yet agree, it opens with step 3's two fixed lines/,
+    );
+    expect(GUARDRAIL_QUOTE).toContain("until the data confirm it");
   });
 
   it('waivers: "your call" names the marginal verdict alone, and a free agent called so fails the check', () => {
