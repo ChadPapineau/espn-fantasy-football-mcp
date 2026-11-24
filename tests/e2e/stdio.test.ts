@@ -12,6 +12,7 @@ import { MANDATORY_SENTENCES, TOOL_FAMILY_OF } from "../../src/mcp/envelope.js";
 import { outputSchemaOf } from "../../src/mcp/define.js";
 import { REGISTRY } from "../../src/mcp/registry.js";
 import { resolveArgs } from "../../scripts/skills/tool-sequences.mjs";
+import { waiverNameProblems, type WaiverNames } from "../mcp/helpers/waiver-names.js";
 import {
   bodyOf,
   DRAIN_DEADLINE_MS,
@@ -171,6 +172,16 @@ describe(
       ]);
       expect(players.length).toBeGreaterThan(0);
       expect(players.every((p) => p.match)).toBe(true);
+      // changelog §R16, R16-6: espn_analyze_waivers names every player its lists carry, from his
+      // row or, where the budget cut it, from data.truncated_names (validated above against the
+      // output schema, which carries the field); on fx-10h the budget cuts rows the lists name
+      const waivers = results.get("espn_analyze_waivers")?.result as {
+        data: WaiverNames;
+        truncated: boolean;
+      };
+      expect(waivers.truncated).toBe(true);
+      expect(waivers.data.truncated_names.length).toBeGreaterThan(0);
+      expect(waiverNameProblems(waivers.data)).toEqual([]);
 
       // the fixture-mode spike: the nonce only in structuredContent (plan 07 G3)
       const echo = await client.callTool({ name: DEBUG_TOOL, arguments: {} });

@@ -22,6 +22,7 @@ import { outputSchemaOf } from "../../src/mcp/define.js";
 import { REGISTRY } from "../../src/mcp/registry.js";
 import { resolveArgs } from "../../scripts/skills/tool-sequences.mjs";
 import { INJECTIONS } from "../../scripts/fx10h/variants.js";
+import { waiverNameProblems, type WaiverNames } from "../mcp/helpers/waiver-names.js";
 import { envelopeViolations, identifierLeaks, stringLeaves } from "../mcp/helpers/walk.js";
 import {
   bodyOf,
@@ -379,6 +380,13 @@ describe(
       };
       expect(status.data.credential.present).toBe(false);
       expect(status.data.capabilities.write.lineup).toBe(false);
+      // changelog §R16, R16-6: espn_analyze_waivers names every player its lists carry, from his
+      // row or, where the budget cut it, from data.truncated_names (validated above against the
+      // output schema, which carries the field)
+      const waivers = by.get("waivers") as { data: WaiverNames; truncated: boolean };
+      expect(Array.isArray(waivers.data.truncated_names)).toBe(true);
+      expect(waiverNameProblems(waivers.data)).toEqual([]);
+      if (!waivers.truncated) expect(waivers.data.truncated_names).toEqual([]);
 
       // B2 over stdio, every team (tests/integration/b2-usage-coverage.test.ts holds the details):
       // ≥ 95 % of the rostered players D1 models (QB/RB/WR/TE/K) carry a trailing window; a D/ST

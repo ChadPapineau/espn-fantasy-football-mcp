@@ -3,11 +3,13 @@
 // scored under the league's S shapes the distribution), E2 espn_analyze_lineup (assignment under the
 // objective the seeding reading implies; the PF exchange rate from the seeding simulator when its
 // inputs are cached, else the cold start), E5 espn_analyze_waivers (priority premium Π(k, W) with
-// its band and `marginal`, the K/D-ST slice). The tools only assemble inputs; the engines in
-// src/domain/analytics are pure. Results are capped at 10 000 chars (C8), `meta.estimate: true`,
-// a deadline-stopped sampler returns `partial: true` and is never cached. The samplers' CPU deadline
-// is ANALYTICS_CPU_DEADLINE_MS unless the server options carry the test-only switch (cpuDeadlineMs:
-// null = off, plan 10 A8a; changelog R5). compare pairs E2 skips are named in warnings (R5).
+// its band and `marginal`, the K/D-ST slice; the names of the listed players whose candidate rows
+// the budget cut, in `truncated_names` — changelog §R16, R16-6). The tools only assemble inputs;
+// the engines in src/domain/analytics are pure. Results are capped at 10 000 chars (C8),
+// `meta.estimate: true`, a deadline-stopped sampler returns `partial: true` and is never cached.
+// The samplers' CPU deadline is ANALYTICS_CPU_DEADLINE_MS unless the server options carry the
+// test-only switch (cpuDeadlineMs: null = off, plan 10 A8a; changelog R5). compare pairs E2 skips
+// are named in warnings (R5).
 import { z } from "zod/v4";
 import {
   analyzeLineup,
@@ -75,7 +77,7 @@ import {
   waiverPhaseSchema,
   weekSchema,
 } from "../bounds.js";
-import { toDataInputs, type InputStamp } from "../envelope.js";
+import { ANALYTICS_BUDGET_CHARS, toDataInputs, type InputStamp } from "../envelope.js";
 import { EffError } from "../errors.js";
 import { beforeSideEffect, defineTool, type ToolContext } from "../define.js";
 import { remainingDeadline } from "../call.js";
@@ -1613,6 +1615,11 @@ export const waiversSchema = z.strictObject({
   claim_list: z.array(playerId).max(25),
   marginal: z.array(playerId).max(25),
   scramble_list: z.array(playerId).max(25),
+  // the listed players whose candidate row the budget cut, each named as his row named him: the
+  // same bare, path-listed espn.player.name (changelog §R16, R16-6; waiverTrims) — [] when uncut
+  truncated_names: z
+    .array(z.strictObject({ player_id: playerId, name: playerName }))
+    .max(BOUNDS.waiverCandidates.max),
   hold_vs_stream: z
     .strictObject({ streamability: z.number(), current_starter_delta: z.number() })
     .nullable(),
@@ -2376,20 +2383,48 @@ export const analyzeWaiversTool = defineTool({
 });
 
 /**
+ * The candidate step's warning (changelog §R16, R16-6): the rows kept, and where the names of the
+ * listed players whose rows were cut are — counts and fixed words only, never a name.
+ */
+export function waiverTruncationWarning(kept: number, total: number, named: number): string {
+  const head = `candidates truncated to ${String(kept)} of ${String(total)} to fit the ${String(ANALYTICS_BUDGET_CHARS)}-character budget; claim_list, marginal and scramble_list are whole, and`;
+  if (named === 0) return `${head} every player they list kept a row (truncated_names is empty)`;
+  return named === 1
+    ? `${head} truncated_names names the 1 listed player whose row was cut`
+    : `${head} truncated_names names the ${String(named)} listed players whose rows were cut`;
+}
+
+/**
  * E5's budget steps (plan 07 C8; [A-1] 10 candidates at compact): the rec's confidence inputs go
  * (`data.inputs` carries them), then candidates leave from the end one at a time (the engine orders
- * them best first) — the id lists keep naming every candidate.
+ * them best first), down to none if the answer needs it. The id lists stay whole, and every player
+ * they name keeps a name (changelog §R16, R16-6): a cut row whose id is in `claim_list`, `marginal`
+ * or `scramble_list` leaves `{ player_id, name }` — its own name, the same bare `espn.player.name`
+ * string, path-listed by the schema as the row's is — at the front of `truncated_names`, so the
+ * entries keep the candidates' order. Each step is measured whole, those entries and its warning
+ * included, so the answer stays inside the budget: an entry is far smaller than the row it replaces.
  */
 export function waiverTrims(total: number): readonly AnalyticsTrim[] {
   return [
     REC_INPUTS_TRIM,
     (d) => {
       const list = arr(d, "candidates");
-      if (list.length <= 1) return null;
-      const kept = list.slice(0, list.length - 1);
+      const cut = list.at(-1) as Obj | undefined;
+      if (cut === undefined) return null;
+      const kept = list.slice(0, -1);
+      const listed = new Set([
+        ...arr(d, "claim_list"),
+        ...arr(d, "marginal"),
+        ...arr(d, "scramble_list"),
+      ]);
+      const named = arr(d, "truncated_names") as Obj[];
+      const truncated =
+        listed.has(cut.player_id) && !named.some((t) => t.player_id === cut.player_id)
+          ? [{ player_id: cut.player_id, name: cut.name }, ...named]
+          : named;
       return {
-        data: { ...(d as Obj), candidates: kept },
-        warning: `candidates truncated to ${String(kept.length)} of ${String(total)} to fit the 10000-character budget; claim_list, marginal and scramble_list still name every candidate`,
+        data: { ...(d as Obj), candidates: kept, truncated_names: truncated },
+        warning: waiverTruncationWarning(kept.length, total, truncated.length),
         key: "candidates",
       };
     },

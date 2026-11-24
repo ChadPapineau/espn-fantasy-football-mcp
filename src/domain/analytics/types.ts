@@ -659,6 +659,16 @@ export interface WaiverCandidate {
   } | null;
 }
 
+/**
+ * One player E5's lists carry whose candidate row the character budget cut (changelog §R16, R16-6;
+ * plan 07 E5 `truncated_names[]`): his id and his name, the cut row's own `name` — the same bare
+ * `espn.player.name` string, path-listed as the row's is.
+ */
+export interface WaiverTruncatedName {
+  readonly player_id: number;
+  readonly name: BareText;
+}
+
 /** `espn_analyze_waivers` data (plan 07 E5). Marginal candidates never enter `claim_list`. */
 export interface WaiversData extends AnalyticsResult {
   readonly mode_used: WaiverMode;
@@ -678,6 +688,13 @@ export interface WaiversData extends AnalyticsResult {
   readonly claim_list: readonly number[];
   readonly marginal: readonly number[];
   readonly scramble_list: readonly number[];
+  /**
+   * Always present: one entry for each id in `claim_list`, `marginal` or `scramble_list` whose
+   * candidate row the character budget cut, in the candidates' order; empty unless it cut one. The
+   * engines return it empty — only the tool's budget step (src/mcp/tools/analytics.ts waiverTrims)
+   * cuts rows (changelog §R16, R16-6).
+   */
+  readonly truncated_names: readonly WaiverTruncatedName[];
   readonly hold_vs_stream: {
     readonly streamability: number;
     readonly current_starter_delta: number;

@@ -594,6 +594,8 @@ export async function analyzeWaiversP1(raw: WaiverP1Request): Promise<WaiverOutc
     claim_list: claims.map((c) => c.player_id),
     marginal,
     scramble_list: scramble,
+    // every candidate keeps his row here, as at P0: only the tool's budget step cuts rows (R16-6)
+    truncated_names: [],
     faab:
       topBid === null
         ? null

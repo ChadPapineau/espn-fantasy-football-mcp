@@ -1549,6 +1549,9 @@ export async function analyzeWaivers(req: WaiverRequest): Promise<WaiverEngineOu
       claim_list: claims.map((c) => c.player_id),
       marginal,
       scramble_list: scramble,
+      // every candidate has its row here: only the tool's budget step cuts rows, and names the
+      // listed ones it cuts (changelog §R16, R16-6)
+      truncated_names: [],
       hold_vs_stream: holdVsStream,
       adds_remaining: req.adds_remaining ?? null,
       faab: null,
