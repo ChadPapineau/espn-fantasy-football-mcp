@@ -27,6 +27,7 @@ import { claimTextPattern, planSuite } from "../../scripts/skills/build-plugin-e
 import {
   INJECTION_FLAG_LINE,
   IR_MOVE_LINE,
+  LISTED_NAMES_RULE,
   LOGGED_NOTE_LINE,
   ORIENT_SENTENCES,
   ROUND4_FIXED,
@@ -38,6 +39,7 @@ import {
   graderOf,
 } from "../../scripts/skills/check-skills.mjs";
 import { REGISTRY } from "../../src/mcp/registry.js";
+import { waiversSchema } from "../../src/mcp/tools/analytics.js";
 import { ROOT } from "./helpers.js";
 
 interface Case {
@@ -687,6 +689,55 @@ describe("the cross-check's finding on the new lines (R12-1, R15-7): IC-3 02 nev
     // patterns give the same verdicts (all pass)
     expect(re.test("He is IR-eligible.")).toBe(false);
     expect(re.test(`${other}\n${move}`)).toBe(true);
+  });
+});
+
+describe("R16-6 and R16-5 on the waivers cases: the scramble list named as the tool returns it, WV-8 06's instance (R14-4)", () => {
+  // the probe suite built from a clean worktree at the head that carries the tool change (c1778a6),
+  // each case's calls in its procedure order, no model: on WV-1's server (base--core) four candidate
+  // rows survive the budget (Tate, Gordon II, Charbonnet, Andrews; each a pass), claim_list and
+  // marginal are empty, and the ten scramble-list ids are all named in truncated_names; on WV-8's
+  // (base--full) two rows survive, Carnell Tate's and Ollie Gordon II's, both with signals[] empty,
+  // and espn_get_player_usage (window 3) gives Tate 0.837, 0.255, WOPR 0.653 and xfp_gap_sum +5.396,
+  // Gordon II no game in the window, KC Concepcion +11.608 and Wan'Dale Robinson −4.091
+  const TEN = [
+    "KC Concepcion",
+    "Khalil Shakir",
+    "Tre Tucker",
+    "Caleb Douglas",
+    "Wan'Dale Robinson",
+    "Dontayvion Wicks",
+    "Keon Coleman",
+    "Keenan Allen",
+    "Malachi Fields",
+    "Jacory Croskey-Merritt",
+  ];
+  it("WV-1 08 names the ten players of the scramble list, from truncated_names on this fixture", () => {
+    const c = caseOf("waivers", "WV-1");
+    expect(c.expectations).not.toContain("The reply gives a scramble list (llm)");
+    const line = `The reply gives a scramble list, naming its players (on this fixture the ten of data.truncated_names[], since the character budget cut their candidate rows: ${TEN.map((n) => `"${n}"`).join(", ")}) (llm)`;
+    expect(c.expectations[7]).toBe(line);
+    expect(graderOf(line)).toBe("llm");
+    // what the judge grades is the Skills' rule, as committed, on the tool's new field
+    expect(read("skills/waivers/SKILL.md")).toContain(LISTED_NAMES_RULE);
+    expect(read("skills/weekly/SKILL.md")).toContain(LISTED_NAMES_RULE);
+    expect(Object.keys(waiversSchema.shape)).toContain("truncated_names");
+    expect(c.expected_output).toContain(
+      "the scramble list, every player named by his quoted name — on this fixture the ten of `truncated_names`, since the character budget cut their candidate rows (changelog §R16, R16-6)",
+    );
+  });
+  it("WV-8 06 lists every detailed candidate's usage numbers, Tate's included", () => {
+    const c = caseOf("waivers", "WV-8");
+    expect(c.expectations).not.toContain(
+      "The reply invents no signal: waivers §4.4's usage numbers, which the reply may cite by value, are not signals (on this fixture, KC Concepcion's xfp_gap_sum +11.6 and Wan'Dale Robinson's −4.09 over 3 games) (llm)",
+    );
+    expect(c.expectations[5]).toBe(
+      "The reply invents no signal: waivers §4.4's usage numbers, which the reply may cite by value, are not signals (on this fixture the detailed candidates' — Carnell Tate's snap share 0.837, target share 0.255, WOPR 0.653 and xfp_gap_sum +5.396 over 3 games; Ollie Gordon II has no usage in the window — and the rest of the usage read's, such as KC Concepcion's xfp_gap_sum +11.6 and Wan'Dale Robinson's −4.09 over 3 games) (llm)",
+    );
+    expect(c.expected_output).toContain(
+      "the detailed candidates (on this fixture Carnell Tate and Ollie Gordon II: the character budget cut the other rows, changelog §R16, R16-6) carry no signal",
+    );
+    expect(c.expected_output).toContain("Carnell Tate's snap share 0.837, target share 0.255");
   });
 });
 

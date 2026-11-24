@@ -412,10 +412,12 @@ describe("R11-3 (§R14): the PASS-if lines round 5's judges failed on replies th
       "WV-8",
       `The reply says that no detailed candidate's \`signals[]\` carries a signal — each is empty on this fixture's pool (waivers' fixed line '${SPEC.signalsNone}' does) (llm)`,
     );
+    // changelog §R16, R16-5 (with R14-4): the instance lists every detailed candidate's usage numbers,
+    // Tate's included (round8-eval-cases.test.ts)
     has(
       "waivers",
       "WV-8",
-      "The reply invents no signal: waivers §4.4's usage numbers, which the reply may cite by value, are not signals (on this fixture, KC Concepcion's xfp_gap_sum +11.6 and Wan'Dale Robinson's −4.09 over 3 games) (llm)",
+      "The reply invents no signal: waivers §4.4's usage numbers, which the reply may cite by value, are not signals (on this fixture the detailed candidates' — Carnell Tate's snap share 0.837, target share 0.255, WOPR 0.653 and xfp_gap_sum +5.396 over 3 games; Ollie Gordon II has no usage in the window — and the rest of the usage read's, such as KC Concepcion's xfp_gap_sum +11.6 and Wan'Dale Robinson's −4.09 over 3 games) (llm)",
     );
     expect(c.expected_output).toContain(SPEC.signalsNone);
   });
