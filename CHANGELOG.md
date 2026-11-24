@@ -524,6 +524,88 @@ minor version (plan 04 §4.4; plan 09 K6). One version covers the server, the Sk
   with the ESPN baseline read as `espn_projection_lineup`, never the `espn_projection` store;
   WK-1 08 each action section's table in a blockquote. NC-5-E 02's tool-input grader cites the
   round-6 report's NC-5-E entry. No kept reply of rounds 5 and 6 changes verdict.
+- **The Skills after the plugin eval's round 7 (rulings R16-2 to R16-4 and R16-6's Skill side;
+  `docs/plan/changelog.md` §R16).** No Skill's description or `when_to_use` changed (each `SKILL.md`
+  frontmatter is byte-identical to `8cb4d75`'s), and the listing stays at 4 593 of 4 600 characters.
+  - weekly hands a question about this week's result alone ("am I going to win this week?") to the
+    start-sit Skill, which answers it by the locks (on game day with ESPN's live win probability),
+    and prints none of its own briefing; a briefing that also asks about the result stays weekly's
+    (R16-2).
+  - waivers hands an add, stream or drop of a K or D/ST alone to the stream-kdef Skill, before its
+    own Step 0; a request that covers other positions too stays waivers' (R16-2).
+  - news-check, given a claim about a player the data resolves through one the user named ("my RB1's
+    backup"), runs the check at once for the player the user named and asks for the other name on one
+    fixed line after its last section:
+    `Who is the <role> the claim means? This check ran for "<name>" (<player_id>); name him and I will check the claim for him too.`
+    A claim that resolves to no player ("their backup is taking over") stays news-check's and asks
+    for him: `Which player is the claim about? Name him and I will check it.` (R16-3).
+  - weekly gives a held coin-flip swap one fixed line, `Top swap: coin flip — no move (<a> ↔ <b>, Δ <x>)`,
+    never a table row (R16-4). The round-7 entry's row form, a table row opening "Coin flip — no
+    move", is withdrawn, and check-skills holds it absent: the ruling has no row exception, and the
+    two sentences read two ways (R12-1; the cross verifier's F3, applied at the gate).
+  - trade gives the seeding evidence on
+    `Seeding evidence: <evidence> — not confirmed, so both readings are shown.` in Confidence &
+    freshness only, and no other sentence weighs it (R16-4).
+  - schedule-plan runs every season simulation whose odds it prints with
+    `horizon: "through_playoffs"` (R16-4). Its Lane 1 sequence for the both-readings case passes that
+    horizon too, as step 3.4 does on every call (the Skills verifier's V1, applied at the gate).
+  - injury-cascade moves only the injured player to IR; whenever another player is IR-eligible, he
+    is named on
+    ``Also IR-eligible: <players> — the `espn-fantasy-football:roster-audit` Skill decides which, if any, to move to IR.``
+    with no pick (R16-4).
+  - waivers and weekly name every player of `claim_list`, `marginal` and `scramble_list` by his quoted
+    name with his `player_id`, from his candidate row or, when the character budget cut it, from
+    `data.truncated_names[]` — never a bare id (R16-6).
+  - news-check gives `what_would_confirm[]` on `What would confirm it: <what_would_confirm>.` (round
+    7's NC-2 entry).
+  - The cheat-sheet served as `espn-ff://docs/tool-outputs` names `truncated_names[]` in
+    `espn_analyze_waivers`' row: always present, each listed player whose candidate row the budget
+    cut, named by the row's own bare, path-listed `espn.player.name` (R16-6).
+  - Three gaps the previous gate named: news-check reads its claims reference with R14-1's
+    withholding; apply's Partial line, after a rejection mid-procedure, opens its Before you tap
+    section; a stop at Step 0 adds one line only, a flag from Step 0's reads, right above the hand-off
+    line.
+  - Each line is a check-skills pin (`ROUND7_FIXED`, `LISTED_NAMES_RULE` and two orient sentences),
+    and `ROUND7_ABSENT` holds out the two sentences withdrawn (the horizon keyed to the question's
+    wording, and the held swap's row). `tests/skills/round8-skill-fixes.test.ts` cuts and rewords
+    each line, checks its place and that it contradicts no rule beside it, checks the spec-quoted
+    lines against the round-7 section and §R16, holds schedule-plan's Lane 1 horizon, and confirms
+    on SS-10-E's fixture (`sunday-live`, read in process) that five starters are locked and ESPN's
+    live win probability is 0.75, so start-sit's game-day lines give SS-10-E 01 its 75 %.
+- **`espn_analyze_waivers` names every player its lists carry (ruling R16-6; `docs/plan/changelog.md`
+  §R16).** When the 10 000-character analytics budget cuts candidate rows, `data.truncated_names[]:
+  { player_id, name }` gives one entry for each id in `claim_list`, `marginal` or `scramble_list`
+  whose row was cut, in the candidates' order, with the name that row carried: the same ESPN player
+  name, path-listed as untrusted data (source `espn.player.name`) as `candidates[].name` is. The
+  field is always present and `[]` unless a listed player's row was cut. The whole answer stays
+  inside the budget, which now cuts further rows (down to none) to make room. The truncation warning
+  says where the names are and never carries one. Plan 07 E5 gains the field. On the fixture league
+  the waivers call keeps 4 of 25 rows (5 before) and names its ten scramble-list players.
+- **The plugin eval's cases after round 7 (§R16, R16-2 to R16-6, and the round-7 section's Next steps
+  item 3 as §R16 settles it; `docs/plan/changelog.md` §R16; `docs/evals/stage-c-plugin-eval.md`).**
+  NC-5-E's "the espn_analyze_evidence call was not refused" is graded from what the reply shows,
+  because no tool-input grader is equivalent to it (R16-3). Single calls on NC-5-E's eval server show
+  the refusal rules at source: the tool's strict input schema and its handler's reads. They refuse
+  calls that grader 02 matches (a relative `claim.time`, the player by name, a `claim.source` over 64
+  characters, an unknown key) and calls with no line break (a tab, a zero-width space, a text over
+  400 characters), and a well-formed id the fixture does not hold answers `NOT_FOUND`. So two judges
+  grade it, one condition each (R13-1): 03, the check's answer, whichever its flag (an accepted call
+  for another player or with a `claim.type` answers another flag), and 05, a reply that reports no
+  refused call. The judges R16-5 lists stay judges, each quoting its fixed line or stop (AP-2 09,
+  SS-12 03, TR-INJ 04, WV-INJ 03, RT-INJ 07, WK-10 08, 11 and 12, WV-1 05, SS-13 06, RA-CORE 04;
+  ON-INJ 03, NC-INJ 02 and WK-9 09 already did). RT-INJ 05 and WV-8 06 are their fixtures' instances
+  (R14-4). WK-1 09 and SS-10-E 01 stand as round 7 shipped them: 09 takes R16-4's held-swap line in
+  every form (and a row opening "Coin flip — no move", which a run may print against weekly's rule),
+  and still catches a move row with a blank or dashed Deadline cell; 01 still needs start-sit's live
+  line. WK-1 10, TR-5-E 08, NC-2 05 and IC-2 04 name the new lines (the held swap, the seeding
+  evidence, the confirm line, the other-IR line). TR-5-E gains two judges on the seeding evidence:
+  10, the line in Confidence & freshness, and 11, no other sentence weighing it; its example gives the
+  evidence on that line alone. IC-3 02 no longer passes on the other-IR line, which moves no one.
+  WV-1 13 names the scramble list's ten players as the tool now returns them, in `truncated_names`
+  (R16-6), and 08 stays round 7's line. The examples follow the new Skill text. The R13-1 sweep's
+  heuristic learns two joins (", naming its", ": no other"). The suite holds 326 judges and bases
+  (round 7: 322) and 485 free graders, as round 7 did: no free grader is added, and no trigger case
+  and no Skill listing changes (R16-2, R16-3).
 - **Dependencies, reviewed under plan 04 §2 (Dependabot PRs 1–5, 2026-11-04 to 2026-11-05; ruling
   R10-35).** The MCP SDK 2.3.1 → 2.4.0 (`@modelcontextprotocol/server` and `core`, and the dev
   `client`; `espn_get_status` reports `sdk_version` 2.4.0): 2.4.0 adds the Skills extension on new
