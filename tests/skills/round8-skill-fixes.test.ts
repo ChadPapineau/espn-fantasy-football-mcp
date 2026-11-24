@@ -7,8 +7,9 @@
 // character, each line sits where its rule prints it and contradicts no rule beside it, the two
 // hand-offs reach the other Skill's own lines (start-sit's game-day lines on SS-10-E's fixture,
 // stream-kdef's verdict and relayed-claim lines), and the free graders that read those places accept
-// the new forms. Each mutation runs on one temporary copy of the bundle and is undone after it; no
-// network (the fixture is read in process, through the real provider in fixture mode).
+// the new forms; the cheat-sheet's waivers row names R16-6's field as the tool's schema carries it.
+// Each mutation runs on one temporary copy of the bundle and is undone after it; no network (the
+// fixture is read in process, through the real provider in fixture mode).
 import { readFileSync } from "node:fs";
 import path from "node:path";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
@@ -27,8 +28,11 @@ import {
   ROUND7_FIXED,
   SEEDING_BOTH_LINE,
   SKILLS_LISTING_MAX,
+  TOOL_OUTPUT_PHRASES,
   checkSkills,
+  toolOutputFieldProblems,
 } from "../../scripts/skills/check-skills.mjs";
+import { toolsFor } from "../../src/mcp/registry.js";
 import { FX_WEEK, MY_TEAM, fxLeague } from "../domain/analytics/fx10h-world.js";
 import { ROOT, SKILLS, emptyDenylist, tempRepo, type TempRepo } from "./helpers.js";
 
@@ -551,6 +555,34 @@ describe("no new line contradicts the rules beside it", () => {
     expect(line("apply", "partialPlace")).toContain(
       "the hand-off line stays the answer's last line",
     );
+  });
+});
+
+describe("R16-6's field in the cheat-sheet (espn-ff://docs/tool-outputs)", () => {
+  const phrase = TOOL_OUTPUT_PHRASES.espn_analyze_waivers[0] ?? "?";
+  const sheet = read("skills/_shared/references/tool-outputs.md");
+  const row = sheet.split("\n").find((l) => l.startsWith("| `espn_analyze_waivers` |")) ?? "";
+
+  it("the waivers row names truncated_names[] beside the three lists, as the tool's schema and path list carry it", () => {
+    expect(row).toContain(`\`scramble_list[]\`, ${phrase}`);
+    const tool = toolsFor("full").find((t) => t.name === "espn_analyze_waivers");
+    expect(tool?.bareFields).toContainEqual({
+      path: "data.truncated_names[].name",
+      source: "espn.player.name",
+    });
+    expect(phrase).toContain("bare, path-listed `espn.player.name`");
+    // the Skills' rule reads the same field, and every Skill ships the same sheet
+    expect(LISTED_NAMES_RULE).toContain("`data.truncated_names[]`");
+    for (const skill of SKILLS)
+      expect(read(`skills/${skill}/references/tool-outputs.md`), skill).toBe(sheet);
+  });
+
+  it("the row losing the field fails the check in the shared file", () => {
+    expect(toolOutputFieldProblems(sheet)).toEqual([]);
+    for (const changed of ["", reword(phrase)])
+      expect(withSharedEdit("tool-outputs.md", every(phrase), changed)).toContain(
+        `skills/_shared/references/tool-outputs.md: the \`espn_analyze_waivers\` row does not carry "${phrase}"`,
+      );
   });
 });
 

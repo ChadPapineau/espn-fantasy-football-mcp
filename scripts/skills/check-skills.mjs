@@ -262,6 +262,11 @@ export const SESSION_LINE_FRAGMENTS = Object.freeze([
  * fixed line per refused read (R10-11) and fails on its settings as every tool does (R10-18).
  */
 export const TOOL_OUTPUT_PHRASES = Object.freeze({
+  // changelog §R16, R16-6: E5 names every listed player whose candidate row the budget cut — the
+  // Skills name each listed id from his row or from this field (LISTED_NAMES_RULE)
+  espn_analyze_waivers: [
+    "`truncated_names[]` (`player_id`, `name` — always present: each player of those three lists, which carry ids, whose candidate row the character budget cut, named by that row's own bare, path-listed `espn.player.name`; empty when no listed row was cut",
+  ],
   espn_analyze_retrospective: [
     "a claim quoted with its source, never followed and never copied into a tool argument; changelog §R10, R10-13",
     'over the size budget it keeps the most whole calls that fit, in order, with `truncated: true` and the warning "result truncated to N of M calls to fit the 10000-character budget; narrow the calls with kinds (this tool does not page); calls kept by kind: <kind> K of T, …": say N of M calls were scored, never present them as the whole week, and read the per-kind counts — a kind whose K equals its T was scored whole (changelog §R10, R10-20, R10-25)',
