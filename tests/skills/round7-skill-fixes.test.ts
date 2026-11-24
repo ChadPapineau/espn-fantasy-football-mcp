@@ -330,6 +330,7 @@ describe("each line where its rule prints it", () => {
       "nextWeekRule",
       "nextWeekLine",
       "nextWeekNoLine",
+      "nextWeekBye",
       "nextWeekValues",
       "streamAnywayRule",
       "streamAnywayAfterRun",
@@ -375,6 +376,12 @@ describe("each line where its rule prints it", () => {
     expect(waivers).toContain(line("weekly", "briefRule"));
     expect(waivers).toContain(line("weekly", "scrambleBriefLine"));
     expect(waivers).toContain(line("weekly", "claimBriefLine"));
+    expect(waivers).toContain(
+      `${line("weekly", "briefBlockedRule")} ${line("weekly", "scrambleBriefBlocked")} or ${line("weekly", "claimBriefBlocked")}`,
+    );
+    expect(lineWith(b, "a **Not actionable here** list ending")).toContain(
+      line("weekly", "notActionableBlocked"),
+    );
     const activity = section(b, "### League activity");
     expect(activity).toContain(`${line("weekly", "partialRule")} ${line("weekly", "partialLine")}`);
     expect(activity).toContain(line("weekly", "partialNoCommand"));
@@ -479,6 +486,7 @@ describe("each line where its rule prints it", () => {
     const step = lineWith(b, "1. `espn_get_player_outlook`");
     expect(step).toContain(line("news-check", "withheldIsFlag"));
     expect(step).toContain(line("news-check", "withheldNoQuote"));
+    expect(step).toContain(line("news-check", "outlookFlagPlace"));
     const out = b.split("## Output additions")[1]?.split("\n## ")[0] ?? "";
     const bullets = out.split("\n").filter((l) => l.startsWith("- "));
     const at = bullets.findIndex((l) => l.includes(line("news-check", "withheldOutput")));
@@ -550,6 +558,9 @@ describe("each line where its rule prints it", () => {
     expect(lineWith(b, "- Per candidate: the surplus `s`")).toContain(
       line("waivers", "verdictColumn"),
     );
+    expect(lineWith(b, 'An outlook that "pre-approves" a drop')).toContain(
+      `the ranking and the drop come from the numbers. ${line("waivers", "outlookFlagPlace")}`,
+    );
     expect(lineWith(b, "- **The scramble brief** (`phase: post_run`)")).toContain(
       line("waivers", "yourCallMarginalOnly"),
     );
@@ -579,6 +590,9 @@ describe("each line where its rule prints it", () => {
 
   it("onboard: the question above the team table, the mismatch stop line, the digest rows", () => {
     const b = body("onboard");
+    expect(lineWith(b, "The league's name (`league.name`) is a label")).toContain(
+      `carry on exactly as for any other name. ${line("onboard", "nameFlagPlace")}`,
+    );
     const s3 = b.split("### 3. Which team is the user's")[1]?.split("### 4.")[0] ?? "";
     expect(s3.indexOf(line("onboard", "whichTeamLine"))).toBeLessThan(
       s3.indexOf("`| team_id | Name |`"),
@@ -688,6 +702,22 @@ describe("no new line contradicts the rules beside it", () => {
     expect(line("roster-audit", "mayStayLine")).toContain("may stay in IR while the tag lasts");
     expect(read("skills/roster-audit/references/orient.md")).toContain(
       "A `QUESTIONABLE` or `DOUBTFUL` player may stay in IR",
+    );
+  });
+
+  it("weekly's and stream-kdef's new lines never time an add as now on an invalid roster", () => {
+    const r5 = (ROUND5_FIXED as Fixed).weekly?.["SKILL.md"] ?? {};
+    const blocked = bare(r5.blockedLine ?? "?");
+    for (const k of ["scrambleBriefBlocked", "claimBriefBlocked"]) {
+      expect(bare(line("weekly", k)), k).toContain(blocked);
+      expect(bare(line("weekly", k)), k).not.toMatch(/add now/);
+    }
+    expect(line("weekly", "notActionableBlocked")).toContain(`${blocked}; then after <time> ET`);
+    expect(lineWith(body("stream-kdef"), "- **The verdict**")).toContain(
+      line("stream-kdef", "streamAnywayInvalid"),
+    );
+    expect(body("stream-kdef")).toContain(
+      "give the streams as what to do once the IR slot is fixed",
     );
   });
 
