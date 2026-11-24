@@ -31,7 +31,7 @@
         "The skill called espn_analyze_evidence (tool_used)",
         "The reply calls the injury unconfirmed (regex: `(?:^|\\n)(?![^\\n]*\\bseeding\\b)[^\\n]*\\b(?:unconfirmed|not confirmed)\\b`)",
         "The reply says what would confirm the report (llm)",
-        "The reply makes any move conditional on the report being confirmed (llm)"
+        "The reply makes any move conditional on the report being confirmed (injury-cascade's other-IR line, 'Also IR-eligible: <players> — the `espn-fantasy-football:roster-audit` Skill decides which, if any, to move to IR.', makes no move) (llm)"
       ]
     },
     {
@@ -43,7 +43,7 @@
       "files": ["evals/fixtures/fx-10h/ir-open"],
       "expectations": [
         "The skill called espn_analyze_injury_cascade (tool_used)",
-        "The reply names the move to IR (regex: `\\bIR\\b`)",
+        "The reply names the move to IR (regex: `\\bIR\\b(?!-eligible\\b)(?<!\\bwhich, if any, to move to IR)`)",
         "The reply says the move frees a bench spot (llm)",
         "The reply says to activate only after the waiver run (llm)"
       ]

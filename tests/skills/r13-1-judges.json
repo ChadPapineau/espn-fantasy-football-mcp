@@ -76,7 +76,7 @@
       "before": "The reply says what would confirm the report and makes any move conditional on it (llm)",
       "after": [
         "The reply says what would confirm the report (llm)",
-        "The reply makes any move conditional on the report being confirmed (llm)"
+        "The reply makes any move conditional on the report being confirmed (injury-cascade's other-IR line, 'Also IR-eligible: <players> — the `espn-fantasy-football:roster-audit` Skill decides which, if any, to move to IR.', makes no move) (llm)"
       ]
     },
     {

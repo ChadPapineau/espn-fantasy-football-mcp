@@ -26,6 +26,7 @@ import { parseFrontmatter } from "../../scripts/skills/_lib.mjs";
 import { claimTextPattern, planSuite } from "../../scripts/skills/build-plugin-evals.mjs";
 import {
   INJECTION_FLAG_LINE,
+  IR_MOVE_LINE,
   LOGGED_NOTE_LINE,
   ORIENT_SENTENCES,
   ROUND4_FIXED,
@@ -643,6 +644,49 @@ describe("R16-4: the judges that read the new lines name them (R11-3: made exact
     expect(c.expectations).not.toContain(
       "The reply names the tool's `what_would_confirm` items as what would settle it (on this fixture, the next official injury report) (llm)",
     );
+  });
+});
+
+describe("the cross-check's finding on the new lines (R12-1, R15-7): IC-3 02 never passes on R16-4's other-IR line, which moves no one", () => {
+  const e = caseOf("injury-cascade", "IC-3").expectations[1] ?? "";
+  const re = new RegExp(/\(regex:\s*`([^`]+)`\)\s*$/.exec(e)?.[1] ?? "^$", "i");
+  /** round 7's pattern, as shipped */
+  const shipped = /\bIR\b/i;
+  // on IC-3's server (ir-open) the injured player, Rachaad White (OUT, on the bench), moves to the
+  // open IR slot, and Tank Dell, the other player of ir.eligible_now, gets R16-4's line
+  const move = fill(unwrap(IR_MOVE_LINE) ?? "", "Rachaad White", 4697815, "OUT", "BE");
+  const other = fill(R16.otherIr, '"Tank Dell" (4366031, INJURY_RESERVE)');
+  it("the move line, in every form, and plan 09's term pass", () => {
+    expect(move).toBe(
+      'Move "Rachaad White" (4697815, OUT) from BE to IR — it frees one bench spot.',
+    );
+    for (const f of forms(move)) expect(re.test(f), f).toBe(true);
+    for (const t of [
+      "the IR move",
+      "Move him to IR now.",
+      "Put him in your open IR slot.",
+      "into IR",
+    ])
+      expect(re.test(t), t).toBe(true);
+  });
+  it("IC-2 04: on IC-2's fixture the other-IR line prints, and the judge on moves names it as none (R12-2)", () => {
+    const c = caseOf("injury-cascade", "IC-2");
+    expect(c.expectations).not.toContain(
+      "The reply makes any move conditional on the report being confirmed (llm)",
+    );
+    expect(c.expectations).toContain(
+      `The reply makes any move conditional on the report being confirmed (injury-cascade's other-IR line, '${R16.otherIr}', makes no move) (llm)`,
+    );
+  });
+  it("the other-IR line, in every form, does not — round 7's pattern took it (failing first)", () => {
+    for (const f of forms(other)) {
+      expect(re.test(f), f).toBe(false);
+      expect(shipped.test(f), `round 7: ${f}`).toBe(true);
+    }
+    // an eligibility is no move either; on the 12 kept IC-3 replies of rounds 5 to 7 the two
+    // patterns give the same verdicts (all pass)
+    expect(re.test("He is IR-eligible.")).toBe(false);
+    expect(re.test(`${other}\n${move}`)).toBe(true);
   });
 });
 
