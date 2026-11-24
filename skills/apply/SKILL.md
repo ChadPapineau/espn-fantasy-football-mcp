@@ -60,7 +60,7 @@ Do not call `espn_record_recommendation` here: nothing was executed, and the agr
 The numbered steps of §4, each ending with its deadline in Eastern Time ("— before <time> ET"): a step without a deadline is incomplete. The steps say what the user does on ESPN, never what was done: never "I applied", "applied", "done" or "the change was made" — the user makes every change, and this version never changes the team.
 
 ### Before you tap
-What the check in §3 found: locks that already passed, IR validity, slot counts after the change, a drop prompt to expect, acquisitions left.
+What the check in §3 found: locks that already passed, IR validity, slot counts after the change, a drop prompt to expect, acquisitions left. On a rejection mid-procedure (orient's **A rejection mid-procedure**), orient's Partial line, which opens Confidence & freshness elsewhere, opens this section instead — this Skill has no Confidence & freshness section — and the hand-off line stays the answer's last line.
 
 ### Deadline
 The earliest `lock_at` that matters, or `next_execution` for a claim, in Eastern Time.

@@ -38,7 +38,7 @@ Run Step 0 of [orient](references/orient.md). If `server.toolset` is `core`, sto
 1. `espn_project_players` for the user's team with `horizon: "ros"`.
 2. `espn_analyze_replacement` with `horizon: "ros"` — what a lineup hole costs.
 3. `espn_get_standings` — the race as it stands; ESPN's `playoff_pct_espn` per team, labelled.
-4. `espn_analyze_matchup` with `mode: "season"`, `seeding_mode` as step 1 decided, and `horizon: "through_playoffs"` when the question is about seeds, byes or the title. Step 3.4 runs on every question, a bye question included, and before step 4 — the playoff odds the answer gives come from it.
+4. `espn_analyze_matchup` with `mode: "season"`, `seeding_mode` as step 1 decided, and `horizon: "through_playoffs"` on every call: every season simulation whose odds the answer prints runs with that one horizon, whatever the question names (the playoffs, seeds, byes or the title). Step 3.4 runs on every question, a bye question included, and before step 4 — the playoff odds the answer gives come from it.
 
 ### 4. The schedule stress test
 `espn_analyze_schedule` with `include_playoffs: true` (and `weeks` only when the user named some).
