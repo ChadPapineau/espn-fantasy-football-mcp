@@ -1524,3 +1524,218 @@ What the eval-case stream of the §R14 fix round built (`3c0e431`, refixed in `2
   verifier's proposal: anchor it on a free-agent add after the run.
 - Both are in `evals.json`, which the Skills stream may not touch; whether they go to the eval-case
   stream's next refix is the orchestrator's call.
+
+## Round 7's fix round (changelog §R15; 2026-11-23 to 2026-11-24)
+
+The fix round that built §R15 and round 6's Next steps items 2 and 3 before round 7: the Skills
+stream (`02fcb3c`, `b909803`), the eval-case stream (`2706f01`), the refixes after their verifiers
+(`62422e9`, `53c4311`) and the gate on `62422e9`. What it built and what stays open, by stream.
+
+### §R15 built
+
+- **§R15's rulings R15-1 to R15-5 and R15-7, built.** R15-1: trade's Not-a-coin-flip line, printed
+  only when the verdict is not `fair` (`02fcb3c`), and TR-1 11 restated, its "not fair" clause a
+  judge of its own (`2706f01`). R15-2: news-check's description and `when_to_use` name no official
+  report (`02fcb3c`); its trigger cases are unchanged. R15-3: RT-1 05, WV-2 08, RA-1 04 and WV-1 12
+  are free graders on their fixed lines (`2706f01`; RT-1 05 refixed in `53c4311`); the gate's
+  cross-check and the judges that stay judges are below. R15-4: the shared flag line, in Confidence
+  & freshness only (`02fcb3c`), said beside each untrusted-text guard (`02fcb3c`, `b909803`), with
+  a withheld passage flagged by its Withheld line alone and the line's place in apply and
+  session-check (`62422e9`); every flag judge names it (`2706f01`). R15-5: trade's §5 (`02fcb3c`).
+  R15-7: the audit of every free grader, a pin for each `regex` it found unbacked (`02fcb3c`,
+  `b909803`, `62422e9`), and each `regex` extended and each `regex_absent` narrowed to its line
+  (`2706f01`, `53c4311`). R15-6 is round 7's scope, not yet run.
+
+### Found in round 7's Skill fixes (2026-11-23)
+
+- weekly's **Value basis** line is still quoted prose ("ESPN's rest-of-season projection,
+  labelled"), not waivers' fixed "Value basis: …" line. No weekly free grader reads it (R15-7's
+  audit), so it stays until one does.
+- onboard's settings digest has fixed Waivers rows only for a move-to-last league and a FAAB league.
+  A league whose `rules.waiver.order_reset` is true (priority reset each week) has none, and
+  `waiver.order_reset` is an unverified field.
+- stream-kdef's stream-anyway line is fixed for `fa_add_after_run` and `fa_add_now` only. A hold
+  whose top option is a `claim` has no fixed how-to-act line; no case reaches that.
+- weekly's Partial line keeps the round-6 section's canonical "<c> claims" (won and lost together).
+  R15-7's audit had proposed won and lost apart, plus a nothing-persisted variant ("not a quiet
+  week").
+- orient's both-readings seeding line sits in a paragraph after the routing table, pointed to from
+  the end of the `seeding.confirmed: false` row. The row is unchanged, so `build-plugin-evals.mjs`'
+  `mandatedLines` still reads only the ESPN's-rule line. A `seeding_mode: "both"` case (TR-5-E,
+  SP-5-E) prints the both line in its place, and the opening-line check does not mandate it yet.
+- round7-skill-fixes.test.ts runs about 270 check-skills passes on one temporary copy, each undone
+  after it. If the CI test job nears its 30-minute limit, batching the mutations per Skill is the
+  place to save time.
+- A JSON-shaped rival name inside the injection-flag line: weekly's escape form (backslash-escaped,
+  in backticks) and the flag line's "<quoted text>" are both fixed. Neither said which wins inside
+  the flag line until the Skills verifier's F2 (`62422e9`): there the escape form replaces
+  `"<quoted text>"`, quotation marks and all, with a filled example.
+
+### Found in round 7's eval-case fixes (2026-11-24)
+
+What the eval-case stream of the §R15 fix round built (`2706f01`);
+`tests/skills/round7-eval-cases.test.ts` holds it, with the R13-1 inventory and the round-4 to
+round-6 case tests updated.
+
+- **Built:** every item of round 6's Next steps item 3, R15-1's TR-1 11 (and its "not fair" judge),
+  R15-3's four free graders and NC-5-E's tool-input grader, R15-4's flag judges, and every audit
+  entry classed needs_regex_extension, spec_mismatch or false_positive (none was tool_optional).
+  R15-2: news-check's trigger cases unchanged. The fixed lines are tied to the committed
+  `ROUND6_FIXED`, `INJECTION_FLAG_LINE`, `RELAYED_CLAIM_LINE` and
+  `ORIENT_SENTENCES.seedingBothLine` (`02fcb3c`).
+- **Kept replies that change verdict (rounds 5 and 6):** the four SC-8/SC-9/SC-11 "public/private"
+  sentences (trip → clean) and WK-11's label row under WK-1 09 (trip → clean), as intended; WK-1 04
+  now fails four Opus replies that paraphrase the basis, and KD-4-E 01 round 6 Opus Lane 2 run 2,
+  which passed only on the hold verdict line — both Skill-text targets under R12-1, met once the
+  Basis and stream-anyway lines print.
+- **TR-1 03 took the audit's minimal fix** (a blockquoted Δ table), not its anchored one: the
+  anchored form refuses rounds 4 and 5's accepted prose terms ("p10 / p50 / p90: −3.1 / 1.2 / 5.8",
+  "Your side: p10 …"). A player's projection interval still passes 03 — an old looseness that cannot
+  fail a compliant reply.
+- **WV-3-E 02 keeps round 5's "bid 12 of your 100"** (a bid without its $); the budget sentence no
+  longer passes. WV-2 03's optional narrowing was not made.
+- **WK-8 09 took WK-9 09's R12-2 line** (the same orient stop); the report named WK-9 only.
+- **The build:** "input_match claim.text on the quoted claim" (tool_used on a claim object's text,
+  word for word, checked against the case's prompt with its line breaks joined); the seeding line's
+  renderings carry orient's gloss, and planSuite refuses an orient.md without it.
+- **Open:** NC-5-E 03 ("the call was not refused") still asks a judge about a tool result it cannot
+  see.
+- **Candidates, not built:** judges whose condition is now one fixed line could name it, as R14-5's
+  did (NC-4-E 05 "No move until …", RT-6 04 the single-kind line, WK-10 08 and 10 the Partial line,
+  WK-INJ 03 the escape form, SP-1 04–07, RA-1 07); R15-3 keeps them judges until the bar is met.
+
+### Found in the round-7 eval-case refix (2026-11-24)
+
+What the eval-case stream built on its verifiers' findings on `2706f01` (`53c4311`);
+`tests/skills/round7-eval-cases.test.ts` holds it.
+
+- **Built:** F1 (WK-10 03, with the heading and bold forms the verifier named optional), F2
+  (WV-3-E 02, WV-1 03), F3 and XC-1 (KD-1 03, KD-2 02), F4 (RT-1 05), F5 (SP-3 02) and F6 (the
+  NC-5-E citation). The finding list reached the stream cut inside XC-1; KD-1 05 (the stream-anyway
+  lines), AP-2 04 (`\bBE\b` under flags i) and WK-1 08 (blockquoted Deadline tables) were taken
+  from the cross-check verifier's logs, confirmed at source and built.
+- **Kept replies that change verdict (rounds 5 and 6):** none.
+- **Older looseness left as it was:** WK-10 04 passes a reply that lists "League activity (not
+  read)" within 200 characters of orient's Confidence & freshness "Partial:" line (round 6 too;
+  WK-10 03 now fails that reply). SP-3 02 still passes on schedule-plan's marginal-values sentence
+  ("a high-variance lineup costs 0.03"), which SP-3 replies print; the exact form, a value in the
+  fixes table's Cost cell, is a candidate once round 7 shows the pinned fixes header printed.
+  KD-1 03 and KD-2 02 still take paraphrases that put the words apart ("Week 6 implied totals:
+  lines aren't posted"); only the pinned line and "implied totals are null/as null" are refused.
+  WK-1 09 (regex_absent) does not read a blockquoted table. WK-10 03 still takes a League activity
+  heading whose next line reads only "Not read: …" (round 6 too); WK-10 04 and the section's judges
+  grade that content.
+- **A narrowing to watch:** WK-10 03 now refuses "no" or "none" right after the League activity
+  label in the heading and bold forms too, as round 6 did for the plain, colon and table-cell forms;
+  a heading that inlines "— no transactions" would fail, which weekly's verbatim heading never
+  prints. AP-2 04's "to BE." also takes the rare English "…to be." at a sentence end.
+
+### The gate's cross-check (2026-11-24, on `62422e9`)
+
+R15-3 as amended and R15-7, on the suite built in scratch from the head with
+`--seed --seed-datasets`.
+
+- **planSuite:** 0 errors over 310 cases and 46 eval plugins; none is held out or not testable.
+- **Every regex on a reply's prose is backed by its line.** Of the 118, 109 accept a pinned fixed
+  line of their Skill, of orient or of the shared references, filled in from its fixture, in plain,
+  bold, quoted, list-item and table-cell forms and, for a line that opens with a label, the label's
+  bold and cell forms. Eight read several lines together (RT-1 05, TR-5-E 02 and 03, WV-1 04,
+  WK-1 03, 04 and 08, WK-11 04) and accept them put together in every form. RA-3-E 03 refuses one
+  form only, a table row whose first cell is another word, which by its anchor is no opening line.
+  WK-1 05 also takes its header's label forms (`**Reads as of** …`), and WK-11 05 the hand-off line
+  last.
+- **No `regex_absent` trips on a line its case's branch prints.** Every check-skills pin (499),
+  filled in, in every form, against every `regex_absent` of its Skill. The trips are each case's
+  forbidden meaning: orient's public-league Session lines under the seven public-league guards
+  (SC-11 05, ON-6 05, SS-13 05, WK-8 06, WK-9 06, WK-10 07, WK-11 06), whose leagues are not known
+  to be public; the output contract's and weekly's headings under a Step-0 stop (ON-6 04, SS-13 04,
+  WK-8 05, WK-9 05); and waivers' premium label under WV-3-E 05, on the FAAB fixture.
+  session-check's own lines, which a stopped answer carries after the hand-off, trip none of the
+  seven guards.
+- **No pinned line of another meaning meets a grader.** The cross-check verifier's probes (KD-1 03,
+  KD-2 02, KD-1 05, SP-3 02, AP-2 04) all refuse the other line now; its probes of WK-1 08's
+  blockquoted tables, WK-1 09's rows and NC-5-E 02's `claim.text` hold, and its `regex_absent` sweep
+  over the kept replies of rounds 5 and 6 is unchanged.
+- **Kept replies:** replayed on the 928 kept replies of rounds 5 and 6, the head's free graders give
+  the verdicts `2706f01`'s cases gave; `53c4311` and `62422e9` change none.
+- **No mismatch** was left between the two streams, and no open question is one, so the gate
+  changed no case and no Skill line. The streams' open questions went to the orchestrator.
+- **Round 6's verifier items:** V-SK-5 is closed (`2706f01`: KD-4-E 01 refuses the hold verdict
+  line). V-SK-3 is unchanged: RA-2 03 and WV-5-E 04 still pass "Don't activate him after the run."
+
+### R15-3: the judges on fixed lines that stay judges until the bar is met
+
+R15-3 as amended makes a free grader only of a judge that failed a reply printing its line verbatim:
+RT-1 05, WV-2 08, RA-1 04 and WV-1 12 (built). Each judge below grades one pinned fixed line, or
+one fixed form repeated, and stays a judge until plan 09 §5.2's bar is met: these are the wider
+conversion. The list is the R15-7 audit's four tables, re-read on `62422e9`, with the judges whose
+line this fix round pinned: "round 7" marks such a pin, held in `ROUND6_FIXED` or the shared
+constants.
+
+| Skill | judges | the fixed line |
+|---|---|---|
+| apply | AP-4 05, AP-7 03 (asks what was agreed) | `ROUND4_FIXED.apply.noAgreement`: "Which change did you agree to? Name it, or ask the Skill that recommends it first." |
+| apply | AP-2 08 (each step's deadline) | `ROUND4_FIXED.apply.stepDeadline`: every step ends `— before <time> ET` |
+| stream-kdef | KD-2 03 (a hold-or-stream verdict) | `ROUND5_FIXED.stream-kdef.verdictHold` / `verdictStream`: `Verdict: hold <starter> — <rec's reason>` / `Verdict: stream <name> — <how to act>` |
+| stream-kdef | KD-INJ 02, 03 (the tip quoted; called unconfirmed) | `RELAYED_CLAIM_LINE` (round 7) |
+| weekly | WK-1 07 (the premium band) | `ROUND4_FIXED.weekly.verdictWords`: "Premium Π(k, W): N, band [low–high]" |
+| weekly | WK-5-E 04 (the season-cutoff reason) | `ROUND3_FIXED.weekly.pointsOnlyMode`, protect: "**protect** — ahead of the season cutoff, so the higher floor (p10) is worth more" |
+| weekly | WK-7-E 05 (every add shown blocked) | `ROUND5_FIXED.weekly.blockedLine`: `blocked until <name> leaves IR`, with round 7's blocked brief, Deadlines and Not-actionable forms |
+| weekly | WK-8 07, WK-9 07 (ESPN rejected the session) | `ORIENT_SENTENCES.stopSessionRejected` |
+| weekly | WK-8 08, WK-9 08, WK-10 13, WK-11 13 (the hand-off) | `ORIENT_SENTENCES.handOff` |
+| weekly | WK-10 11, WK-11 11 (Confidence & freshness says partial) | `ORIENT_SENTENCES.partialFirstLine` |
+| weekly | WK-10 08, 10 (the persisted history; what it leaves out) | `partialLine` (round 7) |
+| weekly | WK-INJ 03 (rendered escaped), 05 (flagged in one line) | `escapeForm` and `escapeFlagExample` (round 7); `INJECTION_FLAG_LINE` |
+| start-sit | SS-9 03, SS-10-E 02–04, SS-11-E 04–06 (the two win probabilities) | `ROUND5_FIXED.start-sit.liveWinLine`: `ESPN's win probability: <win_probability_espn>; ours: <p_win> [<interval>] — <N> points apart` |
+| start-sit | SS-6-E 05–07 (the cross-check's starters, numbers and labels) | `ROUND4_FIXED.start-sit.crossCheckHeader` (`\| Starter \| ESPN \| Ours \| pct \|`) and its rows |
+| start-sit | SS-13 07 (hands over: ESPN rejected the session) | `ORIENT_SENTENCES.stopSessionRejected` and `handOff` |
+| start-sit | SS-1 05 (the chase reason) | `modeLine` with `chaseReason` (round 7) |
+| start-sit | SS-4 02 (what would confirm the report) | `RELAYED_CLAIM_LINE`'s `— <what would confirm it>` (round 7). Not SS-12 04 or SS-INJ-2 04: on game day start-sit's own two lines take its place |
+| schedule-plan | SP-5-E 03 (asks which reading applies) | `ROUND5_FIXED.schedule-plan.bothQuestion` |
+| schedule-plan | SP-1 04 (the per-week table) | `weekHeader` (round 7) |
+| schedule-plan | SP-1 05 (the worst weeks as the tool ranks them) | `worstWeeksLine` (round 7) |
+| schedule-plan | SP-1 06, 07, SP-3 04 (what each fix recovers, its cost, its deadline) | `fixesHeader` (round 7) |
+| schedule-plan | SP-INJ 03, 04 (the division name's tag; flagged) | `INJECTION_FLAG_LINE` (round 7) |
+| roster-audit | RA-1 05, 06 (the bench template derived; its reason) | `ROUND3_FIXED.roster-audit.template` |
+| roster-audit | RA-4-E 04 (the extra bench player is the drop) | `ROUND3_FIXED.roster-audit.hiddenDrop` |
+| roster-audit | RA-1 07 (the open IR slot) | `irLine` (round 7) |
+| roster-audit | RA-2 04 (the bench spot the move frees) | `irMoveLine` (round 7) |
+| roster-audit | RA-4-E 05 (he may stay in IR) | `mayStayLine` (round 7) |
+| roster-audit | RA-INJ 03, 04 (the tag; flagged in one line) | `INJECTION_FLAG_LINE` (round 7) |
+| injury-cascade | IC-1 07 (no beneficiary available) | `ROUND5_FIXED.injury-cascade.allRostered` |
+| injury-cascade | IC-3 04 (activate only after the run) | `ROUND4_FIXED.injury-cascade.activateLine` |
+| injury-cascade | IC-2 03 (what would confirm the report) | `RELAYED_CLAIM_LINE` (round 7) |
+| injury-cascade | IC-3 03 (the move frees a bench spot) | `irMoveLine` (round 7) |
+| injury-cascade | IC-INJ 03 (flagged in one line) | `INJECTION_FLAG_LINE` (round 7) |
+| news-check | NC-7 04, 05, 06, 08, NC-INJ-2 04, 05 (the logged note) | `LOGGED_NOTE_LINE` (R14-5) |
+| news-check | NC-INJ 05 (flagged in one line) | the Withheld line, or `INJECTION_FLAG_LINE` when the passage is quoted (R15-4) |
+| news-check | NC-4-E 05 (no change until the usage confirms) | `noMoveUntil` (round 7) |
+| session-check | SC-7-E 02, 03 (no cookies stored yet; run `eff setup` again) | §4's `not_configured` block, verbatim (`SKILL_RULES`) |
+| session-check | SC-3 02 (which case applies) | the `board_not_discriminating` sentence, verbatim (`BOARD_SENTENCE` in `tests/skills/session-check-auth.test.ts`) |
+| onboard | ON-6 06, 07 (ESPN rejected the session; the hand-off) | `ORIENT_SENTENCES.stopSessionRejected`, `handOff` |
+| onboard | ON-INJ 03 (flagged in one line) | `INJECTION_FLAG_LINE` (round 7) |
+| trade | TR-1 05 (the change for both teams) | `ROUND4_FIXED.trade.deltaHeader`, one row per side |
+| trade | TR-1 09, TR-3 05 (the order of the three parts) | `ROUND4_FIXED.trade.orderLabels` |
+| trade | TR-1 11 (not a coin flip) | `notCoinFlip` (round 7; R15-1 keeps it a judge) |
+| trade | TR-2 03 (the veto risk) | `vetoLine` (round 7) |
+| trade | TR-3 02 (the standing line as the partner's reason) | `ROUND5_FIXED.trade.whyAcceptLead` and the tool's standing line |
+| trade | TR-5-E 06 (the standing under each reading) | `whyAcceptLead` and the two per-reading standing lines |
+| trade | TR-5-E 07, 09 (asks which reading; offers onboard) | §1's ask line, verbatim (`SKILL_RULES`) |
+| trade | TR-INJ 05 (flagged in one line) | `INJECTION_FLAG_LINE` (round 7) |
+| waivers | WV-1 05 (the premium band) | `ROUND4_FIXED.waivers.premiumLabel` |
+| waivers | WV-1 07 (the marginal candidates) | `ROUND5_FIXED.waivers.marginalLine` / `marginalNone` |
+| waivers | WV-1 08 (a scramble list) | `ROUND4_FIXED.waivers.scrambleLabel` |
+| waivers | WV-1 10, 11 (a drop; its re-add risk) | the drop line, verbatim (`SKILL_RULES`): `Drop: <name> — re-add risk N % owned` |
+| waivers | WV-2 04 (Jakobi Meyers touchdown-inflated) | `tdLuckLine` (round 7) |
+| waivers | WV-3-E 03 (the chance each bid wins) | `bidHeader` (round 7) |
+| waivers | WV-4-E 02 (a failed claim costs nothing) | `ROUND4_FIXED.waivers.failedClaim` |
+| waivers | WV-5-E 02 (both surplus values) | `ROUND3_FIXED.waivers.surplusLabel` and `equalSurplus`, `ROUND4_FIXED.waivers.irColumn` |
+| waivers | WV-8 04 (no candidate's `signals[]` carries one) | `ROUND5_FIXED.waivers.signalsNone` |
+| waivers | WV-8 07 (the ensemble value basis) | `valueBasisEnsemble` (round 7; R15-3 converts WV-2 08 only) |
+| waivers | WV-INJ 05 (flagged in one line) | `INJECTION_FLAG_LINE` (round 7) |
+| retro | RT-1 06 (why each baseline is empty) | `ROUND4_FIXED.retro.baselineLastWeek`, `baselineEspn`, `nTooSmall` |
+| retro | RT-4-E 02 (the metrics that fill up first) | `ROUND5_FIXED.retro.leadWithThose` |
+| retro | RT-2 02 (the window still open) | `correctionsLine` (round 7) |
+| retro | RT-6 04 (no narrower call scores the rest) | `singleKindLine` (round 7) |
+| retro | RT-INJ 04 (flagged in one line) | `INJECTION_FLAG_LINE` (round 7) |
+| retro | RT-INJ 07, 08, 09 (the logged note) | `LOGGED_NOTE_LINE` (R14-5) |

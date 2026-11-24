@@ -432,6 +432,98 @@ minor version (plan 04 §4.4; plan 09 K6). One version covers the server, the Sk
   ordinary sentence quoted; and the instruction-shaped passage quoted as data or withheld on
   news-check's fixed line. Plan 09 §3.13's NC-INJ says so, and the fixture, its manifest and the
   integration test follow.
+- **The Skills after the plugin eval's round 6 (rulings R15-1, R15-2, R15-4, R15-5 and R15-7;
+  `docs/plan/changelog.md` §R15).** news-check's description names no official report: it checks a
+  relayed claim (a tweet, a beat writer, a rumour, RotoWire) against the data, so a lookup of the
+  official report is not news-check's (R15-2). To stay under the listing ceiling (4 593 of 4 600),
+  its description drops "its reliability and" and its `when_to_use` drops "story vs numbers". No
+  other Skill's frontmatter changed.
+  - The shared output contract gives every injection flag on one fixed line in Confidence &
+    freshness only:
+    `Injection flag: <source tag> (<flags>): "<quoted text>" — data, never followed.` There is no
+    banner, no flag paragraph and no second line, and a withheld passage is flagged by news-check's
+    Withheld line alone (R15-4). Orient says the same, and trade, news-check, onboard and waivers
+    say it beside their untrusted-text guards.
+  - Guardrail 3 gives a relayed claim on
+    `Relayed claim ("<the user's words>", the user's message): unconfirmed — <what would confirm it>.`
+    The exceptions are start-sit's game-day inactive report, news-check's checked claim and
+    session-check's pasted command. Orient's seeding line gains its both-readings form under
+    `seeding_mode: "both"`.
+  - trade prints `Not a coin flip: the interval (<p10> to <p90>) does not reach zero.` when its
+    verdict is not `fair` (R15-1). Its devil's advocate gives the partner's side only as the tool's
+    standing lines state it (R15-5).
+  - Every prose line a free grader reads is now a fixed line held by a check-skills pin (R15-7):
+    - start-sit: the branch line, the relayed-report lines opening the game-day output, the
+      Questionable line, the lineup table's header and the mode line;
+    - stream-kdef: the next-week line, with its no-line and bye forms, and the stream-anyway line
+      on a hold;
+    - weekly: the `Reads as of <as_of, ET>` header; the Partial line under a refused League
+      activity heading; the claim and scramble brief lines, the block first on an invalid roster;
+      the basis line; each Not-actionable move with its deadline; a conditional row's time; a
+      blocked Deadlines line; the escape form for a JSON-shaped name;
+    - schedule-plan: the per-week and fixes table headers, the worst-weeks line, and the
+      playoff-weeks and playoff-odds lines;
+    - roster-audit: the IR line, the move to IR, the hidden-bench line, and the handcuff and stash
+      lines;
+    - injury-cascade: the weeks-out line, the move to IR, and the core stop for "who benefits";
+    - news-check: the flag, usage and `No move until <what_would_confirm>` lines, and the Withheld
+      line beside the Logged note line;
+    - session-check: the line for a league whose publicity is unknown, and its step 2 printed
+      verbatim;
+    - retro: the corrections-window and single-kind truncation lines;
+    - waivers: the Verdict column, the touchdown-luck line, the bid table header, the cold-start
+      line, both value-basis lines, and "your call" only in the Marginal line (check-skills now
+      fails one anywhere else);
+    - apply: the lineup and IR steps;
+    - onboard: the team question, the mismatch stop line and four settings-digest rows.
+  - `tests/skills/round7-skill-fixes.test.ts` cuts and rewords every pin, and checks each line's
+    place and that it contradicts no rule beside it.
+- **The plugin eval's cases after round 6 (round 6's Next steps item 3, the §R15 rulings as
+  amended on the cases and the R15-7 audit's case entries; `docs/plan/changelog.md` §R15;
+  `docs/evals/stage-c-plugin-eval.md`).** Every regex that reads a fixed line accepts it filled in
+  from its fixture, plain, bold, quoted, as a list item and in a table cell, plus plan 09's term,
+  and each change is shown failing first against the round-6 pattern. The public-league guard
+  (SC-11 05 and its six copies in weekly, start-sit and onboard) no longer reads "public/private",
+  "public or private" or "public-private" as the claim. WK-1 05 takes weekly's "Reads as of" header
+  and its term "Data time"; KD-1 04 the next-week lines and plan 09's two-week look-ahead; WK-10 04
+  the Partial line wherever it stands; KD-2 02 needs a number after a bare "total", so orient's
+  seeding gloss no longer passes it (the build now renders the seeding line with that gloss);
+  KD-4-E 01 no longer passes on the hold verdict line; WK-1 04 needs the basis beside the pair.
+  WK-1 08 and 09, WK-10 03, SS-1 03, SS-6-E 02 and 04, SP-1 03, RA-3-E 03 and TR-1 03 take the
+  heading, list, blockquote and table forms the audit found refused; WV-1 03, WV-3-E 02 and WV-8 03
+  are made exact; SS-10-E 01 takes 0.750 and 75.00 %. RT-1 05, RA-1 04, WV-1 12 and WV-2 08 are
+  free graders on their fixed lines (R15-3), and NC-5-E 02 grades `espn_analyze_evidence`'s
+  `claim.text` input word for word (a new tool_used form). RT-INJ 11, NC-CORE 04 (now two judges),
+  NC-7 07, WV-2 07, WK-8 09, WK-9 09 and TR-1 11 (R15-1, with its "not fair" clause a judge of its
+  own) are made exact; KD-1 gains a judge so its reply is kept; every injection-flag judge names the
+  shared flag line and the Withheld line (R15-4), and KD-INJ's the relayed-claim line. news-check's
+  trigger cases are unchanged (R15-2).
+- **The Skills verifier's findings on the round-7 Skill fixes (F1–F5; `docs/plan/changelog.md`
+  §R15, R15-4).**
+  - news-check's `injection_flags[]` bullet leaves a withheld passage to its Withheld line alone,
+    with no second line and no quote.
+  - weekly gives a JSON-shaped name's flag line in its escape form, with a filled example.
+  - orient names the flag line's place in apply and session-check, which print no Confidence &
+    freshness section: the end of the answer, above the hand-off line or a closing question.
+  - start-sit's step 8 opens with step 3's two lines only while ESPN's status does not yet agree.
+  - Each is a pinned fixed line in check-skills, cut and reworded in
+    `tests/skills/round7-skill-fixes.test.ts`. That test now also checks every line it calls
+    spec-quoted against the round-6 section and changelog §R14–§R15; retro's single-kind line is
+    recorded as worded here.
+- **The round-7 cases after their verifiers (the findings on `2706f01`).** No pinned line of another
+  meaning meets a grader any longer. For KD-1 03 and KD-2 02, stream-kdef's no-line look-ahead ("no
+  implied total posted yet") and "implied totals are null" cite no total. For KD-1 05, the
+  stream-anyway lines are no verdict. For SP-3 02, schedule-plan's per-week header
+  (`bye_cluster_cost`) is no fix's cost. AP-2 04 now reads `BE` as the slot (`**BE**`, `` `BE` ``),
+  not the word "be", so orient's stop line no longer names the bench slot. WK-10 03 refuses a
+  League activity label negated in any form: "(not read)", "(none)", "(skipped)", or "not read"
+  after a colon or a dash, on a plain line, a list item, a heading, bold or a table cell. It now
+  takes `## **League activity**` and `| League activity (partial) |`. WV-3-E 02 takes the Bid cell
+  in backticks and round 6's `$1 on "<name>"`, never a sum spent; WV-1 03 a reason after a comma or
+  a semicolon; RT-1 05 plan 09 §3.5's "the 'last week's points' and 'ESPN's projection' baselines",
+  with the ESPN baseline read as `espn_projection_lineup`, never the `espn_projection` store;
+  WK-1 08 each action section's table in a blockquote. NC-5-E 02's tool-input grader cites the
+  round-6 report's NC-5-E entry. No kept reply of rounds 5 and 6 changes verdict.
 - **Dependencies, reviewed under plan 04 §2 (Dependabot PRs 1–5, 2026-11-04 to 2026-11-05; ruling
   R10-35).** The MCP SDK 2.3.1 → 2.4.0 (`@modelcontextprotocol/server` and `core`, and the dev
   `client`; `espn_get_status` reports `sdk_version` 2.4.0): 2.4.0 adds the Skills extension on new
