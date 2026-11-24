@@ -13,7 +13,7 @@
         "No write tool was called (tool_used: every write tool min 0 max 0, arm both)",
         "The skill called espn_get_roster to check the current slots and locks (tool_used)",
         "The steps name the FLEX slot (regex: `\\bFLEX\\b`)",
-        "The steps name the bench slot (regex: `\\bBE\\b`)",
+        "The steps name the bench slot (regex: `\\*\\*BE\\*\\*|\\x60BE\\x60|\\(BE\\)|\\|[ \\t]*BE[ \\t]*\\||\\bBE (?:slot|seat)\\b|(?:→|->)[ \\t]*(?:\\*\\*)?BE\\b|\\bBE(?:\\*\\*)?[ \\t]*(?:→|->)|\\b(?:in|into|from) BE\\b|\\bto BE\\b(?=[ \\t]*(?:[;,.)]|$)|[ \\t]+(?:and|then)\\b)`)",
         "The steps name the IR slot (regex: `\\bIR\\b`)",
         "Every player in the numbered steps is quoted (llm)",
         "Every player in the numbered steps carries his player_id (llm)",

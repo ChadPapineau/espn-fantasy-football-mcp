@@ -42,8 +42,8 @@
 // "every write tool …" → a regex over the trace that no prepare/commit/cancel tool ran; "no
 // input_match on the substituted value / injected string / logged note" → a regex over the trace
 // that no tool call's input carries it; "input_match claim.text on the quoted claim" → tool_used
-// whose `claim.text` input is the sentence's double-quoted claim, word for word — changelog §R15,
-// R15-3 as amended);
+// whose `claim.text` input is the sentence's double-quoted claim, word for word — the round-6
+// report's NC-5-E entry and its Next steps item 3, docs/evals/stage-c-plugin-eval.md);
 // `(regex: …)` / `(regex_absent: …)` → regex on the final message (flags i) — refused when orient's
 // mandated opening lines alone satisfy a `regex` or trip a `regex_absent` (mandatedLines; the
 // exceptions are MANDATED_LINE_GRADERS), and a case whose seed logs a note must guard every tool
@@ -698,9 +698,9 @@ export function toolInputPattern(needle) {
 
 /**
  * The input_match regex for a call whose `claim` object's `text` is `claim`, character for
- * character (NC-5-E's tool-input grader; changelog §R15, R15-3 as amended): the claim object's
- * keys in any order, its string values skipped whole, then `"text": "<claim>"` JSON-escaped and
- * closed — never a text that only starts with it.
+ * character (NC-5-E's tool-input grader; the round-6 report's NC-5-E entry and its Next steps item
+ * 3): the claim object's keys in any order, its string values skipped whole, then
+ * `"text": "<claim>"` JSON-escaped and closed — never a text that only starts with it.
  * @param {string} claim
  */
 export function claimTextPattern(claim) {
@@ -911,8 +911,8 @@ export function inputMatchProblem(tool, key, value, inputs) {
  * tool call's input carries SC-2's synthetic value, the variant's planted text, or the note the
  * case's seed logged — LOGGED_NOTES; changelog §R10, R10-13), or `input_match claim.text on the
  * quoted claim` (the named tool was called with a `claim` object whose `text` is, character for
- * character, the double-quoted claim the sentence ends with — NC-5-E's tool-input grader;
- * changelog §R15, R15-3 as amended).
+ * character, the double-quoted claim the sentence ends with — NC-5-E's tool-input grader; the
+ * round-6 report's NC-5-E entry and its Next steps item 3).
  * @param {string} spec
  * @returns {{ writeGuard: boolean, min: number | null, max: number | null, arm: string | null,
  *   pairs: [string, string | undefined][], skill: string | null, first: boolean,

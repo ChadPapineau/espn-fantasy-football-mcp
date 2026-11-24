@@ -6,12 +6,16 @@
 // plan 09 §3's term, never a different meaning; every regex_absent trips no fixed line of its Skill
 // and no compliant sentence, only the forbidden meaning. Each changed pattern is shown failing first
 // (the round-6 pattern, held here as shipped). R15-3 as amended: RT-1 05, RA-1 04, WV-1 12 and WV-2
-// 08 are free graders on their fixed lines, and NC-5-E 02 grades espn_analyze_evidence's claim.text
-// input. R11-3 and R12-2: the PASS-if lines made exact, never loosened, one judge per condition
-// (R13-1). R15-4: every judge of an injection flag names the shared flag line and the Withheld
-// line. The fixed lines are held here as the spec quotes them and as the Skills stream words them
-// (its fixed-lines record); the gate checks them against the Skill text as committed. Reads the
-// committed bundle and plan; no network.
+// 08 are free graders on their fixed lines. The round-6 section's NC-5-E entry (its Next steps item
+// 3): NC-5-E 02 grades espn_analyze_evidence's claim.text input. R11-3 and R12-2: the PASS-if lines
+// made exact, never loosened, one judge per condition (R13-1). R15-4: every judge of an injection
+// flag names the shared flag line and the Withheld line. The fixed lines are held here as the spec
+// quotes them and as the Skills stream words them (its fixed-lines record); the gate checks them
+// against the Skill text as committed. The verifiers' findings on these cases close the file: no
+// pinned line of another meaning meets a grader (stream-kdef's no-line and stream-anyway lines,
+// schedule-plan's per-week header, orient's stop line), and the forms a grader refused or took
+// against its meaning (WK-10 03's negated label, a backticked bid, plan 09 §3.5's baseline term, a
+// blockquoted Deadline table). Reads the committed bundle and plan; no network.
 import { readFileSync } from "node:fs";
 import path from "node:path";
 import { describe, expect, it } from "vitest";
@@ -151,6 +155,11 @@ const SPEC = Object.freeze({
   valueEnsemble: "Value basis: this server's usage-based ensemble, ESPN's projection beside it.",
   bidHeader: ["Target", "Bid", "Chance the bid wins"],
   lineupHeader: ["Slot", "Player", "E", "p10", "p90", "basis", "% started"],
+  fixesHeader: ["Worst week (tool's order)", "Fix", "Recovers (Δ)", "Cost", "Deadline (ET)"],
+  streamAnywayNow:
+    "If you stream anyway: <name> is a free-agent add now — add him now: first come, first served, no claim, before his game locks.",
+  lineupStep:
+    "**Roster → Edit lineup**: tap **Move** beside '<name A>' (`player_id` <id>) in **BE**, then the **FLEX** slot; '<name B>' (`player_id` <id>) goes to **BE**; save — before <lock_at> ET.",
   // pinned before this round (check-skills ROUND4_FIXED, ROUND5_FIXED)
   liveWin:
     "ESPN's win probability: <`win_probability_espn`>; ours: <`p_win`> [<interval>] — <N> points apart",
@@ -219,6 +228,9 @@ describe("the fixed lines are the ones the Skills print (check-skills ROUND6_FIX
     ["schedule-plan", "weekHeader", `| ${SPEC.weekHeader.join(" | ")} |`],
     ["waivers", "bidHeader", `| ${SPEC.bidHeader.join(" | ")} |`],
     ["start-sit", "lineupHeader", `| ${SPEC.lineupHeader.join(" | ")} |`],
+    ["schedule-plan", "fixesHeader", `| ${SPEC.fixesHeader.join(" | ")} |`],
+    ["stream-kdef", "streamAnywayNow", SPEC.streamAnywayNow],
+    ["apply", "lineupStep", SPEC.lineupStep],
   ])("%s %s", (skill, key, line) => {
     expect(unwrap(F[skill]?.["SKILL.md"][key])).toBe(line);
     expect(read(`skills/${skill}/SKILL.md`)).toContain(line);
@@ -363,7 +375,13 @@ describe("R12-1 and R15-7: each regex that reads a fixed line accepts it in ever
       "stream-kdef",
       "KD-2",
       "The reply cites the game total",
-      ["Implied total: 24.0 (BAL)", "a total of 50.5", "Game total 50.5 in a dome", "O/U 50.5"],
+      [
+        "Implied total: 24.0 (BAL)",
+        "a total of 50.5",
+        "Game total 50.5 in a dome",
+        "O/U 50.5",
+        fill(SPEC.nextWeek, 6, '"Cam Little"', "HOU", "22.5"),
+      ],
       ["| Kicker | E | Implied total |\n|---|---|---|\n| K | 8.1 | 24.0 |", "over/under 38.5"],
       [
         // orient's seeding gloss, which every KD reply prints (the audit's KD-2 02)
@@ -371,6 +389,10 @@ describe("R12-1 and R15-7: each regex that reads a fixed line accepts it in ever
         "**Seeding:** assuming ESPN's rule (record first, total points as the tiebreak).",
         "Total points: 100.96 so far.",
         "Should I stream a kicker this week?",
+        // the verifiers' F3 and XC-1: stream-kdef's pinned no-line line, which this fixture prints
+        // (week 6 has no line on post-run), says there is no total
+        fill(SPEC.nextWeekNoLine, 6, '"Cam Little"', "HOU"),
+        "Week 6: there are no lines yet (implied totals are null).",
       ],
     ],
     [
@@ -560,6 +582,10 @@ describe("R12-1 and R15-7: each regex that reads a fixed line accepts it in ever
       '- "Carnell Tate" (WR): pass',
       "Verdicts: every candidate is a pass.",
       "| pass — below the premium |",
+      // the verifier's F2: a reason after a comma or a semicolon, and round 5's longer parenthesis
+      "| pass, below the premium |",
+      "| `pass`; below the premium |",
+      "| pass (unlikely to hold a role in Week 5: 0 %) |",
     ])
       expect(re.test(t), t).toBe(true);
     for (const l of [SPEC.failedClaim, SPEC.marginalNone])
@@ -568,6 +594,8 @@ describe("R12-1 and R15-7: each regex that reads a fixed line accepts it in ever
       "No waiver claim is worth your spot.",
       "Claim brief — claims process at Wed Oct 7, 3:30 AM ET.",
       "Don't claim anyone.",
+      // a legend of the tool's verdict words is no verdict
+      "| Verdicts | claim, pass or marginal |",
     ])
       expect(re.test(o), o).toBe(false);
     // the round-6 pattern passed on the two lines alone (failing first)
@@ -581,10 +609,19 @@ describe("R12-1 and R15-7: each regex that reads a fixed line accepts it in ever
         ['"Ollie Gordon II" (4711533)', "$1", "64.8 %"],
         ['"Carnell Tate" (4871023)', "$2", "47.2 %"],
       ]),
+      // the verifier's F2: the Bid cell as waivers' SKILL.md writes it, `$<b_star>`
+      ...tables(SPEC.bidHeader, [
+        ['"Ollie Gordon II" (`4711533`)', "`$1`", "64.8 %"],
+        ['"Carnell Tate" (`4871023`)', "`$2`", "47.2 %"],
+      ]),
       "b_star $2 for Tate",
       "Bid $2 on Carnell Tate.",
       "a bid of $1",
+      "Bid: `$1`",
       "bid 12 of your 100", // round 5's accepted form, kept
+      // round 6's Sonnet run 1, which the round-6 pattern took
+      'Bid on two players this week, $1 on "Ollie Gordon II" and $2 on "Carnell Tate".',
+      'Put **$1** on "Ollie Gordon II".',
     ])
       expect(re.test(t), t).toBe(true);
     expect(re.test("Bid: 64.8 % chance it wins"), "a chance is no bid").toBe(false);
@@ -592,6 +629,7 @@ describe("R12-1 and R15-7: each regex that reads a fixed line accepts it in ever
       "You have $86 of $100 left.",
       "with $86 left of $100 (you've spent $14)",
       "You can bid with your $86.",
+      'You have spent $14 on "Tank Dell" this season.',
     ]) {
       expect(re.test(o), o).toBe(false);
       expect(shipped("bid").test(o), `the round-6 pattern took it: ${o}`).toBe(true);
@@ -716,6 +754,29 @@ describe("the R15-7 audit's weekly entries: WK-1 08's headings in every form, WK
       columns.test(briefing((x) => (x === "Waivers" ? "Waivers are below." : `## ${x}`))),
     ).toBe(false);
   });
+  it.each(headings)(
+    "WK-1 08 takes each section's table in a blockquote too, under headings as %s (the cross-check verifier's composite)",
+    (_, heading) => {
+      const columns = graderOf("weekly", "WK-1", "Each action section");
+      const quoted = (s: string) =>
+        s
+          .split("\n")
+          .map((l) => (l.startsWith("|") ? `> ${l}` : l))
+          .join("\n");
+      expect(columns.test(quoted(briefing(heading)))).toBe(true);
+      // a blockquoted table with no Deadline column still fails
+      expect(
+        columns.test(
+          quoted(
+            briefing(heading).replace(
+              `| ${h} |\n|---|---|---|---|\n| QB`,
+              "| Locks (ET) |\n|---|---|---|---|\n| QB",
+            ),
+          ),
+        ),
+      ).toBe(false);
+    },
+  );
   it("WK-1 09: held and label rows are no move; a move row with no time still trips", () => {
     const blank = graderOf(
       "weekly",
@@ -754,14 +815,75 @@ describe("the R15-7 audit's weekly entries: WK-1 08's headings in every form, WK
       "1. **League activity**\nx",
       "- League activity\nx",
       "| League activity | partial: 0 adds |",
+      "## **League activity**\nx",
+      "| League activity (partial) | 0 adds |",
+      "League activity (partial): the server's persisted history only",
     ])
       expect(re.test(t), t).toBe(true);
+    // the heading as weekly prints it, verbatim, with the Partial line under it or beside it
+    const partial = fill(
+      SPEC.partial,
+      0,
+      0,
+      0,
+      0,
+      "ESPN's transaction feed, the standings, the rosters and the free-agent pool",
+    );
+    for (const h of [
+      "## League activity",
+      "### League activity (partial)",
+      "**League activity**",
+      "League activity",
+      "> **League activity**",
+      "- **League activity**",
+    ])
+      expect(re.test(`${h}\n${partial}`), h).toBe(true);
+    for (const l of [
+      `League activity: ${partial}`,
+      `**League activity:** ${partial}`,
+      `**League activity: ${partial}**`,
+      `> League activity: ${partial}`,
+      `- League activity: ${partial}`,
+      `- **League activity:** ${partial}`,
+      `| League activity | ${partial} |`,
+      `| **League activity** | ${partial} |`,
+    ])
+      expect(re.test(`${l}\n`), l).toBe(true);
     for (const t of [
       "League activity: not read",
       "| League activity | — |",
       "- League activity: none",
+      // the verifier's F1: a negated label as a plain line, a list item, a heading, bold, a label
+      // before a colon or a dash, and a table cell — round 6 refused the plain and list forms
+      "- League activity (not read)\nx",
+      "League activity (none)\nx",
+      "League activity (skipped)\nx",
+      "## League activity (not read)\nx",
+      "**League activity** (n/a)\nx",
+      "**League activity:** not read",
+      "- **League activity:** not read — ESPN rejected the session",
+      "League activity (not read): ESPN rejected the stored session",
+      "League activity — not read: the feed needs a session",
+      "| League activity (not read) | — |",
+      "| League activity | **not read** |",
+      "> **League activity** — skipped",
     ])
-      expect(re.test(t), t).toBe(false);
+      expect(re.test(`Intro.\n\n${t}\n\nEnd.`), t).toBe(false);
+    // the verifier's whole reply: orient's stop, the sections it could not read listed, orient's
+    // Partial line in Confidence & freshness and the hand-off — no League activity section given
+    const stopped = [
+      ORIENT.stopRejected,
+      "",
+      "What I could not read this time:",
+      "- League activity (not read)",
+      "- Rosters and standings (not read)",
+      "",
+      "### Confidence & freshness",
+      "Partial: ESPN rejected the stored session — not read: ESPN's transaction feed, the standings and the rosters.",
+      "",
+      ORIENT.handOff,
+    ].join("\n");
+    expect(re.test(stopped)).toBe(false);
   });
 });
 
@@ -780,12 +902,21 @@ describe("R15-3 as amended: RT-1 05, RA-1 04, WV-1 12 and WV-2 08 are free grade
       ],
       [
         "baselines.last_week_points: n too small; baselines.espn_projection_lineup: not informative in v1",
+        // the verifier's F4: plan 09 §3.5's own term, quoted or not, either order
+        "Regret against both the 'last week's points' and 'ESPN's projection' baselines: n too small (1 of 30); not informative in v1.",
+        "Regret against both the last week's points and ESPN's projection baselines: n too small.",
+        "The “ESPN's projection” and “last week's points” baselines are both empty.",
+        "The last week's points baseline: n too small (1 of 30). The ESPN's projection baseline: not informative in v1.",
+        "`last_week_points`: n too small; the `espn_projection` baseline: not informative in v1",
       ],
       [
         fill(SPEC.baselineLastWeek, "n too small (1 of 30)"),
         fill(SPEC.baselineEspn, "not informative in v1"),
         "Both baselines are empty this week.",
         "ESPN's projection vs ours (CRPS / MAE by position): n too small, 0 player-weeks",
+        // the verifier's F4: espn_projection is the projection snapshot store, not the ESPN baseline
+        `${fill(SPEC.baselineLastWeek, "n too small (1 of 30)")}\nNo \`espn_projection\` snapshot was stored before kickoff.`,
+        `${fill(SPEC.baselineLastWeek, "n too small (1 of 30)")}\nespn_projection: none stored for week 4.`,
       ],
     ],
     [
@@ -846,7 +977,7 @@ describe("R15-3 as amended: RT-1 05, RA-1 04, WV-1 12 and WV-2 08 are free grade
   );
 });
 
-describe("R15-3 as amended: NC-5-E 02 grades espn_analyze_evidence's claim.text input, as SC-2's tool-input grader does", () => {
+describe("the round-6 section's NC-5-E entry (Next steps item 3): NC-5-E 02 grades espn_analyze_evidence's claim.text input, as SC-2's tool-input grader does", () => {
   const c = caseOf("news-check", "NC-5-E");
   const sentence = c.expectations[1] ?? "";
   const claim =
@@ -1047,6 +1178,112 @@ describe("R15-4: every judge of an injection flag names the shared flag line, an
       expect(j).toHaveLength(1);
       expect(j[0]).toContain(`(the shared relayed-claim line '${SPEC.relayed}' does)`);
     }
+  });
+});
+
+describe("the verifiers' findings: no pinned line of another meaning meets a grader (R12-1, R15-7)", () => {
+  const kdOpen = `${ORIENT.notConfiguredPublic}\n${ORIENT.seeding.replace(ESPN_RULE, `${ESPN_RULE} (${ESPN_RULE_GLOSS})`)}\n\n`;
+  it.each([
+    ["KD-1", "The reply cites the opponent's implied total", "Rams D/ST", "ARI"],
+    ["KD-2", "The reply cites the game total", '"Cam Little"', "HOU"],
+  ] as const)(
+    "%s: stream-kdef's no-line line, in every form, cites no total; the posted line and the Implied total column do (F3, XC-1)",
+    (name, lead, who, opp) => {
+      const re = graderOf("stream-kdef", name, lead);
+      const hold = fill(
+        SPEC.verdictHold,
+        who,
+        "no clear move: 2 on the scramble list after the run",
+      );
+      for (const f of forms(fill(SPEC.nextWeekNoLine, 6, who, opp)))
+        expect(re.test(`${kdOpen}${hold}\n${f}\n`), f).toBe(false);
+      for (const f of forms(fill(SPEC.nextWeek, 6, who, opp, "21.5")))
+        expect(re.test(f), f).toBe(true);
+      for (const t of tables(["Option", "E", "Implied total"], [[who, "7.0", "26.0"]]))
+        expect(re.test(t), t).toBe(true);
+      expect(re.test("The opponent's implied team total is 24.75.")).toBe(true);
+      for (const o of [
+        "Week 6: there are no lines yet (implied totals are null).",
+        "The tool shows week 6 implied totals as null for every streamer.",
+        "No implied total is posted for week 6.",
+      ])
+        expect(re.test(o), o).toBe(false);
+      // the 2706f01 pattern's term took the no-line line alone (failing first)
+      expect(/implied (?:team )?total/i.test(fill(SPEC.nextWeekNoLine, 6, who, opp))).toBe(true);
+    },
+  );
+  it("KD-1 05: the stream-anyway lines are no verdict; the Verdict line and plan 09's verdict are (the cross-check verifier)", () => {
+    const re = graderOf("stream-kdef", "KD-1", "The reply gives a hold-or-stream verdict");
+    const noLine = fill(SPEC.nextWeekNoLine, 6, "Rams D/ST", "ARI");
+    for (const l of [
+      fill(SPEC.streamAnyway, "Jets D/ST", "Wed Oct 7, 3:30 AM ET"),
+      fill(SPEC.streamAnywayNow, "Jets D/ST"),
+    ])
+      for (const f of forms(l)) expect(re.test(`${kdOpen}${noLine}\n${f}\n`), f).toBe(false);
+    for (const l of [
+      fill(SPEC.verdictHold, "Rams D/ST", "no clear move: 2 on the scramble list after the run"),
+      fill(SPEC.verdictStream, "Jets D/ST", "a free-agent add after the run"),
+    ])
+      for (const f of forms(l)) expect(re.test(f), f).toBe(true);
+    for (const t of [
+      "Hold the Rams D/ST over the Jets.",
+      "I'd stream the Jets D/ST this week.",
+      "**Hold** the Rams.",
+    ])
+      expect(re.test(t), t).toBe(true);
+  });
+  it("SP-3 02: a fix's cost — the fixes table or the word — never the per-week header's bye_cluster_cost (F5)", () => {
+    const re = graderOf("schedule-plan", "SP-3", "The reply names a fix with a cost");
+    const week = tables(SPEC.weekHeader, [["11", "QB, WR, TE, D/ST", "5.72", "0.91"]]);
+    const rest = "\n\nWorst weeks, in the tool's order: 11, 7\n\nCover week 11 by streaming.";
+    for (const t of week) expect(re.test(`${t}${rest}`), t).toBe(false);
+    for (const t of tables(SPEC.fixesHeader, [
+      ["11", 'stream QB "Jared Goff" (3046779)', "+22.7", "0", "before Wed Nov 18, 3:30 AM ET"],
+    ]))
+      expect(re.test(t), t).toBe(true);
+    for (const t of [
+      'Starting "Bo Nix" from the bench costs nothing.',
+      "the QB hole costs 0 points",
+      "at no extra cost",
+      "Streaming him is costing you nothing.",
+    ])
+      expect(re.test(t), t).toBe(true);
+    // the 2706f01 pattern, `cost`, took the per-week header alone (failing first)
+    expect(/cost/i.test(`${week[0] ?? ""}${rest}`)).toBe(true);
+  });
+  it("AP-2 04: BE as the slot — the pinned step's **BE**, plan 09's `BE` — never the word 'be' (graders compile with flags i)", () => {
+    const re = graderOf("apply", "AP-2", "The steps name the bench slot");
+    const step = fill(
+      SPEC.lineupStep,
+      "Devaughn Vele",
+      4569559,
+      "Bhayshul Tuten",
+      4882093,
+      "Sun Oct 11, 1:00 PM",
+    );
+    for (const f of forms(step)) expect(re.test(f), f).toBe(true);
+    for (const t of [
+      "the slots `FLEX`, `BE` and `IR`",
+      "Tuten goes to the bench (BE).",
+      "Move Tuten to BE.",
+      "| BE | Bhayshul Tuten |",
+      "BE → FLEX",
+      "tap the BE slot",
+      "in BE, then the FLEX slot",
+    ])
+      expect(re.test(t), t).toBe(true);
+    for (const l of [
+      ORIENT.stopRejected,
+      ORIENT.stopNone,
+      ORIENT.stopNotRead,
+      ORIENT.handOff,
+      "Which change did you agree to? Name it, or ask the Skill that recommends it first.",
+      "I can't be sure which move you mean.",
+      "It has to be done before kickoff.",
+    ])
+      for (const f of forms(l)) expect(re.test(f), f).toBe(false);
+    // the 2706f01 pattern, \bBE\b under flags i, took orient's stop line (failing first)
+    expect(/\bBE\b/i.test(ORIENT.stopRejected)).toBe(true);
   });
 });
 

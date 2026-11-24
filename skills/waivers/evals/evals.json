@@ -12,7 +12,7 @@
       "expectations": [
         "The skill called espn_list_players before espn_analyze_waivers, and espn_record_recommendation last (tool_order)",
         "espn_analyze_waivers was called with mode auto (tool_used: input_match mode auto)",
-        "The reply gives a verdict per candidate — the tool's own word in its Verdict column (`claim`, `pass`, `marginal`, `fa_add_after_run` or `fa_add_now`) or beside the candidate's name (regex: `\\|\\s*(?:\\*\\*)?\\x60?(?:claim|pass|marginal|fa_add_after_run|fa_add_now)\\x60?(?:\\*\\*)?(?:\\s*(?:\\((?!your call\\))[^)|\\n]{0,30}\\)|[—–:-][^|\\n]{0,60}))?\\s*\\||\\bverdicts?\\b(?:\\*\\*)?\\s*[:=—–-][^\\n]{0,60}?\\x60?\\b(?:claim|pass|marginal|fa_add_after_run|fa_add_now)\\b|(?:^|\\n)\\s*(?:[-*]|\\d+\\.)\\s+[^\\n]{0,80}?[:—–]\\s*(?:\\*\\*)?\\x60?(?:claim|pass|marginal|fa_add_after_run|fa_add_now)\\b`)",
+        "The reply gives a verdict per candidate — the tool's own word in its Verdict column (`claim`, `pass`, `marginal`, `fa_add_after_run` or `fa_add_now`) or beside the candidate's name (regex: `\\|\\s*(?:\\*\\*)?\\x60?(?:claim|pass|marginal|fa_add_after_run|fa_add_now)\\x60?(?:\\*\\*)?(?:\\s*(?:\\((?!your call\\))[^)|\\n]{0,60}\\)|[—–:-][^|\\n]{0,60}|[,;](?![ \\t]*(?:(?:claim|pass|marginal|fa_add_after_run|fa_add_now)|or)\\b)[^|\\n]{0,60}))?\\s*\\||\\bverdicts?\\b(?:\\*\\*)?\\s*[:=—–-][^\\n]{0,60}?\\x60?\\b(?:claim|pass|marginal|fa_add_after_run|fa_add_now)\\b|(?:^|\\n)\\s*(?:[-*]|\\d+\\.)\\s+[^\\n]{0,80}?[:—–]\\s*(?:\\*\\*)?\\x60?(?:claim|pass|marginal|fa_add_after_run|fa_add_now)\\b`)",
         "The reply prints the premium and the surplus (regex: `premium[\\s\\S]*surplus|surplus[\\s\\S]*premium`)",
         "The reply prints the premium band beside the premium (llm)",
         "The reply gives the ordered claim list — or says plainly that it is empty when no candidate clears the premium (llm)",
@@ -51,7 +51,7 @@
       "files": ["evals/fixtures/fx-10h/faab"],
       "expectations": [
         "espn_analyze_waivers was called with mode auto (tool_used: input_match mode auto)",
-        "The reply gives a bid amount per target — its Bid cell, b_star, or a bid in dollars (regex: `\\|\\s*(?:\\*\\*)?\\$\\s?\\d+(?:\\.\\d+)?(?:\\*\\*)?\\s*\\||\\bb_star\\b\\W{0,6}\\$?\\s?\\d+|\\bbids?\\b(?:\\s+(?:of|is|at|up to))?\\s*[:=]?\\s*(?:\\*\\*)?\\$?\\s?(?![\\d.]+\\s*%)\\d+`)",
+        "The reply gives a bid amount per target — its Bid cell, b_star, or a bid in dollars (regex: `\\|\\s*(?:\\*\\*)?\\x60?\\$\\s?\\d+(?:\\.\\d+)?\\x60?(?:\\*\\*)?\\s*\\||\\bb_star\\b\\W{0,6}\\$?\\s?\\d+|\\bbids?\\b(?:\\s+(?:of|is|at|up to))?\\s*[:=]?\\s*(?:\\*\\*)?\\x60?\\$?\\s?(?![\\d.]+\\s*%)\\d+|(?<!\\b(?:spent|paid|used)\\s(?:\\*\\*)?)\\$\\s?\\d+(?:\\.\\d+)?(?:\\*\\*)?\\x60?\\s+on\\s+(?:\\*\\*)?[\"“\\x60]`)",
         "The reply gives the bid curve or the chance each bid wins (llm)",
         "The reply gives the value of a dollar kept (llm)",
         "The reply prints no waiver-priority premium (regex_absent: `premium band|Π\\(k`)"
