@@ -526,9 +526,10 @@ describe("WK-1: the deadline criterion is graded free, on weekly's fixed lines (
     expect(deadlineJudges[0]).toMatch(
       /^Every move the reply recommends outside a table's Deadline column — in a sentence, a list line, the Deadlines block or a table without that column — names when it is due/,
     );
-    // one condition (changelog §R12, R12-2): its second sentence only says what is no move
+    // one condition (changelog §R12, R12-2): its second sentence only says what is no move — since
+    // changelog §R16, R16-4, weekly's held-swap line among them (round8-eval-cases.test.ts)
     expect(deadlineJudges[0]).toMatch(
-      /\. A pass, a hold or a row the tool holds is no move and needs none \(llm\)$/,
+      /\. A pass, a hold or a row the tool holds is no move and needs none \(weekly's held-swap line 'Top swap: coin flip — no move \(<a> ↔ <b>, Δ <x>\)' is one\) \(llm\)$/,
     );
   });
 

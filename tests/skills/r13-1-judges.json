@@ -1,8 +1,8 @@
 {
   "$comment": "changelog §R13, R13-1 (R12-2's split, its scope): every llm-graded PASS-if line in skills/*/evals/evals.json that joins conditions is one judge per condition. splits: each joined line before and its judges after, in place. single: every judge the join heuristic in r13-1-judge-splits.test.ts flags that stays one judge, with why (note: the case's $comment says why, R13-1's 'one fact stated two ways'). counts: llm judges per case after the split. The R13 refix (its verifier's F1–F4) splits what that sweep kept as one where the parts can fail apart: an item with its attributes, a quotation with its label or source tag, content with its order, two numbers named as one basis; what stays one is a value with its own uncertainty, basis or id, a named set, a prohibition's scope, one comparison against the base trajectory, or one fact said two ways.",
   "totals": {
-    "linesBefore": 176,
-    "judgesAfter": 322,
+    "linesBefore": 177,
+    "judgesAfter": 323,
     "linesSplit": 90
   },
   "splits": [
@@ -688,7 +688,7 @@
       "before": "The reply asks which seeding reading applies instead of asserting one, even though the verdict is the same under both, and offers onboard to record it (llm)",
       "after": [
         "The reply asks which seeding reading applies, even though the verdict is the same under both (llm)",
-        "The reply does not assert one seeding reading (llm)",
+        "The reply does not assert one seeding reading (trade's fixed line 'Seeding evidence: <evidence> — not confirmed, so both readings are shown.', in Confidence & freshness, asserts none) (llm)",
         "The reply offers onboard to record the seeding reading (llm)"
       ]
     },
@@ -1060,7 +1060,7 @@
     {
       "skill": "weekly",
       "case": "WK-1",
-      "judge": "Every move the reply recommends outside a table's Deadline column — in a sentence, a list line, the Deadlines block or a table without that column — names when it is due: a time, or the waiver run or kickoff it is timed by. A pass, a hold or a row the tool holds is no move and needs none (llm)",
+      "judge": "Every move the reply recommends outside a table's Deadline column — in a sentence, a list line, the Deadlines block or a table without that column — names when it is due: a time, or the waiver run or kickoff it is timed by. A pass, a hold or a row the tool holds is no move and needs none (weekly's held-swap line 'Top swap: coin flip — no move (<a> ↔ <b>, Δ <x>)' is one) (llm)",
       "why": "one condition and its scope: the second sentence says what is no move (c355819's V5S-4 judge)"
     },
     {
@@ -1185,7 +1185,7 @@
     "trade/TR-2": 2,
     "trade/TR-3": 7,
     "trade/TR-4": 5,
-    "trade/TR-5-E": 6,
+    "trade/TR-5-E": 7,
     "trade/TR-INJ": 5,
     "trade/TR-CORE": 2,
     "waivers/WV-1": 7,

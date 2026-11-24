@@ -29,7 +29,9 @@ import {
   LOGGED_NOTE_LINE,
   ORIENT_SENTENCES,
   ROUND4_FIXED,
+  ROUND5_FIXED,
   ROUND6_FIXED,
+  ROUND7_FIXED,
   TEMPLATE_FLAG_SENTENCES,
   TOOLSET_STOP,
   graderOf,
@@ -442,6 +444,244 @@ describe("R16-2 and R16-3: no trigger case changes, and no Skill's listing", () 
   });
 });
 
+/**
+ * The lines §R16 pinned (check-skills ROUND7_FIXED, the Skills stream's f328c6a): quoted by R16-4
+ * (the held swap, the seeding evidence) or worded by the stream where a ruling describes a line
+ * (its fixed-lines record: the confirm line, the ask for an unnamed player, the IR hand-off).
+ */
+const R16 = Object.freeze({
+  heldSwap: "Top swap: coin flip — no move (<a> ↔ <b>, Δ <x>)",
+  heldRow:
+    'A lineup table that must still show the held pair opens that row with "Coin flip — no move", its Deadline cell "—".',
+  evidence: "Seeding evidence: <evidence> — not confirmed, so both readings are shown.",
+  confirm: "What would confirm it: <what_would_confirm>.",
+  otherPlayer:
+    'Who is the <role> the claim means? This check ran for "<name>" (<player_id>); name him and I will check the claim for him too.',
+  otherIr:
+    "Also IR-eligible: <players> — the `espn-fantasy-football:roster-audit` Skill decides which, if any, to move to IR.",
+  liveWin:
+    "ESPN's win probability: <`win_probability_espn`>; ours: <`p_win`> [<interval>] — <N> points apart",
+  gameDay: "Game day: <n> of your starters are locked (<names>).",
+});
+/** A fixed line with its placeholders filled in order. */
+const fill = (line: string, ...values: (string | number)[]): string => {
+  let i = 0;
+  return line.replace(/<[^<>]+>/g, () => String(values[i++] ?? "?"));
+};
+/**
+ * The forms a reply prints one fixed line in (R15-3, R15-7): plain; bold, whole and label; quoted;
+ * a list item; a table cell, whole and label | rest. The label is the text before the first ": ".
+ */
+const forms = (line: string): string[] => {
+  const m = /^(.{1,48}?): (.+)$/.exec(line);
+  const out = [
+    line,
+    `**${line}**`,
+    `> ${line}`,
+    `"${line}"`,
+    `- ${line}`,
+    `1. ${line}`,
+    `- **${line}**`,
+    `| ${line} |`,
+    `| Note | ${line} |`,
+  ];
+  if (m) {
+    const [, label = "", rest = ""] = m;
+    out.push(
+      `**${label}:** ${rest}`,
+      `| ${label} | ${rest} |`,
+      `| **${label}** | ${rest} |`,
+      `- **${label}:** ${rest}`,
+    );
+  }
+  return out;
+};
+
+describe("the lines §R16 pinned are the Skills' as committed (check-skills ROUND7_FIXED)", () => {
+  it.each<[string, string, string]>([
+    ["weekly", "heldSwapLine", R16.heldSwap],
+    ["weekly", "heldSwapRow", R16.heldRow],
+    ["trade", "seedingEvidenceLine", R16.evidence],
+    ["news-check", "confirmLine", R16.confirm],
+    ["news-check", "otherPlayerLine", R16.otherPlayer],
+    ["injury-cascade", "otherIrLine", R16.otherIr],
+  ])("%s %s", (skill, key, line) => {
+    expect(pin(ROUND7_FIXED, skill, key)).toBe(line);
+    expect(read(`skills/${skill}/SKILL.md`)).toContain(line);
+  });
+  it("start-sit's live and game-day lines, which SS-10-E reads, stand as rounds 5 and 6 pinned them", () => {
+    expect(pin(ROUND5_FIXED, "start-sit", "liveWinLine")).toBe(R16.liveWin);
+    expect(pin(ROUND6_FIXED, "start-sit", "branchGameDay")).toBe(R16.gameDay);
+    for (const l of [R16.liveWin, R16.gameDay])
+      expect(read("skills/start-sit/SKILL.md")).toContain(l);
+    // R16-2's hand-off: weekly gives a result-only question to start-sit, which prints that line
+    expect(read("skills/weekly/SKILL.md")).toContain(pin(ROUND7_FIXED, "weekly", "resultHandOff"));
+  });
+});
+
+describe("R16-4 and R16-2: the regex graders that read the new lines stand as round 7 shipped them, and accept them", () => {
+  const regexOf = (skill: string, name: string, lead: string): RegExp => {
+    const e = caseOf(skill, name).expectations.find((x) => x.startsWith(lead)) ?? "";
+    const p = /\((?:regex|regex_absent):\s*`([^`]+)`\)\s*$/.exec(e)?.[1];
+    if (p === undefined) throw new Error(`${name}: no regex grader "${lead}"`);
+    return new RegExp(p, "i");
+  };
+  it.each<[string, string, string, string]>([
+    [
+      "weekly",
+      "WK-1",
+      "No move row leaves its Deadline cell blank",
+      "3115e065fd5db9caf0818a1ade3ef6969701ebb1275c77b394558931db25e95a",
+    ],
+    [
+      "start-sit",
+      "SS-10-E",
+      "The reply shows ESPN's win probability labelled as ESPN's",
+      "abbc69c414063df20a9eebba6e07a3b560409c0c36adc0ba398fab92dbaa18b4",
+    ],
+  ])(
+    "%s %s: the grader is round 7's, byte for byte (never loosened)",
+    (skill, name, lead, hash) => {
+      const e = caseOf(skill, name).expectations.filter((x) => x.startsWith(lead));
+      expect(e).toHaveLength(1);
+      expect(sha(e[0] ?? "")).toBe(hash);
+    },
+  );
+
+  const deadline = "| Slot | Player | E | p10 | p90 | Deadline (ET) |\n|---|---|---|---|---|---|";
+  const table = (rows: string): string =>
+    `${deadline}\n| QB | "Drake Maye" (4431452) | 20.1 | 10.6 | 30.7 | Sun Oct 11, 1:00 PM |\n${rows}`;
+  const held = fill(R16.heldSwap, '"Rashid Shaheed"', '"Devaughn Vele"', "+0.01");
+  it("WK-1 09: the held-swap line, in every form, under the lineup table or as one of its rows, trips nothing", () => {
+    const blank = regexOf("weekly", "WK-1", "No move row leaves its Deadline cell blank");
+    for (const f of forms(held)) {
+      expect(blank.test(`${table("")}\n\n${f}`), `under the table: ${f}`).toBe(false);
+      const row = f.startsWith("|") ? f.replace(/ \|$/, " | — |") : `| ${f} | | | | | — |`;
+      expect(blank.test(table(row)), `as a row: ${row}`).toBe(false);
+    }
+  });
+  it("WK-1 09: a row opening 'Coin flip — no move' is no move row, in any cell form", () => {
+    const blank = regexOf("weekly", "WK-1", "No move row leaves its Deadline cell blank");
+    for (const r of [
+      '| Coin flip — no move | "Rashid Shaheed" ↔ "Devaughn Vele" | +0.01 | | | — |',
+      '| **Coin flip — no move** | "Rashid Shaheed" ↔ "Devaughn Vele" | +0.01 | | | — |',
+      "| `Coin flip — no move` | Shaheed ↔ Vele | +0.01 | | | — |",
+      '| Coin flip — no move ("Rashid Shaheed" ↔ "Devaughn Vele", Δ +0.01) | | | | | — |',
+    ])
+      expect(blank.test(table(r)), r).toBe(false);
+  });
+  it("WK-1 09: a move row whose Deadline cell is blank or '—' still trips — round 7's Sonnet row among them", () => {
+    const blank = regexOf("weekly", "WK-1", "No move row leaves its Deadline cell blank");
+    for (const r of [
+      '| Swap | Shaheed → "Devaughn Vele" (4569559) | +0.01 | | | — |', // round 7, Sonnet Lane 2 run 1
+      '| Swap | Shaheed → "Devaughn Vele" (4569559) | +0.01 | | |  |',
+      '| Start "Devaughn Vele" over "Rashid Shaheed" | | +0.01 | | | — |',
+      '| Move "Tank Dell" BE → IR | | | | | — |',
+      "| Swap | Shaheed → Vele | +0.01 | | | n/a |",
+    ])
+      expect(blank.test(table(r)), r).toBe(true);
+  });
+
+  it("SS-10-E 01: start-sit's live line, filled in from sunday-live, in every form; weekly's own estimate alone never", () => {
+    const re = regexOf("start-sit", "SS-10-E", "The reply shows ESPN's win probability");
+    for (const l of [
+      fill(R16.liveWin, "75%", "50.4%", "40.0–60.7%", "24.6"), // round 7, Opus run 1
+      fill(R16.liveWin, "75 %", "50.4 %", "40–61 %", "24.6"),
+      fill(R16.liveWin, "0.75", "0.504", "0.40–0.61", "24.6"),
+    ])
+      for (const f of forms(l)) expect(re.test(f), f).toBe(true);
+    for (const t of [
+      "Short answer: it's about a coin flip. Your win probability: 50% (40–61%).", // round 7, Sonnet run 2
+      "I didn't pull ESPN's own win probability.",
+      fill(R16.gameDay, 5, "Jeanty, Maye, Fannin, Tuten, Little"),
+      caseOf("start-sit", "SS-10-E").prompt,
+    ])
+      expect(re.test(t), t).toBe(false);
+  });
+});
+
+describe("R16-4: the judges that read the new lines name them (R11-3: made exact), one judge per condition (R13-1)", () => {
+  it("WK-1 10: weekly's held-swap line is a hold, which needs no time", () => {
+    const c = caseOf("weekly", "WK-1");
+    expect(c.expectations).toContain(
+      `Every move the reply recommends outside a table's Deadline column — in a sentence, a list line, the Deadlines block or a table without that column — names when it is due: a time, or the waiver run or kickoff it is timed by. A pass, a hold or a row the tool holds is no move and needs none (weekly's held-swap line '${R16.heldSwap}' is one) (llm)`,
+    );
+    expect(c.expectations).not.toContain(
+      "Every move the reply recommends outside a table's Deadline column — in a sentence, a list line, the Deadlines block or a table without that column — names when it is due: a time, or the waiver run or kickoff it is timed by. A pass, a hold or a row the tool holds is no move and needs none (llm)",
+    );
+    expect(c.expected_output).toContain(
+      `a held coin-flip swap on weekly's fixed line '${R16.heldSwap}' under the lineup table, never a table row (changelog §R16, R16-4)`,
+    );
+  });
+  it("TR-5-E 08 names the seeding evidence line as asserting no reading, and a judge of its own grades that line's one place", () => {
+    const c = caseOf("trade", "TR-5-E");
+    expect(c.expectations).not.toContain("The reply does not assert one seeding reading (llm)");
+    expect(c.expectations[7]).toBe(
+      `The reply does not assert one seeding reading (trade's fixed line '${R16.evidence}', in Confidence & freshness, asserts none) (llm)`,
+    );
+    expect(c.expectations[9]).toBe(
+      `The reply gives the seeding evidence on trade's fixed line alone (in Confidence & freshness, '${R16.evidence}'): no other sentence says what the evidence suggests or which reading it favours (llm)`,
+    );
+    expect(c.expectations.filter((e) => graderOf(e) === "llm")).toHaveLength(7);
+    // the Skill's own rule, which the new judge grades
+    expect(read("skills/trade/SKILL.md")).toContain(
+      pin(ROUND7_FIXED, "trade", "seedingEvidenceOnly"),
+    );
+    expect(c.expected_output).toContain(
+      `is given only on trade's Confidence & freshness line, '${R16.evidence}', and no other sentence weighs it (changelog §R16, R16-4)`,
+    );
+    // r13-1-judge-splits.test.ts: the example still shows the split judge's condition
+    expect(c.expected_output).toMatch(
+      /asks which reading applies in trade's fixed line, asserting neither/,
+    );
+  });
+  it("NC-2 05 quotes news-check's confirm line", () => {
+    const c = caseOf("news-check", "NC-2");
+    expect(c.expectations).toContain(
+      `The reply names the tool's \`what_would_confirm\` items as what would settle it (on this fixture, the next official injury report; news-check's fixed line '${R16.confirm}' does) (llm)`,
+    );
+    expect(c.expectations).not.toContain(
+      "The reply names the tool's `what_would_confirm` items as what would settle it (on this fixture, the next official injury report) (llm)",
+    );
+  });
+});
+
+describe("the examples follow the new Skill text (the judges' one passing reply)", () => {
+  it("NC-5-E: the check for Jeanty, then news-check's ask for the backup, filled in", () => {
+    expect(caseOf("news-check", "NC-5-E").expected_output).toContain(
+      `on news-check's fixed line '${fill(R16.otherPlayer, "backup", "Ashton Jeanty", 4890973)}'.`,
+    );
+  });
+  it("IC-1 and IC-INJ: only the injured player's IR consequence; the other IR-eligible players handed to roster-audit, no pick", () => {
+    // on IC-1's and IC-INJ's servers ir.eligible_now is Tank Dell (INJURY_RESERVE) and Rachaad White
+    // (OUT), with Alec Pierce already in one of the two IR slots
+    const filled = fill(
+      R16.otherIr,
+      '"Tank Dell" (4366031, INJURY_RESERVE), "Rachaad White" (4697815, OUT)',
+    );
+    expect(caseOf("injury-cascade", "IC-1").expected_output).toContain(`'${filled}'`);
+    expect(caseOf("injury-cascade", "IC-INJ").expected_output).toContain(
+      "its IR line included: the other IR-eligible bench players named on injury-cascade's fixed 'Also IR-eligible: …' line, with no pick (changelog §R16, R16-4)",
+    );
+  });
+  it("SP-4-E and SP-INJ: one horizon, through_playoffs; KD-INJ and SS-10-E: the hand-offs", () => {
+    for (const name of ["SP-4-E", "SP-INJ"])
+      expect(caseOf("schedule-plan", name).expected_output, name).toMatch(
+        /horizon through_playoffs, schedule-plan's one horizon \(changelog §R16, R16-4\)/,
+      );
+    expect(read("skills/schedule-plan/SKILL.md")).toContain(
+      pin(ROUND7_FIXED, "schedule-plan", "horizonRule"),
+    );
+    expect(caseOf("stream-kdef", "KD-INJ").expected_output).toContain(
+      "should the waivers Skill load first, it hands the question over, and stream-kdef's answer is the whole reply (changelog §R16, R16-2)",
+    );
+    expect(caseOf("start-sit", "SS-10-E").expected_output).toContain(
+      "should the weekly Skill load first, it hands the question over, and start-sit's answer is the whole reply (changelog §R16, R16-2)",
+    );
+    expect(read("skills/waivers/SKILL.md")).toContain(pin(ROUND7_FIXED, "waivers", "kdstHandOff"));
+  });
+});
+
 describe("the previous gate's open questions, held with their evidence (4, 6 and 8)", () => {
   /** sha256 of the regex graders round 7 ran and this round keeps as they are */
   const kept: [string, string, string, string][] = [
@@ -549,6 +789,9 @@ describe("the built suite holds every change (planSuite, no errors)", () => {
       ["weekly--wk-10", 7, 7],
       ["waivers--wv-1", 7, 6],
       ["roster-audit--ra-core", 1, 3],
+      ["trade--tr-5-e", 7, 3],
+      ["news-check--nc-2", 4, 1],
+      ["weekly--wk-1", 3, 8],
     ] as const) {
       expect(judges(dir), dir).toHaveLength(j);
       expect(free(dir), dir).toHaveLength(fr);

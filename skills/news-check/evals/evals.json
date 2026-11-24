@@ -31,7 +31,7 @@
         "The reply reports espn_analyze_evidence's flag with its basis — consistent passes when said so (llm)",
         "The reply says the official practice side is missing this week (llm)",
         "The reply says neither version is confirmed by the official report yet (llm)",
-        "The reply names the tool's `what_would_confirm` items as what would settle it (on this fixture, the next official injury report) (llm)"
+        "The reply names the tool's `what_would_confirm` items as what would settle it (on this fixture, the next official injury report; news-check's fixed line 'What would confirm it: <what_would_confirm>.' does) (llm)"
       ]
     },
     {
@@ -120,7 +120,7 @@
       "$comment": "R13-1: NC-5-E 03 stays one — 'gives the check's answer' and 'reports no refused call' are one fact said two ways: the call answered on its first try, as the reply shows it (changelog §R16, R16-3: no tool-input grader is equivalent to 'not refused', so the judge grades what the reply shows).",
       "toolset": "full",
       "prompt": "Saw this on my timeline:\nBeat writer: my RB1's backup will get more work this week\n(from the team's practice report)\nIs it true?",
-      "expected_output": "The paste runs over three lines: claim.text is the pasted claim with its line breaks joined by single spaces and nothing else changed, so espn_analyze_evidence accepts it on the first call. 'My RB1' resolves to Ashton Jeanty by ESPN's week projection, and the claim is about his backup, whom the user does not name: the check runs at once for Jeanty, and the answer asks for the backup's name in one line after its answer, never before the check (news-check §2; changelog §R16, R16-3). The claim is quoted as unconfirmed and weighed against the usage and ESPN's status, with the tool's flag on news-check's fixed Flag line (unconfirmed_narrative on this fixture) and what would confirm it.",
+      "expected_output": "The paste runs over three lines: claim.text is the pasted claim with its line breaks joined by single spaces and nothing else changed, so espn_analyze_evidence accepts it on the first call. 'My RB1' resolves to Ashton Jeanty by ESPN's week projection, and the claim is about his backup, whom the user does not name: the check runs at once for Jeanty, and the answer asks for the backup's name in one line after its answer, never before the check (news-check §2; changelog §R16, R16-3), on news-check's fixed line 'Who is the backup the claim means? This check ran for \"Ashton Jeanty\" (4890973); name him and I will check the claim for him too.'. The claim is quoted as unconfirmed and weighed against the usage and ESPN's status, with the tool's flag on news-check's fixed Flag line (unconfirmed_narrative on this fixture) and what would confirm it.",
       "files": ["evals/fixtures/fx-10h"],
       "expectations": [
         "espn_analyze_evidence was called with the pasted claim (tool_used: input_match claim non-empty)",

@@ -445,10 +445,12 @@ describe("R11-3 (§R14): the PASS-if lines round 5's judges failed on replies th
   });
 
   it("NC-2 05: the tool's what_would_confirm items settle it", () => {
+    // changelog §R16 (the round-7 section's NC-2 entry): the line now quotes news-check's confirm
+    // line (round8-eval-cases.test.ts)
     has(
       "news-check",
       "NC-2",
-      "The reply names the tool's `what_would_confirm` items as what would settle it (on this fixture, the next official injury report) (llm)",
+      "The reply names the tool's `what_would_confirm` items as what would settle it (on this fixture, the next official injury report; news-check's fixed line 'What would confirm it: <what_would_confirm>.' does) (llm)",
     );
     expect(caseOf("news-check", "NC-2").expectations.join("\n")).not.toMatch(
       /what would confirm one version or the other/,
