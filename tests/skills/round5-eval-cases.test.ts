@@ -666,7 +666,10 @@ describe("WK-10: one judge per clause (changelog §R12, R12-2), the empty histor
     );
     // the round-5 verifier's V5S-5: the history clause and the hand-off clause were split too
     expect(llm).toHaveLength(7);
-    for (const l of llm) expect(l.split(/;/)).toHaveLength(1);
+    // a fixed line a judge quotes, in its parentheses, is no clause of its own (changelog §R16, R16-5:
+    // WK-10 08 quotes weekly's Partial line, which holds a ";")
+    for (const l of llm)
+      expect(l.replace(/\((?:[^()]|\([^()]*\))*\)/g, " ").split(/;/)).toHaveLength(1);
   });
 
   it("the history clause says the persisted history is empty on this seed", () => {
@@ -876,7 +879,8 @@ describe("R12-2's split on the lines the round-5 verifier named", () => {
       "weekly",
       "WK-10",
       [
-        "The League activity section reports the server's persisted history — 0 adds, drops, claims and trades in the 7-day window, empty on this seed (llm)",
+        // changelog §R16, R16-5: 08 quotes weekly's fixed Partial line (round8-eval-cases.test.ts)
+        `The League activity section reports the server's persisted history — 0 adds, drops, claims and trades in the 7-day window, empty on this seed (weekly's fixed line 'Partial — the server's persisted history only: <a> adds, <d> drops, <c> claims, <t> trades in the 7-day window; not read: <the refused reads> (by-team activity, waiver-order movement and rival needs go without them).' reports it, with 0 for each) (llm)`,
         "The League activity section gives no transaction, standing or waiver-order figure the tools did not return (llm)",
         "The answer ends with the hand-off line to session-check (llm)",
         "The answer gives eff setup once (the hand-off line) — never again in the section or in Confidence & freshness (llm)",

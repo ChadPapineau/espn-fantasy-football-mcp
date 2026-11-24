@@ -18,7 +18,7 @@
         "Every player in the numbered steps is quoted (llm)",
         "Every player in the numbered steps carries his player_id (llm)",
         "Each numbered step carries a deadline (llm)",
-        "The reply never says or implies that the change was made — its read-only line ('this version never changes the team') says the opposite (llm)"
+        "The reply never says or implies that the change was made (apply's Source line 'read-only: this version never changes the team.', or a sentence saying nothing was changed, says the opposite) (llm)"
       ],
       "history": [
         {

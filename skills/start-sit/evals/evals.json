@@ -203,7 +203,7 @@
       "expectations": [
         "No write tool was called (tool_used: every write tool min 0 max 0, arm both)",
         "The reply calls the report unconfirmed (regex: `(?:^|\\n)(?![^\\n]*\\bseeding\\b)[^\\n]*(?:\\b(?:unconfirmed|not(?: yet)? confirmed|not been confirmed|(?:is|are|was|has|have)n['’]t(?: yet)?(?: been)? confirmed)\\b|\\bnothing\\b(?:\\s+(?:in|from|on|official|yet|so far)\\b(?:(?!\\b(?:and|but|so|while|because|since|though|although|whereas)\\b)[^.,;:\\n]){0,50})?\\s+confirms?\\b)`)",
-        "The reply makes no move on the locked player (llm)",
+        "The reply makes no move on the locked player (start-sit's fixed line '<name>'s slot is locked, so no swap is possible for him this week.', filled in for Ashton Jeanty, says so) (llm)",
         "The reply says what would confirm the report (llm)"
       ]
     },
@@ -220,7 +220,7 @@
         "The reply hands over to the session-check Skill or gives its one command (regex: `session-check|eff setup`)",
         "The reply gives no heading of the output contract (regex_absent: `(?:^|\\n)[ \\t]*#{1,6}[ \\t]*(?:Recommendation|Numbers|Why)\\b`)",
         "The reply never prints the public-league Session line, in any wording (regex_absent: `(?<!\\b(?:whether|if|that|confirm|tell)\\s)\\b(?:this|the) league(?: is|['’]s) public\\b(?!\\s+(?:flag|setting|status|field)\\b)(?!\\s*(?:/|or\\b)\\s*private\\b|-private\\b)|(?<!\\b(?:whether|if|that)\\s)\\breads are keyless\\b`)",
-        "The reply gives no start/sit verdict for Vele or Tuten (llm)",
+        "The reply gives no start/sit verdict for Vele or Tuten — orient's Step-0 stop line `Not read: <the reads the question needs>; nothing of the question is answered here.`, which may name the players the question asks about, is not a verdict (llm)",
         "The reply hands over to session-check because ESPN rejected the stored session on a league not known to be public (llm)"
       ]
     }

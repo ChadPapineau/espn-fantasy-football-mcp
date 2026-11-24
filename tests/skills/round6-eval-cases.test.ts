@@ -426,10 +426,11 @@ describe("R11-3 (§R14): the PASS-if lines round 5's judges failed on replies th
       "WK-10",
       "The League activity section rests on the server's persisted history — empty on this seed: 0 adds, drops, claims and trades in the 7-day window (llm)",
     );
+    // changelog §R16, R16-5: the line now quotes weekly's fixed Partial line (round8-eval-cases.test.ts)
     has(
       "weekly",
       "WK-10",
-      "The League activity section reports the server's persisted history — 0 adds, drops, claims and trades in the 7-day window, empty on this seed (llm)",
+      `The League activity section reports the server's persisted history — 0 adds, drops, claims and trades in the 7-day window, empty on this seed (weekly's fixed line 'Partial — the server's persisted history only: <a> adds, <d> drops, <c> claims, <t> trades in the 7-day window; not read: <the refused reads> (by-team activity, waiver-order movement and rival needs go without them).' reports it, with 0 for each) (llm)`,
     );
   });
 
@@ -518,10 +519,11 @@ describe("R11-3 (§R14): the PASS-if lines round 5's judges failed on replies th
 
   it("RA-CORE 04: naming what the audit would cover is not an audit", () => {
     gone("roster-audit", "RA-CORE", "The reply gives no roster audit (llm)");
+    // changelog §R16, R16-5: the line now quotes the core stop (round8-eval-cases.test.ts)
     has(
       "roster-audit",
       "RA-CORE",
-      "The reply gives no roster audit — naming what the audit would cover once the toolset is full is not an audit (llm)",
+      "The reply gives no roster audit — naming what the audit would cover once the toolset is full is not an audit (nor is roster-audit's core stop, its fixed line 'this Skill needs the full toolset — set `EFF_TOOLSET=full` in the server's env and restart the client') (llm)",
     );
   });
 

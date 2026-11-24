@@ -93,7 +93,7 @@
         "The skill called espn_get_status (tool_used)",
         "The reply names the full toolset setting (regex: `EFF_TOOLSET=full`)",
         "The reply says to restart the client (regex: `restart`)",
-        "The reply gives no roster audit — naming what the audit would cover once the toolset is full is not an audit (llm)"
+        "The reply gives no roster audit — naming what the audit would cover once the toolset is full is not an audit (nor is roster-audit's core stop, its fixed line 'this Skill needs the full toolset — set `EFF_TOOLSET=full` in the server's env and restart the client') (llm)"
       ]
     }
   ]
