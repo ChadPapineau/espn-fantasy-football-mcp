@@ -98,7 +98,7 @@
         {
           "id": "race",
           "tool": "espn_analyze_matchup",
-          "args": { "mode": "season", "seeding_mode": "both" }
+          "args": { "mode": "season", "seeding_mode": "both", "horizon": "through_playoffs" }
         },
         {
           "id": "plan",

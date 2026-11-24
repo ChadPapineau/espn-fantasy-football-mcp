@@ -34,6 +34,7 @@ import {
   checkSkills,
   toolOutputFieldProblems,
 } from "../../scripts/skills/check-skills.mjs";
+import { loadToolSequences } from "../../scripts/skills/tool-sequences.mjs";
 import { toolsFor } from "../../src/mcp/registry.js";
 import { FX_WEEK, MY_TEAM, fxLeague } from "../domain/analytics/fx10h-world.js";
 import { ROOT, SKILLS, emptyDenylist, tempRepo, type TempRepo } from "./helpers.js";
@@ -545,6 +546,24 @@ describe("no new line contradicts the rules beside it", () => {
     const b = body("schedule-plan");
     expect(read("src/mcp/bounds.ts")).toContain('"through_playoffs"');
     expect(b).not.toContain("when the question is about seeds, byes or the title");
+  });
+
+  it("schedule-plan's Lane 1 sequences run every season simulation with that one horizon (the gate; the Skills verifier's V1)", () => {
+    // step 3.4 passes `horizon: "through_playoffs"` on every call (R16-4), so every sequence the dry
+    // run replays for it does too — the both-readings race as well as the configured one
+    expect(line("schedule-plan", "horizonRule")).toContain(
+      '`horizon: "through_playoffs"` on every call',
+    );
+    const races = (
+      loadToolSequences(ROOT, { toolset: "all" }).find((s) => s.skill === "schedule-plan")
+        ?.sequences ?? []
+    ).flatMap((q) =>
+      q.steps
+        .filter((x) => x.tool === "espn_analyze_matchup" && x.args.mode === "season")
+        .map((x) => ({ sequence: q.id, args: x.args })),
+    );
+    expect(races.map((r) => r.sequence)).toEqual(["season", "both_readings"]);
+    for (const r of races) expect(r.args.horizon, r.sequence).toBe("through_playoffs");
   });
 
   it("injury-cascade's other-IR line uses guardrail 8's IR tags, names roster-audit, which owns the choice, and picks none", () => {
