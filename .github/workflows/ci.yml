@@ -319,8 +319,9 @@ jobs:
     name: test
     runs-on: ubuntu-24.04
     # the unit + coverage suite took 12.7 min on 2026-10-19 and outgrew 15 with Stage C's regression tests;
+    # by 2026-11-24 it took about 23 min, and over 30 on slower runners (three timeouts, no failing test);
     # a wall-clock budget, not a quality gate (coverage thresholds are unchanged)
-    timeout-minutes: 30
+    timeout-minutes: 45
     steps:
       - name: Check out
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
