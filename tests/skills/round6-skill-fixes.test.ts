@@ -386,11 +386,12 @@ describe("round 5's frontmatter (changelog §R14, R14-3; onboard pos-05)", () =>
     );
   });
 
-  it("R14-3: news-check names the official report only as what a relayed report is checked against", () => {
+  // R14-3 is superseded by changelog §R15, R15-2 (round7-skill-fixes.test.ts): the description names
+  // no official report at all; when_to_use still names none
+  it("R14-3, as R15-2 extends it: news-check names no official report in its frontmatter", () => {
     const d = str(fm("news-check").description);
     const w = str(fm("news-check").when_to_use);
-    expect(d.match(/official report/g)).toHaveLength(1);
-    expect(d).toContain("Checks a relayed report against the official report");
+    expect(d).not.toMatch(/official/);
     expect(w).not.toMatch(/official|report\b/);
     expect(d).toContain("what ESPN's outlook says and whether to act on it");
   });
