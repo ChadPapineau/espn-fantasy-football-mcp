@@ -3,11 +3,13 @@
 // #### skill_text_defect, the NC-2 entry of #### model_variance and Next steps item 2; changelog §R16,
 // R16-2 to R16-4 and R16-6's Skill side; the previous gate's open questions 10 to 12): every fixed
 // line fails the check when it is cut or reworded, orient's two new sentences fail in every copy, the
-// text the fixes replace fails when restored, the lines the spec quotes are its text character for
-// character, each line sits where its rule prints it and contradicts no rule beside it, the two
-// hand-offs reach the other Skill's own lines (start-sit's game-day lines on SS-10-E's fixture,
-// stream-kdef's verdict and relayed-claim lines), and the free graders that read those places accept
-// the new forms; the cheat-sheet's waivers row names R16-6's field as the tool's schema carries it.
+// text the fixes replace or withdraw fails when restored (weekly's table row for a held swap, which
+// R16-4's "never a table row" rules out: the refix's F3), the lines the spec quotes are its text
+// character for character, each line sits where its rule prints it and contradicts no rule beside
+// it, the two hand-offs reach the other Skill's own lines (start-sit's game-day lines on SS-10-E's
+// fixture, stream-kdef's verdict and relayed-claim lines), and the free graders that read those
+// places accept the new forms; the cheat-sheet's waivers row names R16-6's field as the tool's
+// schema carries it.
 // Each mutation runs on one temporary copy of the bundle and is undone after it; no network (the
 // fixture is read in process, through the real provider in fixture mode).
 import { readFileSync } from "node:fs";
@@ -159,7 +161,8 @@ const graderAt = (skill: string, name: string, at: number): RegExp => {
 
 describe("round 7's fixed lines (changelog §R16; R12-1, R15-7)", () => {
   it("the committed bundle carries every one, and the check is clean", () => {
-    expect(fixedRows.length).toBeGreaterThanOrEqual(30);
+    // 30 built, less weekly's withdrawn row for the held swap (the refix's F3)
+    expect(fixedRows.length).toBeGreaterThanOrEqual(29);
     for (const [skill, file, , s] of fixedRows)
       expect(read(`skills/${skill}/${file}`), `${skill}: ${s}`).toContain(s);
     expect(errorsOf()).toBe("");
@@ -203,7 +206,7 @@ describe("orient's two new sentences fail in every copy (the previous gate's ope
 });
 
 describe("the lines the spec quotes are its text, character for character", () => {
-  it("R16-4's weekly and trade lines, and the round-7 section's row opening", () => {
+  it("R16-4's weekly and trade lines, and its 'never a table row' over the round-7 entry's row", () => {
     const quoted: [string, string, string][] = [
       ["weekly", "heldSwapLine", "Top swap: coin flip — no move (<a> ↔ <b>, Δ <x>)"],
       [
@@ -216,9 +219,19 @@ describe("the lines the spec quotes are its text, character for character", () =
       expect(bare(line(skill, k)), `${skill}.${k}`).toBe(want);
       expect(SPEC, `${skill}.${k}`).toContain(want);
     }
-    // the row a table must open with when it shows the held pair (the round-7 section's WK-1 fix)
+    // R16-4 quotes the held-swap line with "never a table row" and no exception, and so does Next
+    // steps item 2; the round-7 section's WK-1 entry also offers a row ("A row that must show it
+    // opens …"). Where they differ the ruling wins (the refix's F3): weekly keeps "never a table
+    // row" and carries no row for the held pair
+    expect(SPEC).toContain(
+      "one fixed line, `Top swap: coin flip — no move (<a> ↔ <b>, Δ <x>)`, never a table row.",
+    );
+    expect(SPEC).toContain(
+      'the held swap on its fixed "Top swap: coin flip — no move (…)" line, never a table row;',
+    );
     expect(SPEC).toContain('A row that must show it opens "Coin flip — no move"');
-    expect(line("weekly", "heldSwapRow")).toContain('opens that row with "Coin flip — no move"');
+    expect(line("weekly", "heldSwapNoRow")).toContain("— never a table row:");
+    expect(F.weekly?.["SKILL.md"]?.heldSwapRow).toBeUndefined();
   });
 
   it("R16-4's horizon and R16-6's field, as the rulings fix them", () => {
@@ -279,8 +292,10 @@ describe("each line where its rule prints it", () => {
       `**the League-activity-only answer** (Output, below). ${line("weekly", "resultHandOff")} ${line("weekly", "resultStays")} Otherwise run every step.`,
     );
     const matchup = section(b, "### This week's matchup and lineup");
+    // the no-row rule is the held swap's last sentence: the rec's lineup rule follows it, with no
+    // row exception between them (R16-4; the refix's F3)
     expect(matchup).toContain(
-      `(one line for each basis the lineup's projections carry). ${line("weekly", "heldSwapRule")} ${line("weekly", "heldSwapLine")} — ${line("weekly", "heldSwapValues")} ${line("weekly", "heldSwapNoRow")} ${line("weekly", "heldSwapRow")}`,
+      `(one line for each basis the lineup's projections carry). ${line("weekly", "heldSwapRule")} ${line("weekly", "heldSwapLine")} — ${line("weekly", "heldSwapValues")} ${line("weekly", "heldSwapNoRow")} The lineup the rec sets or keeps is \`rec.subjects[]\``,
     );
     const waivers = section(b, "### Waivers");
     expect(waivers).toContain(
@@ -438,9 +453,10 @@ describe("no new line contradicts the rules beside it", () => {
     );
     expect(bare(line("weekly", "heldSwapLine"))).toContain("coin flip — no move");
     expect(b).toContain('a change the rec holds is **"no move"**, said plainly');
-    // a row with no move says "—" (the deadline rule), and the held row is no move
+    // the held swap gets no row and no time (it is no move), beside the deadline rule's own "A row
+    // with no move says "—"" for the rows a table does have, which it leaves standing
+    expect(line("weekly", "heldSwapNoRow")).toContain("no time, since it is no move");
     expect(b).toContain('A row with no move says "—"');
-    expect(line("weekly", "heldSwapRow")).toContain('its Deadline cell "—"');
     const absent = graderAt("weekly", "WK-1", 9);
     const header =
       '| Slot | Player | E | p10 | p90 | Deadline (ET) |\n|---|---|---|---|---|---|\n| WR | "Rashid Shaheed" (4032473) | 9.1 | 3.0 | 16.2 | Sun 1:00 PM ET |';
@@ -451,6 +467,8 @@ describe("no new line contradicts the rules beside it", () => {
       "+0.01",
     );
     expect(absent.test(`${header}\n\n${heldLine}`)).toBe(false);
+    // a run that gives the pair a "Coin flip — no move" row anyway, against the rule, trips nothing
+    // either: 09's lookahead is round 7's, so the row's withdrawal (F3) adds no free-grader failure
     expect(
       absent.test(
         `${header}\n| Coin flip — no move | "Rashid Shaheed" ↔ "Devaughn Vele" | +0.01 | | | — |`,
@@ -460,6 +478,20 @@ describe("no new line contradicts the rules beside it", () => {
     expect(
       absent.test(`${header}\n| Swap | Shaheed → "Devaughn Vele" (4569559) | +0.01 | | | — |`),
     ).toBe(true);
+  });
+
+  it("weekly's held swap is its fixed line alone: no sentence offers the held pair a table row (R16-4; the refix's F3)", () => {
+    const b = body("weekly");
+    // "never a table row" stands with nothing after it that reopens a row: neither the withdrawn
+    // sentence nor a rewording of its two marks (ROUND7_ABSENT holds the sentence itself)
+    expect(b).toContain(line("weekly", "heldSwapNoRow"));
+    expect(b).not.toMatch(/held pair/i);
+    expect(b).not.toMatch(/row with "coin flip/i);
+    expect(
+      (ROUND7_ABSENT as Record<string, Record<string, string[]>>).weekly?.["SKILL.md"],
+    ).toEqual([
+      'A lineup table that must still show the held pair opens that row with "Coin flip — no move", its Deadline cell "—".',
+    ]);
   });
 
   it("the hand-offs print none of the handing Skill's own output, and each keeps a request that spans more", () => {

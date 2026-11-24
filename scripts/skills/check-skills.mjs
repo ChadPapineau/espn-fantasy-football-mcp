@@ -1800,7 +1800,8 @@ export const ROUND7_FIXED = Object.freeze({
         "A question about this week's result alone — \"am I going to win this week?\", \"what are my chances this week?\" — is the `espn-fantasy-football:start-sit` Skill's: load that Skill and answer through it — its answer is the whole reply, orient's opening lines included, and none of this Skill's briefing prints (no header, section, table, Deadlines block or Not actionable list); that Skill takes its game-day or pre-game branch by the locks.",
       resultStays:
         "A request for the briefing that also asks about the result stays here: its matchup section answers it.",
-      // WK-1 09 (R16-4): a held coin-flip swap on one fixed line, never a table row
+      // WK-1 09 (R16-4): a held coin-flip swap on one fixed line, never a table row — with no row
+      // exception (ROUND7_ABSENT)
       heldSwapRule:
         "A held coin-flip swap (the tool's `coin_flip: true`, a change the rec holds) is one fixed line under the lineup table, verbatim with its values filled in:",
       heldSwapLine: '"Top swap: coin flip — no move (<a> ↔ <b>, Δ <x>)"',
@@ -1808,9 +1809,6 @@ export const ROUND7_FIXED = Object.freeze({
         "`<a>` the starter the rec keeps and `<b>` the bench player, each by his quoted name, `<x>` the swap's `delta_e` as the tool gives it",
       heldSwapNoRow:
         '— never a table row: no "Swap" row and no move row for it, and no time, since it is no move.',
-      // the round-7 section's WK-1 fix: a row that must show the pair opens as WK-1 09 accepts
-      heldSwapRow:
-        'A lineup table that must still show the held pair opens that row with "Coin flip — no move", its Deadline cell "—".',
       // WK-1 06, WV-1 08's weekly twin (R16-6): every listed player by name, never a bare id
       namesRule: LISTED_NAMES_RULE,
     },
@@ -1894,10 +1892,18 @@ export const ROUND7_FIXED = Object.freeze({
 });
 
 /**
- * Text round 7's triage withdrew: schedule-plan's horizon keyed to the question's wording (changelog
- * §R16, R16-4: SP-INJ's base and runs used different horizons).
+ * Text round 7's triage withdrew (changelog §R16): schedule-plan's horizon keyed to the question's
+ * wording (R16-4: SP-INJ's base and runs used different horizons); and weekly's row for a held
+ * coin-flip swap, which the round-7 section's WK-1 entry offered and R16-4 rules out: one fixed line,
+ * "never a table row", with no exception (the §R16 refix, the cross verifier's F3: the two sentences
+ * read two ways, R12-1).
  */
 export const ROUND7_ABSENT = Object.freeze({
+  weekly: {
+    "SKILL.md": [
+      'A lineup table that must still show the held pair opens that row with "Coin flip — no move", its Deadline cell "—".',
+    ],
+  },
   "schedule-plan": {
     "SKILL.md": [
       'and `horizon: "through_playoffs"` when the question is about seeds, byes or the title',

@@ -492,8 +492,6 @@ describe("R16-2 and R16-3: no trigger case changes, and no Skill's listing", () 
  */
 const R16 = Object.freeze({
   heldSwap: "Top swap: coin flip — no move (<a> ↔ <b>, Δ <x>)",
-  heldRow:
-    'A lineup table that must still show the held pair opens that row with "Coin flip — no move", its Deadline cell "—".',
   evidence: "Seeding evidence: <evidence> — not confirmed, so both readings are shown.",
   confirm: "What would confirm it: <what_would_confirm>.",
   otherPlayer:
@@ -541,7 +539,6 @@ const forms = (line: string): string[] => {
 describe("the lines §R16 pinned are the Skills' as committed (check-skills ROUND7_FIXED)", () => {
   it.each<[string, string, string]>([
     ["weekly", "heldSwapLine", R16.heldSwap],
-    ["weekly", "heldSwapRow", R16.heldRow],
     ["trade", "seedingEvidenceLine", R16.evidence],
     ["news-check", "confirmLine", R16.confirm],
     ["news-check", "otherPlayerLine", R16.otherPlayer],
