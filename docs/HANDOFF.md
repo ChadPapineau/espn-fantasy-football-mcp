@@ -28,6 +28,11 @@ and nothing secret ever lives in it.
 ceiling of about 93 %. The orchestrator ruled §R15 and paused. Nothing runs until the weekly reset
 (2026-11-24, 04:00 UTC); the owner's 75 % rule applies again from then.
 
+**Owner, 2026-11-23, 20:10 ET:** proceed now and use this week's remaining usage before the reset.
+The fix round (item 1) starts at once, with this week's ceiling at 98 % until the reset; round 7
+follows under the 75 % rule. The orchestrator amended R15-1 and R15-3 and added R15-7 first
+(`docs/plan/changelog.md` §R15).
+
 - **Where it stands.** §R14's fix round landed (`4896a2b` … `476d393`, verifiers, refix, gate, CI
   green). Round 6 ran on `476d393`: 32 batches, both models, `--runs 2`, fixture mode only, about
   $274 of eval. Report: the round-6 section of `docs/evals/stage-c-plugin-eval.md` (`644a5ac`,
@@ -37,10 +42,10 @@ ceiling of about 93 %. The orchestrator ruled §R15 and paused. Nothing runs unt
   - Trigger bar (judged across rounds 5 and 6, R14-6): met on Sonnet (410/410), not on Opus
     (409/410: news-check neg-03 fires on 1 of 2 runs).
   - No product defect. Every free-grader failure has a Skill-text or regex cause.
-- **The rulings the triage asked for are made:** §R15 (R15-1 … R15-6) in `docs/plan/changelog.md`.
+- **The rulings the triage asked for are made:** §R15 (R15-1 … R15-7, R15-1 and R15-3 amended on 2026-11-23) in `docs/plan/changelog.md`.
 - **Next, in order (after the reset):**
-  1. A fix round for §R15 and the round-6 report's "Next steps, in order" items 2 and 3, in two
-     streams (Skills; eval cases with the build), each with an independent verifier and a refix,
+  1. R15-7's audit of every free grader, then a fix round for §R15 and the round-6 report's "Next
+     steps, in order" items 2 and 3, in two streams (Skills; eval cases with the build), each with an independent verifier and a refix,
      then a gate that runs R15-3's cross-check and gets CI green. About 5 weekly points.
   2. Round 7 per R15-6, a full round: inj-base and every Lane 2 case, then every trigger case, on both
      models at `--runs 2`, judged on round 7 alone. About 31 points. Then the triage, the report section
