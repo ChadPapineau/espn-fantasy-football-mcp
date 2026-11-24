@@ -16,8 +16,14 @@
 // Skill's description or when_to_use. The previous gate's open questions 4, 6 and 8 are held here
 // with their evidence. One judge per condition (R13-1); the judge counts follow
 // (r13-1-judges.json). Each changed line is shown failing first: round 7's line, held here as
-// shipped, is gone. Reads the committed bundle, the plan and the server's real input schema; no
-// network.
+// shipped, is gone. The refix of the verifiers' findings on this stream (the eval-case verifier's
+// F1–F4, the cross-check's F1 and F2): NC-5-E's restated judge pinned the fixture's flag, which a
+// call accepted for another player or with a claim.type does not return, and joined two conditions
+// a kept reply fails apart, so 03 grades the check's answer, whichever its flag, and 05 a reply that
+// reports no refused call; TR-5-E 10 joined the evidence line's presence and its exclusivity, so 10
+// and 11 grade one each, and TR-5-E's example gives the evidence only on that line; WV-1 08 joined
+// the scramble list and its names, so 08 is round 7's line again and 13 grades the names. Reads the
+// committed bundle, the plan and the server's real input schema; no network.
 import { createHash } from "node:crypto";
 import { readFileSync } from "node:fs";
 import path from "node:path";
@@ -320,23 +326,55 @@ describe("R16-3: NC-5-E 03 is graded from what a run can show — no tool-input 
     /"claim"\s*:\s*\{(?:[^{}"]|"(?:[^"\\]|\\.)*")*?"text"\s*:\s*"(?:[^"\\]|\\.)*?\\n/;
   const json = (args: unknown): string => JSON.stringify(args);
 
-  it("the judge is restated on what the reply shows, one fact said two ways, and the case says why", () => {
+  /** 7067fcc's restatement, as committed before the refix: two conditions joined, a flag pinned */
+  const JOINED_03 = `The espn_analyze_evidence call was not refused, as the reply shows it: it gives the check's answer for the claim (news-check's fixed line '${LINE.ncFlag}', on this fixture \`unconfirmed_narrative\`) and reports no refused call (llm)`;
+  /** the refix's two judges, one condition each (R13-1) */
+  const ANSWER = `The reply gives the check's answer for the claim (news-check's fixed line '${LINE.ncFlag}' gives it, whichever flag the check returns) (llm)`;
+  const NO_REFUSAL =
+    "The reply reports no refused espn_analyze_evidence call (no call the tool turned down with an error, such as a claim text refused for its line breaks) (llm)";
+  const FLAGS = [
+    "unconfirmed_narrative",
+    "quiet_role_change",
+    "availability_conflict",
+    "consistent",
+    "no_claim",
+  ];
+
+  it("the judge is restated on what the reply shows, one judge per condition (R13-1): 03 the check's answer, 05 no refused call reported", () => {
     expect(c.expectations).not.toContain("The espn_analyze_evidence call was not refused (llm)");
-    expect(c.expectations[2]).toBe(
-      `The espn_analyze_evidence call was not refused, as the reply shows it: it gives the check's answer for the claim (news-check's fixed line '${LINE.ncFlag}', on this fixture \`unconfirmed_narrative\`) and reports no refused call (llm)`,
-    );
-    expect(c.$comment).toMatch(/^R13-1: NC-5-E 03 stays one — .*one fact said two ways/);
-    expect(c.$comment).toContain("changelog §R16, R16-3");
+    // the verifiers' F1 and F3 (failing first): the joined line, its flag pinned, is gone
+    expect(c.expectations).not.toContain(JOINED_03);
+    expect(c.expectations[2]).toBe(ANSWER);
+    expect(c.expectations[4]).toBe(NO_REFUSAL);
+    // 04, the regex on the flag, keeps its number: 05 follows it
+    expect(graderOf(c.expectations[3] ?? "")).toBe("regex");
+    // no R13-1 note: no judge of the case is kept as one for two conditions; the case says why two
+    expect(c.$comment ?? "").not.toMatch(/^R13-1/);
+    expect(c.$comment).toMatch(/^changelog §R16, R16-3: /);
+    expect(c.$comment).toContain("one judge per condition (R13-1)");
   });
 
-  it("no free grader is added: 01, 02 and 04 stand as round 7 shipped them, and 03 is the case's one judge", () => {
+  it("no judge pins the check's flag (the verifier's F1): calls the server accepts answer other flags", () => {
+    // single calls on NC-5-E's eval server (base--full), each accepted: Jeanty with the joined claim,
+    // with or without a source or an ISO time, unconfirmed_narrative; with claim.type coaching_intent,
+    // health, transaction or other, quiet_role_change, and availability, consistent; Mike Washington
+    // Jr., the other LV RB, consistent — four kept replies of rounds 5 to 7 checked him, each with
+    // "Flag: `consistent`", none refused. Which player §2 checks is not 03's condition.
+    for (const e of c.expectations.filter((x) => graderOf(x) === "llm"))
+      for (const flag of FLAGS) expect(e, `${flag}: ${e}`).not.toContain(flag);
+    expect(ANSWER).toContain("whichever flag the check returns");
+    // the example keeps the flag the check §2 directs gives, as an example only
+    expect(c.expected_output).toContain("(unconfirmed_narrative on this fixture)");
+  });
+
+  it("no free grader is added: 01, 02 and 04 stand as round 7 shipped them, and 03 and 05 are the case's judges", () => {
     const free = c.expectations.filter((e) => graderOf(e) !== "llm");
     expect(free).toEqual([
       "espn_analyze_evidence was called with the pasted claim (tool_used: input_match claim non-empty)",
       `The claim passed to espn_analyze_evidence is the paste with its line breaks joined by single spaces, otherwise word for word: "${JOINED}" (tool_used: input_match claim.text on the quoted claim)`,
       "The reply names a flag for the claim (regex: `unconfirmed[_ ]narrative|\\bconsistent\\b|quiet[_ ]role[_ ]change|availability[_ ]conflict`)",
     ]);
-    expect(c.expectations.filter((e) => graderOf(e) === "llm")).toHaveLength(1);
+    expect(c.expectations.filter((e) => graderOf(e) === "llm")).toEqual([ANSWER, NO_REFUSAL]);
   });
 
   it("the Skill's call is accepted, and the raw paste refused — the case's own refusal", () => {
@@ -616,22 +654,51 @@ describe("R16-4: the judges that read the new lines name them (R11-3: made exact
       `a held coin-flip swap on weekly's fixed line '${R16.heldSwap}' under the lineup table, never a table row (changelog §R16, R16-4)`,
     );
   });
-  it("TR-5-E 08 names the seeding evidence line as asserting no reading, and a judge of its own grades that line's one place", () => {
+  /** trade's Seeding evidence line filled in on TR-5-E's fixture: espn_get_league's seeding.evidence on
+   * points-only-seeding--full is season 2025, seed_order_matches_pf true, seed_order_matches_record
+   * false, suggests points_only (a single call on the case's eval server) */
+  const EVIDENCE_FILLED = fill(
+    R16.evidence,
+    "last season's seeds followed points for, not the records (suggests: points_only)",
+  );
+  /** 589f1ac's judge, as committed before the refix: the line's presence and its exclusivity joined */
+  const JOINED_10 = `The reply gives the seeding evidence on trade's fixed line alone (in Confidence & freshness, '${R16.evidence}'): no other sentence says what the evidence suggests or which reading it favours (llm)`;
+  const PRESENT_10 = `Confidence & freshness gives the seeding evidence on trade's fixed line ('${R16.evidence}', its evidence filled in) (llm)`;
+  const ONLY_11 =
+    "No sentence other than trade's Seeding evidence line says what the seeding evidence suggests or which reading it favours (the tool's why_they_accept lines, each under its reading, and trade's ask line are not such sentences) (llm)";
+  it("TR-5-E 08 names the seeding evidence line as asserting no reading; 10 and 11 grade that line's one place, one condition each (the verifiers' F2)", () => {
     const c = caseOf("trade", "TR-5-E");
     expect(c.expectations).not.toContain("The reply does not assert one seeding reading (llm)");
     expect(c.expectations[7]).toBe(
       `The reply does not assert one seeding reading (trade's fixed line '${R16.evidence}', in Confidence & freshness, asserts none) (llm)`,
     );
-    expect(c.expectations[9]).toBe(
-      `The reply gives the seeding evidence on trade's fixed line alone (in Confidence & freshness, '${R16.evidence}'): no other sentence says what the evidence suggests or which reading it favours (llm)`,
+    // failing first: the joined judge is gone; its two conditions stand in its place. Round 7's kept
+    // replies fail them apart: Sonnet run 1 gives no evidence at all (10 fails, 11 holds), and both
+    // Opus runs weigh it in the analysis ("the evidence suggests `points_only`"; 11 fails)
+    expect(c.expectations).not.toContain(JOINED_10);
+    expect(c.expectations.slice(9)).toEqual([PRESENT_10, ONLY_11]);
+    expect(c.expectations.filter((e) => graderOf(e) === "llm")).toHaveLength(8);
+    // the Skill's own rules, which they grade: the line's place (10) and its being the only mention (11)
+    const skill = read("skills/trade/SKILL.md");
+    expect(skill).toContain(pin(ROUND7_FIXED, "trade", "seedingEvidencePlace"));
+    expect(skill).toContain(pin(ROUND7_FIXED, "trade", "seedingEvidenceOnly"));
+    // R12-2: 11 never forbids what the contract prints — the standing lines and the ask name both
+    // readings and weigh no evidence
+    expect(skill).toContain(
+      '"under the record-first reading: …", "under the points-only reading: …"',
     );
-    expect(c.expectations.filter((e) => graderOf(e) === "llm")).toHaveLength(7);
-    // the Skill's own rule, which the new judge grades
-    expect(read("skills/trade/SKILL.md")).toContain(
-      pin(ROUND7_FIXED, "trade", "seedingEvidenceOnly"),
-    );
+    expect(skill).toContain("Which reading applies in your league");
+  });
+  it("TR-5-E's example gives the evidence on trade's line alone (the eval-case verifier's F4, the cross-check's F1)", () => {
+    const c = caseOf("trade", "TR-5-E");
+    // failing first: the example opened with the evidence, outside the line, as Opus's failing runs do
+    expect(c.expected_output).not.toMatch(/^Last season's seeds followed points for/);
+    expect(c.expected_output).toContain(`'${EVIDENCE_FILLED}'`);
+    // outside that line no sentence of the example says what last season's seeds show or suggest
+    const rest = c.expected_output.split(`'${EVIDENCE_FILLED}'`).join(" ");
+    expect(rest).not.toMatch(/last season|seeds followed|seed order|points_only/i);
     expect(c.expected_output).toContain(
-      `is given only on trade's Confidence & freshness line, '${R16.evidence}', and no other sentence weighs it (changelog §R16, R16-4)`,
+      "no other sentence says what the evidence suggests or which reading it favours (changelog §R16, R16-4)",
     );
     // r13-1-judge-splits.test.ts: the example still shows the split judge's condition
     expect(c.expected_output).toMatch(
@@ -712,12 +779,22 @@ describe("R16-6 and R16-5 on the waivers cases: the scramble list named as the t
     "Malachi Fields",
     "Jacory Croskey-Merritt",
   ];
-  it("WV-1 08 names the ten players of the scramble list, from truncated_names on this fixture", () => {
+  const QUOTED_TEN = TEN.map((n) => `"${n}"`).join(", ");
+  it("WV-1 13 names the ten players of the scramble list, from truncated_names on this fixture; 08 is round 7's line (the cross-check's F2)", () => {
     const c = caseOf("waivers", "WV-1");
-    expect(c.expectations).not.toContain("The reply gives a scramble list (llm)");
-    const line = `The reply gives a scramble list, naming its players (on this fixture the ten of data.truncated_names[], since the character budget cut their candidate rows: ${TEN.map((n) => `"${n}"`).join(", ")}) (llm)`;
-    expect(c.expectations[7]).toBe(line);
+    // failing first: 7119122's 08 joined the list and its names, which a list of bare ids fails apart
+    expect(c.expectations).not.toContain(
+      `The reply gives a scramble list, naming its players (on this fixture the ten of data.truncated_names[], since the character budget cut their candidate rows: ${QUOTED_TEN}) (llm)`,
+    );
+    // 08 is round 7's line again, byte for byte, and the names are a judge of their own, after the
+    // value-basis regex, so 09 to 12 keep their numbers (WV-1 12 is R15-3's free grader)
+    expect(c.expectations[7]).toBe("The reply gives a scramble list (llm)");
+    const line = `The reply names every scramble-list player (on this fixture the ten of data.truncated_names[], since the character budget cut their candidate rows: ${QUOTED_TEN}) (llm)`;
+    expect(c.expectations).toHaveLength(13);
+    expect(c.expectations[12]).toBe(line);
     expect(graderOf(line)).toBe("llm");
+    expect(graderOf(c.expectations[11] ?? "")).toBe("regex");
+    expect(c.expectations[11]).toMatch(/^The reply states the value basis \(regex:/);
     // what the judge grades is the Skills' rule, as committed, on the tool's new field
     expect(read("skills/waivers/SKILL.md")).toContain(LISTED_NAMES_RULE);
     expect(read("skills/weekly/SKILL.md")).toContain(LISTED_NAMES_RULE);
@@ -874,7 +951,7 @@ describe("the built suite holds every change (planSuite, no errors)", () => {
     const free = (dir: string) =>
       files(dir).filter((f) => /^type: "?(?:regex|tool_used|tool_order)"?$/m.test(f.text));
     for (const [dir, j, fr] of [
-      ["news-check--nc-5-e", 1, 3],
+      ["news-check--nc-5-e", 2, 3],
       ["apply--ap-2", 4, 5],
       ["start-sit--ss-12", 2, 2],
       ["start-sit--ss-13", 2, 5],
@@ -882,19 +959,43 @@ describe("the built suite holds every change (planSuite, no errors)", () => {
       ["waivers--wv-inj", 5, 1],
       ["retro--rt-inj", 9, 3],
       ["weekly--wk-10", 7, 7],
-      ["waivers--wv-1", 7, 6],
+      ["waivers--wv-1", 8, 6],
       ["roster-audit--ra-core", 1, 3],
-      ["trade--tr-5-e", 7, 3],
+      ["trade--tr-5-e", 8, 3],
       ["news-check--nc-2", 4, 1],
       ["weekly--wk-1", 3, 8],
     ] as const) {
       expect(judges(dir), dir).toHaveLength(j);
       expect(free(dir), dir).toHaveLength(fr);
     }
-    // NC-5-E 03's PASS-if line, as the judge reads it
-    const nc5 = files("news-check--nc-5-e").find((f) => f.rel.includes("03-"));
-    expect(nc5?.text).toContain(
-      "PASS if: The espn_analyze_evidence call was not refused, as the reply shows it:",
+    const grader = (dir: string, n: string) =>
+      files(dir).find((f) => f.rel.startsWith(`graders/${n}-`))?.text ?? "";
+    // NC-5-E 03 and 05, as the judges read them, and the regex between them keeps its number
+    expect(grader("news-check--nc-5-e", "03")).toContain(
+      "PASS if: The reply gives the check's answer for the claim (news-check's fixed line 'Flag: `<flag>` — <its meaning>.' gives it, whichever flag the check returns).",
+    );
+    expect(grader("news-check--nc-5-e", "04")).toMatch(/^type: "?regex"?$/m);
+    expect(grader("news-check--nc-5-e", "05")).toContain(
+      "PASS if: The reply reports no refused espn_analyze_evidence call (",
+    );
+    // TR-5-E 10 and 11: one condition each, and the example each judge sees gives the evidence on
+    // trade's line alone
+    expect(grader("trade--tr-5-e", "10")).toContain(
+      "PASS if: Confidence & freshness gives the seeding evidence on trade's fixed line (",
+    );
+    expect(grader("trade--tr-5-e", "11")).toContain(
+      "PASS if: No sentence other than trade's Seeding evidence line says what the seeding evidence suggests or which reading it favours (",
+    );
+    for (const n of ["10", "11"]) {
+      const example = grader("trade--tr-5-e", n).split("One passing reply, as an example only")[1];
+      expect(example, n).toBeDefined();
+      expect(example, n).not.toMatch(/: Last season's seeds followed points for/);
+    }
+    // WV-1: the names judge is 13, after the value-basis regex, which keeps its number (R15-3's 12)
+    expect(grader("waivers--wv-1", "08")).toContain("PASS if: The reply gives a scramble list.");
+    expect(grader("waivers--wv-1", "12")).toMatch(/^type: "?regex"?$/m);
+    expect(grader("waivers--wv-1", "13")).toContain(
+      "PASS if: The reply names every scramble-list player (on this fixture the ten of data.truncated_names[]",
     );
   });
 });

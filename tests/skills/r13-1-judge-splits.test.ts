@@ -9,11 +9,13 @@
 // order and two numbers named as one basis are split (the R13 refix verifier's F2). What is held:
 // the heuristic is pinned to the inventory, so a flagged judge the inventory does not hold fails — a
 // line joined by a joiner it knows ("and", ";", a list, ", never", "without", "instead of", "rather
-// than", "as well as", ", then", ", plus", ", also", "with its", "labelled", "each with", a quotation
-// "as a claim", a second sentence) cannot pass unsplit; every inventoried split is pinned in place
-// and every case's judge count, so a split line re-joined in any words fails too. A join in words the
-// heuristic does not know, on a new line, is not held (the verifier's F3). Reads the committed
-// bundle; no network.
+// than", "as well as", ", then", ", plus", ", also", "with its", ", naming its", "labelled", "each
+// with", a quotation "as a claim", ": no other", a second sentence) cannot pass unsplit; every
+// inventoried split is pinned in place and every case's judge count, so a split line re-joined in
+// any words fails too. A join in words the heuristic does not know, on a new line, is not held (the
+// verifier's F3); the §R16 fix round's two such lines (the cross-check's F2: an item joined to its
+// attribute by a participle, a line's presence joined to a prohibition after a colon) taught it two
+// more. Reads the committed bundle; no network.
 import { readFileSync, readdirSync } from "node:fs";
 import path from "node:path";
 import { describe, expect, it } from "vitest";
@@ -66,10 +68,11 @@ const passIf = (e: string): string => e.replace(/\s*\((?:[^()]|\([^()]*\))*\)\s*
  * Whether a PASS-if line joins conditions (R13-1: two or more independently checkable things, joined
  * by "and", by ";" or by a list): "and", ";", ", never" / ", not" / "— never" naming a second
  * behaviour, "without", "instead of", "rather than", "as well as", ", then" / ", plus" / ", also",
- * an item "with its" (or "at its") attribute, ", labelled" / ", each labelled", ", each with", a
- * quotation "as a claim", or a second sentence — outside parentheses (a fixture's values and
- * examples) and code spans. A heuristic: what it flags and the inventory keeps as one judge is listed
- * there with why.
+ * an item "with its" (or "at its") attribute or with a participle of it (", naming its players"),
+ * ", labelled" / ", each labelled", ", each with", a quotation "as a claim", a statement and a
+ * prohibition after a colon (": no other sentence …", ": nothing else …"), or a second sentence —
+ * outside parentheses (a fixture's values and examples) and code spans. A heuristic: what it flags and
+ * the inventory keeps as one judge is listed there with why.
  */
 export const joinsConditions = (e: string): boolean => {
   const t = passIf(e)
@@ -85,9 +88,11 @@ export const joinsConditions = (e: string): boolean => {
     /\bas well as\b/i,
     /(?:,|—|–)\s*(?:then|plus|also)\b/i,
     /\b(?:with|at) (?:its|his|their)\b/i,
+    /(?:,|—|–)\s*\w+ing\s+(?:its|his|their)\b/i,
     /(?:,|—|–)\s*(?:each\s+)?labell?ed\b/i,
     /(?:,|—|–)\s*each with\b/i,
     /\bquot(?:e|es|ed|ing)\b.*\bas (?:an?\s+)?(?:unconfirmed\s+)?claim\b/i,
+    /:\s*(?:no other|nothing else)\b/i,
     /\.\s+[A-Z]/,
   ].some((r) => r.test(t));
 };
@@ -214,6 +219,77 @@ describe("R13-1: every llm judge grades one condition", () => {
       "The reply does not bench the RB1 on the unconfirmed report: any swap for him is conditional on ESPN confirming it (llm)",
     ])
       expect(joinsConditions(j), j).toBe(false);
+  });
+
+  it("the §R16 fix round's joined lines are split, one judge per condition (the eval-case verifier's F2 and F3, the cross-check's F2)", () => {
+    const NC_FLAG = "Flag: `<flag>` — <its meaning>.";
+    const EVIDENCE = "Seeding evidence: <evidence> — not confirmed, so both readings are shown.";
+    const TEN =
+      '"KC Concepcion", "Khalil Shakir", "Tre Tucker", "Caleb Douglas", "Wan\'Dale Robinson", "Dontayvion Wicks", "Keon Coleman", "Keenan Allen", "Malachi Fields", "Jacory Croskey-Merritt"';
+    // each line as the fix round committed it, and the judges that stand for it now
+    const lines: [string, string, string, string[]][] = [
+      [
+        "news-check",
+        "NC-5-E",
+        `The espn_analyze_evidence call was not refused, as the reply shows it: it gives the check's answer for the claim (news-check's fixed line '${NC_FLAG}', on this fixture \`unconfirmed_narrative\`) and reports no refused call (llm)`,
+        [
+          `The reply gives the check's answer for the claim (news-check's fixed line '${NC_FLAG}' gives it, whichever flag the check returns) (llm)`,
+          "The reply reports no refused espn_analyze_evidence call (no call the tool turned down with an error, such as a claim text refused for its line breaks) (llm)",
+        ],
+      ],
+      [
+        "trade",
+        "TR-5-E",
+        `The reply gives the seeding evidence on trade's fixed line alone (in Confidence & freshness, '${EVIDENCE}'): no other sentence says what the evidence suggests or which reading it favours (llm)`,
+        [
+          `Confidence & freshness gives the seeding evidence on trade's fixed line ('${EVIDENCE}', its evidence filled in) (llm)`,
+          "No sentence other than trade's Seeding evidence line says what the seeding evidence suggests or which reading it favours (the tool's why_they_accept lines, each under its reading, and trade's ask line are not such sentences) (llm)",
+        ],
+      ],
+      [
+        "waivers",
+        "WV-1",
+        `The reply gives a scramble list, naming its players (on this fixture the ten of data.truncated_names[], since the character budget cut their candidate rows: ${TEN}) (llm)`,
+        [
+          "The reply gives a scramble list (llm)",
+          `The reply names every scramble-list player (on this fixture the ten of data.truncated_names[], since the character budget cut their candidate rows: ${TEN}) (llm)`,
+        ],
+      ],
+    ];
+    const single = new Set(inventory.single.map((s) => `${s.case}\u0000${s.judge}`));
+    for (const [skill, name, joined, judges] of lines) {
+      const exps = caseOf(skill, name).expectations;
+      // failing first: the heuristic flags the joined line — "and", ": no other", ", naming its"
+      expect(joinsConditions(joined), joined).toBe(true);
+      expect(exps, `${name}: the joined line is gone`).not.toContain(joined);
+      for (const j of judges) {
+        expect(exps, `${name}: ${j}`).toContain(j);
+        expect(isLlm(j), j).toBe(true);
+        expect(joinsConditions(j), j).toBe(false);
+        expect(single.has(`${name}\u0000${j}`), j).toBe(false);
+      }
+    }
+    // and the shapes, in other words
+    for (const j of [
+      "The reply gives a claim list, naming its players (llm)",
+      "The reply names a drop — giving his re-add risk (llm)",
+      "The reply prints the line in its section: no other sentence repeats it (llm)",
+      "The reply gives the flag once: nothing else names it (llm)",
+    ])
+      expect(joinsConditions(j), j).toBe(true);
+    // NC-5-E keeps no judge as one, so it carries no R13-1 note; TR-5-E's split is in place, at the
+    // end of the case; WV-1's sweep split stands as the sweep left it, with round 7's line
+    expect(inventory.single.some((s) => s.case === "NC-5-E")).toBe(false);
+    expect(caseOf("news-check", "NC-5-E").$comment ?? "").not.toMatch(/^R13-1/);
+    expect(inventory.splits).toContainEqual({
+      skill: "trade",
+      case: "TR-5-E",
+      before: lines[1]?.[2],
+      after: lines[1]?.[3],
+    });
+    expect(
+      inventory.splits.find((s) => s.case === "WV-1" && s.after.includes(lines[2]?.[3][0] ?? "")),
+    ).toBeDefined();
   });
 
   it("the built suite has one llm or baseline grader per judge in every case it runs", () => {

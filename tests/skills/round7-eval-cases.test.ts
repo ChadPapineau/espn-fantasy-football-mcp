@@ -1311,13 +1311,16 @@ describe("the built suite holds every change (planSuite, no errors)", () => {
       );
     const judges = (dir: string) =>
       files(dir).filter((f) => /^type: "?(?:llm|baseline)"?$/m.test(f.text));
+    // changelog §R16 (the refix of R16-3's and R16-6's judges, one per condition, R13-1): NC-5-E 03's
+    // two conditions are 03 and 05, and WV-1 13 names the scramble list's players
+    // (round8-eval-cases.test.ts)
     for (const [dir, n] of [
       ["trade--tr-1", 8],
       ["news-check--nc-core", 2],
-      ["news-check--nc-5-e", 1],
+      ["news-check--nc-5-e", 2],
       ["retro--rt-1", 3],
       ["roster-audit--ra-1", 4],
-      ["waivers--wv-1", 7],
+      ["waivers--wv-1", 8],
       ["waivers--wv-2", 4],
       ["stream-kdef--kd-1", 1],
     ] as const)

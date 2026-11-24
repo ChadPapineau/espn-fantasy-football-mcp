@@ -117,7 +117,7 @@
     {
       "id": 8,
       "name": "NC-5-E",
-      "$comment": "R13-1: NC-5-E 03 stays one — 'gives the check's answer' and 'reports no refused call' are one fact said two ways: the call answered on its first try, as the reply shows it (changelog §R16, R16-3: no tool-input grader is equivalent to 'not refused', so the judge grades what the reply shows).",
+      "$comment": "changelog §R16, R16-3: 'the espn_analyze_evidence call was not refused' is graded on what the reply shows, since no tool-input grader is equivalent to it (round8-eval-cases.test.ts), one judge per condition (R13-1): 03, the check's answer given, whichever its flag — a call accepted for Jeanty answers unconfirmed_narrative, the example's, one accepted for another player or with a claim.type another flag, and which player §2 checks is not this condition — and 05, no refused call reported. 05 follows the regex, so 04 keeps its number.",
       "toolset": "full",
       "prompt": "Saw this on my timeline:\nBeat writer: my RB1's backup will get more work this week\n(from the team's practice report)\nIs it true?",
       "expected_output": "The paste runs over three lines: claim.text is the pasted claim with its line breaks joined by single spaces and nothing else changed, so espn_analyze_evidence accepts it on the first call. 'My RB1' resolves to Ashton Jeanty by ESPN's week projection, and the claim is about his backup, whom the user does not name: the check runs at once for Jeanty, and the answer asks for the backup's name in one line after its answer, never before the check (news-check §2; changelog §R16, R16-3), on news-check's fixed line 'Who is the backup the claim means? This check ran for \"Ashton Jeanty\" (4890973); name him and I will check the claim for him too.'. The claim is quoted as unconfirmed and weighed against the usage and ESPN's status, with the tool's flag on news-check's fixed Flag line (unconfirmed_narrative on this fixture) and what would confirm it.",
@@ -125,8 +125,9 @@
       "expectations": [
         "espn_analyze_evidence was called with the pasted claim (tool_used: input_match claim non-empty)",
         "The claim passed to espn_analyze_evidence is the paste with its line breaks joined by single spaces, otherwise word for word: \"Beat writer: my RB1's backup will get more work this week (from the team's practice report)\" (tool_used: input_match claim.text on the quoted claim)",
-        "The espn_analyze_evidence call was not refused, as the reply shows it: it gives the check's answer for the claim (news-check's fixed line 'Flag: `<flag>` — <its meaning>.', on this fixture `unconfirmed_narrative`) and reports no refused call (llm)",
-        "The reply names a flag for the claim (regex: `unconfirmed[_ ]narrative|\\bconsistent\\b|quiet[_ ]role[_ ]change|availability[_ ]conflict`)"
+        "The reply gives the check's answer for the claim (news-check's fixed line 'Flag: `<flag>` — <its meaning>.' gives it, whichever flag the check returns) (llm)",
+        "The reply names a flag for the claim (regex: `unconfirmed[_ ]narrative|\\bconsistent\\b|quiet[_ ]role[_ ]change|availability[_ ]conflict`)",
+        "The reply reports no refused espn_analyze_evidence call (no call the tool turned down with an error, such as a claim text refused for its line breaks) (llm)"
       ]
     },
     {

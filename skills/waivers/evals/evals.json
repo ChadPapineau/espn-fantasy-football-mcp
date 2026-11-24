@@ -17,11 +17,12 @@
         "The reply prints the premium band beside the premium (waivers' fixed line 'Premium Π(k, W): N, band [low–high]' does) (llm)",
         "The reply gives the ordered claim list — or says plainly that it is empty when no candidate clears the premium (llm)",
         "The reply gives the marginal candidates apart from the claim list — or, when there are none, says so plainly (waivers' fixed line 'Marginal (your call): none' does) (llm)",
-        "The reply gives a scramble list, naming its players (on this fixture the ten of data.truncated_names[], since the character budget cut their candidate rows: \"KC Concepcion\", \"Khalil Shakir\", \"Tre Tucker\", \"Caleb Douglas\", \"Wan'Dale Robinson\", \"Dontayvion Wicks\", \"Keon Coleman\", \"Keenan Allen\", \"Malachi Fields\", \"Jacory Croskey-Merritt\") (llm)",
+        "The reply gives a scramble list (llm)",
         "The reply gives the next run time (llm)",
         "The reply names a drop (llm)",
         "The reply gives the drop's re-add risk (llm)",
-        "The reply states the value basis (regex: `\\bvalue[ _]basis\\b[\\s*:|=—–\\x60-]{0,8}(?:is\\s+)?(?:\\*\\*)?\\x60?(?:espn_ros\\b|ESPN['’]s rest-of-season projection\\b)|ESPN['’]s rest-of-season projection,\\s*labell?ed\\b`)"
+        "The reply states the value basis (regex: `\\bvalue[ _]basis\\b[\\s*:|=—–\\x60-]{0,8}(?:is\\s+)?(?:\\*\\*)?\\x60?(?:espn_ros\\b|ESPN['’]s rest-of-season projection\\b)|ESPN['’]s rest-of-season projection,\\s*labell?ed\\b`)",
+        "The reply names every scramble-list player (on this fixture the ten of data.truncated_names[], since the character budget cut their candidate rows: \"KC Concepcion\", \"Khalil Shakir\", \"Tre Tucker\", \"Caleb Douglas\", \"Wan'Dale Robinson\", \"Dontayvion Wicks\", \"Keon Coleman\", \"Keenan Allen\", \"Malachi Fields\", \"Jacory Croskey-Merritt\") (llm)"
       ]
     },
     {
