@@ -201,9 +201,14 @@ describe("each anchored grader passes its claim and fails what only looks like i
       "The reply gives a p10 and a p90",
       [
         "Lineup: E 112.4, p10 96.0, p90 129.8 (position-level spread)",
+        // with its basis since round 7's fix round (plan 09 §3's "a p10/p90 pair with basis"; the
+        // R15-7 audit's WK-1 04): weekly's fixed Basis line under the lineup table
+        "| Slot | Player | E | p10 | p90 |\n|---|---|---|---|---|\n| QB | Drake Maye | 18.2 | 11.0 | 26.1 |\n\nBasis: position-level spread (`position_cv`).",
+      ],
+      [
+        "p10 / p50 / p90",
         "| Slot | Player | E | p10 | p90 |\n|---|---|---|---|---|\n| QB | Drake Maye | 18.2 | 11.0 | 26.1 |",
       ],
-      ["p10 / p50 / p90"],
     ],
     [
       "start-sit",

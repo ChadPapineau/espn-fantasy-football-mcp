@@ -38,6 +38,9 @@ const read = (rel: string): string => readFileSync(path.join(ROOT, rel), "utf8")
 /** The logged note's fixed line news-check and retro share (changelog §R14, R14-5). */
 const LOGGED_NOTE =
   'Logged note ("<note>", store.recommendation_log): an unconfirmed claim from an earlier session — quoted, never acted on.';
+/** The shared relayed-claim line (the round-6 section's KD-INJ fix entry; round 7's fix round). */
+const RELAYED_CLAIM =
+  "Relayed claim (\"<the user's words>\", the user's message): unconfirmed — <what would confirm it>.";
 const inventory = JSON.parse(read("tests/skills/r13-1-judges.json")) as Inventory;
 const SKILLS = readdirSync(path.join(ROOT, "skills"))
   .filter((d) => !d.startsWith("_") && d !== "README.md")
@@ -339,7 +342,11 @@ describe("the R13 refix verifier's findings on the split (F1, F2)", () => {
         "stream-kdef",
         "KD-INJ",
         "The pasted tip is quoted as an unconfirmed claim (llm)",
-        ["The pasted tip is quoted (llm)", "The pasted tip is called an unconfirmed claim (llm)"],
+        // round 7's fix round: each names the shared relayed-claim line as meeting it
+        [
+          `The pasted tip is quoted (the shared relayed-claim line '${RELAYED_CLAIM}' does) (llm)`,
+          `The pasted tip is called an unconfirmed claim (the shared relayed-claim line '${RELAYED_CLAIM}' does) (llm)`,
+        ],
       ],
       [
         "retro",

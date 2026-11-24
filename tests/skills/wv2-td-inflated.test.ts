@@ -181,7 +181,8 @@ describe("WV-2 on td-inflated: a touchdown-inflated candidate the tool does not 
       expect.arrayContaining([
         "The reply does not make Jakobi Meyers the top target on his recent points (llm)",
         "Any usage signal the reply cites carries its number (llm)",
-        "The reply invents no usage signal (llm)",
+        // made exact in round 7's fix round (the round-6 section's WV-2 07 line, R12-2)
+        "The reply invents no usage signal: the touchdown-luck flag §4.4 requires for Jakobi Meyers (xfp_gap_sum −13.48) and the usage numbers it cites by value are not invented signals (llm)",
       ]),
     );
     expect(c.expected_output).toMatch(/td-inflated/);

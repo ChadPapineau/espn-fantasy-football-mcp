@@ -41,7 +41,9 @@
 // `arm both`; `first` → also a regex over the trace that no other ESPN tool ran before it;
 // "every write tool …" → a regex over the trace that no prepare/commit/cancel tool ran; "no
 // input_match on the substituted value / injected string / logged note" → a regex over the trace
-// that no tool call's input carries it);
+// that no tool call's input carries it; "input_match claim.text on the quoted claim" → tool_used
+// whose `claim.text` input is the sentence's double-quoted claim, word for word — changelog §R15,
+// R15-3 as amended);
 // `(regex: …)` / `(regex_absent: …)` → regex on the final message (flags i) — refused when orient's
 // mandated opening lines alone satisfy a `regex` or trip a `regex_absent` (mandatedLines; the
 // exceptions are MANDATED_LINE_GRADERS), and a case whose seed logs a note must guard every tool
@@ -443,6 +445,9 @@ export function contractLines(template) {
  * (`Seeding reading is unconfirmed — …`) — and a two- or three-word label shortened to its first
  * word (`Seeding unconfirmed — …`). The round-4 verifiers' R4VS-2: the "calls it unconfirmed"
  * graders' `(?<!seeding reading )` guard blocked only the verbatim line.
+ * A line that names ESPN's rule is also rendered with orient's Seeding-row gloss beside it
+ * (ESPN_RULE_GLOSS), as replies print the seeding line: the R15-7 audit's KD-2 02, a bare
+ * `total` that every such reply satisfies.
  * @param {string} line
  * @returns {string[]} the line itself first
  */
@@ -459,8 +464,23 @@ export function lineRenderings(line) {
     out.add(`${label} is ${rest}`);
     if (k >= 2) out.add(`${cap(words[0] ?? "")} ${rest}`);
   }
+  for (const r of [...out])
+    if (r.includes(ESPN_RULE))
+      for (const glossed of [
+        `${ESPN_RULE} (${ESPN_RULE_GLOSS})`,
+        `${ESPN_RULE}: ${ESPN_RULE_GLOSS}`,
+      ])
+        out.add(r.replace(ESPN_RULE, glossed));
   return [...out];
 }
+/** ESPN's rule by name, as orient's seeding line prints it. */
+export const ESPN_RULE = "ESPN's rule";
+/**
+ * ESPN's rule as orient's Seeding row glosses it ("ESPN's rule — <gloss>"; check-skills'
+ * SEEDING_RULE_SENTENCE): the words a reply prints beside the seeding line. planSuite refuses an
+ * orient.md whose Seeding row no longer carries it.
+ */
+export const ESPN_RULE_GLOSS = "record first, total points as the tiebreak";
 /**
  * The problems of one case's final-message regex graders against its mandated opening lines and the
  * output contract's fixed lines: a `regex` grader that matches them alone — as written or as a reply
@@ -677,6 +697,37 @@ export function toolInputPattern(needle) {
 }
 
 /**
+ * The input_match regex for a call whose `claim` object's `text` is `claim`, character for
+ * character (NC-5-E's tool-input grader; changelog §R15, R15-3 as amended): the claim object's
+ * keys in any order, its string values skipped whole, then `"text": "<claim>"` JSON-escaped and
+ * closed — never a text that only starts with it.
+ * @param {string} claim
+ */
+export function claimTextPattern(claim) {
+  const json = escapeRe(JSON.stringify(claim));
+  return String.raw`"claim"\s*:\s*\{(?:[^{}"]|"(?:[^"\\]|\\.)*")*?"text"\s*:\s*` + json;
+}
+
+/**
+ * The double-quoted claim an expectation sentence ends with (its last `"…"`), or null.
+ * @param {string} text the sentence without its grader tag
+ * @returns {string | null}
+ */
+export function quotedClaimOf(text) {
+  const m = /"([^"\n]+)"\s*$/.exec(text);
+  return m?.[1] ?? null;
+}
+
+/**
+ * A prompt with every line break, and the blanks around it, made one space — how news-check passes
+ * a multi-line paste as `claim.text` (its SKILL.md §4).
+ * @param {string} s
+ */
+export function joinedLines(s) {
+  return s.replace(/[ \t]*\r?\n[ \t]*/g, " ");
+}
+
+/**
  * The trace regex for "another ESPN tool ran before `tool`" (a `first` spec, graded not_contains): a
  * tool_use name ending `__espn_<other>` followed, anywhere later, by one ending `__espn_<tool>`.
  * @param {string} tool a bare tool name (`espn_check_auth`)
@@ -858,11 +909,14 @@ export function inputMatchProblem(tool, key, value, inputs) {
  * starting "every write tool" (the write guard), `Skill <name> [min N] [max M]` (routing to a
  * Skill), or `no input_match on the substituted value | the injected string | the logged note` (no
  * tool call's input carries SC-2's synthetic value, the variant's planted text, or the note the
- * case's seed logged — LOGGED_NOTES; changelog §R10, R10-13).
+ * case's seed logged — LOGGED_NOTES; changelog §R10, R10-13), or `input_match claim.text on the
+ * quoted claim` (the named tool was called with a `claim` object whose `text` is, character for
+ * character, the double-quoted claim the sentence ends with — NC-5-E's tool-input grader;
+ * changelog §R15, R15-3 as amended).
  * @param {string} spec
  * @returns {{ writeGuard: boolean, min: number | null, max: number | null, arm: string | null,
  *   pairs: [string, string | undefined][], skill: string | null, first: boolean,
- *   noArg: "substituted" | "injected" | "logged" | null, unknown: string[] }}
+ *   noArg: "substituted" | "injected" | "logged" | null, claimText: boolean, unknown: string[] }}
  */
 export function parseToolUsedSpec(spec) {
   /** @type {ReturnType<typeof parseToolUsedSpec>} */
@@ -875,6 +929,7 @@ export function parseToolUsedSpec(spec) {
     skill: null,
     first: false,
     noArg: null,
+    claimText: false,
     unknown: [],
   };
   for (const raw of spec.split(",")) {
@@ -893,6 +948,10 @@ export function parseToolUsedSpec(spec) {
       r.skill = sk[1] ?? null;
       if (sk[2] !== undefined) r.min = Number(sk[2]);
       if (sk[3] !== undefined) r.max = Number(sk[3]);
+      continue;
+    }
+    if (part === "input_match claim.text on the quoted claim") {
+      r.claimText = true;
       continue;
     }
     const na = /^no input_match on the (substituted value|injected string|logged note)$/.exec(part);
@@ -1008,6 +1067,38 @@ export function gradersFor(sentence, ctx) {
             pattern: toolInputPattern(needle),
             match: "not_contains",
             arm: "both",
+          },
+          body: text,
+        });
+        break;
+      }
+      if (spec.claimText) {
+        const tool = tools[0];
+        const claim = quotedClaimOf(text);
+        const problem =
+          tool === undefined
+            ? "names no tool"
+            : inputMatchProblem(tool, "claim", "non-empty", ctx.inputs) !== null
+              ? `${tool} takes no claim object`
+              : claim === null
+                ? 'ends with no double-quoted claim ("…")'
+                : !joinedLines(ctx.prompt).includes(claim)
+                  ? "quotes a claim the case's prompt, its line breaks joined by single spaces, does not hold"
+                  : null;
+        if (problem !== null || tool === undefined || claim === null) {
+          errors.push(
+            `input_match claim.text on the quoted claim: the sentence ${problem}: "${sentence}"`,
+          );
+          break;
+        }
+        graders.push({
+          name: `used-${slug(tool)}-claim-text-as-quoted`,
+          frontmatter: {
+            type: "tool_used",
+            tool: q(tool),
+            input_match: claimTextPattern(claim),
+            min: spec.min ?? 1,
+            ...(spec.max !== null ? { max: spec.max } : {}),
           },
           body: text,
         });
@@ -1590,6 +1681,11 @@ export function planSuite(root, opts = {}) {
   } catch (e) {
     errors.push(`skills/_shared/references/orient.md: ${errMsg(e)}`);
   }
+  // the gloss the seeding line's renderings carry (lineRenderings) is orient's own
+  if (orient !== "" && !orient.includes(`${ESPN_RULE} — ${ESPN_RULE_GLOSS}`))
+    errors.push(
+      `skills/_shared/references/orient.md: its Seeding row no longer glosses ${ESPN_RULE} as "${ESPN_RULE_GLOSS}" — update ESPN_RULE_GLOSS, which the seeding line's renderings carry`,
+    );
   /** the output contract's fixed lines, which every recommendation prints (F3) */
   /** @type {string[]} */
   let contract = [];

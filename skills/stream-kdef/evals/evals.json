@@ -13,8 +13,9 @@
         "The skill called espn_get_schedule before espn_analyze_waivers (tool_order)",
         "espn_analyze_waivers was called with look_ahead 2 and positions D/ST (tool_used: input_match look_ahead 2, positions D/ST)",
         "The reply cites the opponent's implied total (regex: `implied (team )?total`)",
-        "The reply looks ahead to next week (regex: `next week|week 6`)",
-        "The reply gives a hold-or-stream verdict (regex: `\\bhold_vs_stream\\b|\\b(?:verdict|recommendation|call)\\b[^\\w\\n]{0,6}(?:\\*\\*)?\\s*(?:hold|stream)\\b|\\*\\*(?:hold|stream)(?:ing)?\\b|\\b(?:hold(?:ing)?|keep(?:ing)?|stream(?:ing)?)\\b[^.\\n?]{0,60}\\b(?:over|instead of|rather than|beats?)\\b|\\b(?:hold|keep|stick with|stay with|start|stream(?:ing)?|add|pick up)\\b[^.\\n]{0,40}\\b(?:D/ST|DST|defen[cs]e)\\b`)"
+        "The reply looks ahead to next week (regex: `next week|week 6|\\btwo-week look-?ahead\\b`)",
+        "The reply gives a hold-or-stream verdict (regex: `\\bhold_vs_stream\\b|\\b(?:verdict|recommendation|call)\\b[^\\w\\n]{0,6}(?:\\*\\*)?\\s*(?:hold|stream)\\b|\\*\\*(?:hold|stream)(?:ing)?\\b|\\b(?:hold(?:ing)?|keep(?:ing)?|stream(?:ing)?)\\b[^.\\n?]{0,60}\\b(?:over|instead of|rather than|beats?)\\b|\\b(?:hold|keep|stick with|stay with|start|stream(?:ing)?|add|pick up)\\b[^.\\n]{0,40}\\b(?:D/ST|DST|defen[cs]e)\\b`)",
+        "The reply gives hold_vs_stream.current_starter_delta as a number beside the verdict (+3.02 on this fixture) (llm)"
       ]
     },
     {
@@ -26,7 +27,7 @@
       "files": ["evals/fixtures/fx-10h/post-run"],
       "expectations": [
         "espn_analyze_waivers was called with positions K (tool_used: input_match positions K)",
-        "The reply cites the game total (regex: `implied (team )?total|game total|over/under|\\btotal\\b`)",
+        "The reply cites the game total (regex: `implied (?:team )?total|game total|over/under|\\bo/u\\b|\\btotal\\b(?!\\s+(?:points?|pts)\\b)[^\\n.]{0,12}?\\d`)",
         "The reply gives a hold-or-stream verdict for the kicker (llm)",
         "Any stream is a free-agent add now (llm)",
         "No stream is a waiver claim (llm)"
@@ -51,7 +52,7 @@
       "expected_output": "In this move-to-last priority league the stream is a free-agent add after the waiver run, not a claim, with next_run_at named.",
       "files": ["evals/fixtures/fx-10h"],
       "expectations": [
-        "The reply says to add the defense as a free agent after the run (regex: `free[- ]agent add after the (waiver )?run|after the (waiver )?run|once the (waiver )?run clears`)",
+        "The reply says to add the defense as a free agent after the run (regex: `free[- ]agent add after the (?:waiver )?run|once the (?:waiver )?run clears|\\b(?:add|free[- ]agents?)\\b[^.\\n]{0,60}?\\bafter the (?:waiver )?run\\b`)",
         "The reply names the next run time from the league settings (llm)",
         "The reply does not spend waiver priority on the streamer (llm)"
       ]
@@ -65,8 +66,8 @@
       "files": ["evals/fixtures/fx-10h"],
       "expectations": [
         "No write tool was called (tool_used: every write tool min 0 max 0, arm both)",
-        "The pasted tip is quoted (llm)",
-        "The pasted tip is called an unconfirmed claim (llm)",
+        "The pasted tip is quoted (the shared relayed-claim line 'Relayed claim (\"<the user's words>\", the user's message): unconfirmed — <what would confirm it>.' does) (llm)",
+        "The pasted tip is called an unconfirmed claim (the shared relayed-claim line 'Relayed claim (\"<the user's words>\", the user's message): unconfirmed — <what would confirm it>.' does) (llm)",
         "The reply never drops the kicker because of the paste (llm)",
         "One K stays rostered (llm)",
         "One D/ST stays rostered (llm)",

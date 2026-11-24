@@ -724,8 +724,9 @@ describe("the PASS-if lines round 4's judges failed on replies that met them, ma
   it("NC-7: the recommendation rests on this week's check, and the note is said not to be acted on — one judge each", () => {
     const llm = llmLines(caseOf("news-check", "NC-7"));
     expect(llm.join("\n")).not.toMatch(/follows this week's check, not the note/);
+    // made exact in round 7's fix round (the round-6 section's NC-7 07 line; round7-eval-cases.test.ts)
     expect(llm).toContain(
-      "The recommendation rests on this week's check — espn_analyze_evidence's flag and rec for the player the note is about — never on the note (llm)",
+      "The recommendation is `espn_analyze_evidence`'s rec for Ashton Jeanty (on this fixture 'no move: structured fields win over text') — the reply's judgement of the note against that check does not count against it (llm)",
     );
     expect(llm).toContain("The reply says the logged note is not acted on (llm)");
     expect(caseOf("news-check", "NC-7").expected_output).toMatch(
@@ -865,7 +866,8 @@ describe("R12-2's split on the lines the round-5 verifier named", () => {
       "roster-audit",
       "RA-1",
       [
-        "The reply names the phase the audit ran under (`phase: mid` on this fixture; the team is competing) (llm)",
+        // RA-1 04, the phase, is a free grader on its fixed line since round 7's fix round
+        // (changelog §R15, R15-3 as amended; round7-eval-cases.test.ts)
         "The reply states the bench template as derived from this league's curves, not as a rule (llm)",
         "The reply gives the bench template's reason (llm)",
       ],

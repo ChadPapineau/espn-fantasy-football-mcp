@@ -376,8 +376,11 @@ describe("R11-3 (§R14): the PASS-if lines round 5's judges failed on replies th
       "TR-1",
       "The reply gives the tool's verdict, decline, with the user's interval as the tool gives it (on this fixture delta_me p10 −220.8, p90 −29.1) (llm)",
     );
-    has("trade", "TR-1", "The reply calls the tool's verdict neither fair nor a coin flip (llm)");
-    expect(llmLines(caseOf("trade", "TR-1"))).toHaveLength(7);
+    // changelog §R15, R15-1 as amended: 11 restated exactly, its "not fair" clause a judge of its
+    // own (R13-1) — round7-eval-cases.test.ts holds both
+    gone("trade", "TR-1", "The reply calls the tool's verdict neither fair nor a coin flip (llm)");
+    has("trade", "TR-1", "The reply does not call the tool's verdict fair (llm)");
+    expect(llmLines(caseOf("trade", "TR-1"))).toHaveLength(8);
     expect(caseOf("trade", "TR-1").expected_output).toMatch(
       /the tool's verdict, decline, with the user's interval .* called neither fair nor a coin flip/,
     );
@@ -538,7 +541,7 @@ describe("R11-3 (§R14): the PASS-if lines round 5's judges failed on replies th
       );
     const judges = (dir: string) =>
       files(dir).filter((f) => /^type: "?(?:llm|baseline)"?$/m.test(f.text));
-    expect(judges("trade--tr-1")).toHaveLength(7);
+    expect(judges("trade--tr-1")).toHaveLength(8); // R15-1 as amended: the "not fair" judge
     expect(judges("news-check--nc-inj")).toHaveLength(7);
     expect(judges("roster-audit--ra-3-e")).toHaveLength(2);
     expect(
