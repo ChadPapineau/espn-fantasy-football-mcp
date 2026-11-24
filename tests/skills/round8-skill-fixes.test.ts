@@ -222,7 +222,7 @@ describe("the lines the spec quotes are its text, character for character", () =
     expect(line("schedule-plan", "horizonRule")).toContain('`horizon: "through_playoffs"`');
     expect(SPEC).toContain("`data.truncated_names[]: { player_id, name: UT }`");
     expect(LISTED_NAMES_RULE).toContain(
-      "`data.truncated_names[]` (`{ player_id, name }`, `name` an `untrusted_text`",
+      "`data.truncated_names[]` (`{ player_id, name }`, its `name` third-party text like the row's own",
     );
     for (const list of ["`claim_list[]`", "`marginal[]`", "`scramble_list[]`"]) {
       expect(SPEC).toContain(list.replace("[]", ""));
