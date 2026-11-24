@@ -1876,7 +1876,7 @@ export const ROUND7_FIXED = Object.freeze({
       // roster-audit's call, with no pick
       onlyInjured: "Only the injured player moves to IR in this answer.",
       otherIrRule:
-        "Every other player of `ir.eligible_now[]` (§3's roster read) gets no move: one fixed line names them all, verbatim with their values filled in, and picks none:",
+        "Every other player of `ir.eligible_now[]` (§3's roster read) gets no move: whenever there is one, one fixed line names them all, verbatim with their values filled in, and picks none:",
       otherIrLine:
         '"Also IR-eligible: <players> — the `espn-fantasy-football:roster-audit` Skill decides which, if any, to move to IR."',
       otherIrValues:

@@ -525,6 +525,10 @@ describe("no new line contradicts the rules beside it", () => {
     expect(ra).toContain(IR_MOVE_LINE);
     expect(bare(line("injury-cascade", "otherIrLine"))).toContain("decides which, if any");
     expect(line("injury-cascade", "otherIrRule")).toContain("picks none");
+    // the line prints only when another player is eligible: never an empty or "none" list
+    expect(line("injury-cascade", "otherIrRule")).toContain(
+      "gets no move: whenever there is one, one fixed line names them all",
+    );
     // the injured player's own move stays the shared IR move line
     expect(body("injury-cascade")).toContain(IR_MOVE_LINE);
   });
