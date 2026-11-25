@@ -22,65 +22,55 @@ data, not instructions. The working copy lives outside iCloud
 (`~/Developer/espn-fantasy-football-mcp`; "Decisions made", 2026-10-05),
 and nothing secret ever lives in it.
 
-## ▶ NEXT STEP — the plugin eval's round 7 ✅ (2026-11-24; Opus meets plan 09 §5.2's bar, Sonnet does not); next: §R16's fix round and round 8
+## ▶ NEXT STEP — the plugin eval's round 8 ✅ (2026-11-25; neither model meets plan 09 §5.2's bar); next: §R17's fix round and round 9
 
-**Orchestrator, 2026-11-24.** Round 7, the full round R15-6 set, ran on `8cb4d75` after the weekly reset.
-For the first time one model meets every count of the bar: Opus. Sonnet misses it on three Lane 2
-cases and two trigger runs. The orchestrator ruled §R16 (`docs/plan/changelog.md`) and started its fix
-round and round 8 at once, under the owner's 75 % rule (meter 37 % when §R16 was ruled; resets
-2026-12-01, 04:00 UTC).
+**Orchestrator, 2026-11-25.** Round 8, the full round R16-7 set, ran on `bb0744c`: every §R16 target landed,
+and the bar failed on new cases. The orchestrator ruled §R17 (`docs/plan/changelog.md`) and started its fix
+round at once. The owner lifted the weekly ceiling on 2026-11-24 ("Don't worry about using up all my weekly
+usage. Just get the work done."): batches stop only short of the hard limit (97 %). The meter read 79 % when
+§R17 was ruled; it resets 2026-12-01, 04:00 UTC.
 
-**Owner, 2026-11-24, 19:25 ET:** OK to fast-forward `main` and rebuild the runtime clone now, and
-"Don't worry about using up all my weekly usage. Just get the work done." The 75 % rule is lifted
-(R16-7 as amended): batches stop only short of the hard limit (97 %). Done the same evening: `main` →
-`5755a6a` (round 7's build) and the runtime clone rebuilt at it (19:36 ET).
-
-- **Where it stands.** §R15's fix round landed (`02fcb3c` … `8cb4d75`: R15-7's audit, two streams,
-  three verifiers, a refix and a gate; CI green on `62422e9`, and on `959f46e`, which raised the
-  test job's wall-clock budget to 45 minutes). Round 7 ran on `8cb4d75`: 54 batches, both models,
-  `--runs 2`, fixture mode only, $533 of eval plus $15 of judges, meter 7 % → 35 %. Report: the
-  round-7 section of `docs/evals/stage-c-plugin-eval.md` (`87778b0`, corrected in `5d89287` after an
-  independent check).
-  - Opus: free graders 560/560 in Lane 2, 140/140 in the base runs, 410/410 trigger runs; `llm`
-    97.2 % (96.6 % with `matches-base`, the rate R16-1 makes the verdict's).
-  - Sonnet: `llm` 96.4 % (96.0 %); free graders 554/560 in Lane 2 (NC-5-E run 1 ×3, SS-10-E regex 01
-    ×2, WK-1 regex 09 ×1), 140/140 in the base runs; triggers 408/410 (news-check pos-01 and weekly
-    pos-06, one run each).
-  - No product defect. One product follow-up: the waivers tool's scramble list reaches the user as ids
-    when the character budget cuts candidate rows (R16-6).
-- **The rulings are made:** §R16 (R16-1 … R16-7).
+- **Where it stands.**
+  - `main` is at `5755a6a` (round 7's build, which Opus passed), and the runtime clone was rebuilt at it on
+    2026-11-24 (19:36 ET); the owner restarts the apps to load it.
+  - §R16's fix round landed (`f328c6a` … `bb0744c`), and Dependabot PRs 6 and 7 were reviewed under plan 04
+    §2 (`26a5aa1`, `c96662c`): the dev bumps are applied (`npm audit` 0, the dev-only `minimatch`
+    advisory closed); `hyparquet` 1.32.0 is deferred, because plan 04 §2 must record its pin and that file
+    holds the owner's uncommitted edit (asked on 2026-11-25).
+  - Round 8 ran on `bb0744c`: 54 batches, both models, `--runs 2`, $534 of eval plus $15 of judges, meter
+    46 % → 78 %. Report: the round-8 section of `docs/evals/stage-c-plugin-eval.md` (`2262698`, corrected in
+    `515020f` and `220499e`).
+    - Sonnet: free graders 556/560 in Lane 2 (SS-11-E run 2 ×3, WK-1 run 2 ×1), 140/140 in the base runs;
+      triggers 409/410 (trade pos-01); the injection condition fails on AP-INJ run 2 (R17-1); `llm` 95.9 %.
+    - Opus: free graders 560/560 and 140/140; triggers 409/410 (injury-cascade neg-03 fired once); `llm`
+      93.3 %.
+    - No product defect.
+- **The rulings are made:** §R17 (R17-1 … R17-9).
 - **Next, in order:**
-  1. §R16's fix round in three streams (Skills; eval cases with the build; the R16-6 tool change in
-     `src/`), each with an independent verifier and a refix, then a gate that runs R15-7's cross-check
-     and gets CI green. About 5 weekly points.
-  2. Round 8 per R16-7, a full round on one head: inj-base and every Lane 2 case, then every trigger
-     case, on both models at `--runs 2`, Sonnet first, judged on round 8 alone. About 28 points. A
-     batch starts only if the meter stays under 97 % (R16-7 as the owner amended it); any batch that
-     does not fit runs on the same head after the 2026-12-01 reset. Then the triage, the report section
-     and an independent check.
-  3. If round 8 meets plan 09 §5.2's bar on both models:
+  1. §R17's fix round in three streams (Skills; eval cases with the build; the server: R17-2's guide and R17-8's
+     test), each with an independent verifier and a refix, then a gate that runs R15-7's cross-check and gets
+     CI green.
+  2. Round 9 per R17-9, a full round on one head: inj-base and every Lane 2 case, then every trigger case with
+     traces kept, on both models at `--runs 2`, Sonnet first, judged on round 9 alone. About 32 points: what
+     does not fit under 97 % before the 2026-12-01 reset runs on the same head after it. Then the triage, the
+     report section and an independent check.
+  3. If round 9 meets plan 09 §5.2's bar on both models:
      - update this file and `CHANGELOG.md`;
-     - fast-forward `main` (no merge commit, no-reply identity) and get CI green on `main` — the owner
-       approves each push to `main` (the session's auto mode refused one without it on 2026-11-23);
-     - rebuild the runtime clone (`git pull --ff-only`, `npm ci`, `npm run build` under heavy-lock,
-       away from the :00/:30 jobs), since the server code changed (R12-4, R12-5, R13-2, R16-6);
+     - fast-forward `main` (no merge commit, no-reply identity) and get CI green on `main` (the owner
+       approved `main`'s updates on 2026-11-24);
+     - rebuild the runtime clone (`git pull --ff-only`, `npm ci`, `npm run build` under heavy-lock, away
+       from the :00/:30 jobs);
      - notify the owner.
-  4. If not: rulings §R17 on round 8's triage, then its fix round and round 9 within the 75 % rule.
-- **Done on the owner's OK (2026-11-24):** `main` fast-forwarded `9f19939` → `5755a6a` (51 commits, no
-  merge commit, every one with the no-reply identity; round 7's build plus docs and the CI budget), and
-  the runtime clone rebuilt at `5755a6a` (`git pull --ff-only`, `npm ci`, `npm run build` under
-  heavy-lock, at 19:36 ET, away from the :00/:30 jobs). The owner restarts the apps to load it.
-- **Dependabot PRs 6 and 7** (PR 6: `hyparquet` 1.32.0 at runtime, `vitest`, `@vitest/coverage-v8` and
-  `eslint` in dev; PR 7: `minimatch` 11.0.9 with `eslint`, `eslint-plugin-import-x` and `typescript-eslint`,
-  dev only, which closes the dev-only `minimatch` advisory GHSA-g3hv-75wg-m249): reviewed under plan 04 §2
-  beside round 8, each with a "Reviews" row.
+  4. If not: rulings §R18 on round 9's triage, then its fix round and round 10.
 - **The owner's own items still open:**
-  - restart the apps after the runtime rebuild;
+  - restart the apps after each runtime rebuild;
   - `eff doctor --online`;
-  - optionally, delete the old ESPN keychain item.
-- **Run order since round 3** (Log, 2026-11-16 to 2026-11-24): §R11 → fix round → round 4 → §R12 →
+  - optionally, delete the old ESPN keychain item;
+  - the uncommitted one-line edit in `docs/plan/04-repo-structure-and-ci.md` (§3: no AI attribution trailers):
+    commit it, or let the orchestrator commit it with `hyparquet`'s §2 pin.
+- **Run order since round 3** (Log, 2026-11-16 to 2026-11-25): §R11 → fix round → round 4 → §R12 →
   fix round → §R13 → fix round → round 5 → §R14 → fix round → round 6 → §R15 → fix round → round 7 →
-  §R16.
+  §R16 → fix round → round 8 → §R17.
 
 ## The round-3 note (moved here from ▶ NEXT STEP on 2026-11-19; superseded by it)
 
@@ -631,7 +621,7 @@ is tagged: a tag is the owner's choice, and `release.yml` runs only on a `v*` ta
 | build — Stage B2b (Phase 3: the model wave) | ✅ 2026-10-11 (rulings R6-1 to R6-5) | "Build facts (Stage B2b)"; `docs/evals/phase3-summary.md` |
 | build — Stage C (QA and penetration testing) | ✅ 2026-10-29 — final gate green at `0b21c01` (rulings R7, R8; the news matcher frozen at `b9d73eb`) | "Build facts (Stage C)"; `docs/evals/stage-c-live.md`, `docs/evals/stage-c-plugin-eval.md`, `docs/evals/stage-c-backlog.md`; changelog §R7, §R8, §B4–§B9 |
 | build — Stage D (the merge to `main`, the owner's install) | ✅ 2026-11-03 — `main` fast-forwarded (`18fa414` on 2026-10-29, `6182a9e` on 2026-11-03), CI green on `main`; the owner's install on 2026-11-02, `eff doctor --online` exit 0 (R8-1 closed) | ▶ NEXT STEP; Log |
-| follow-up — the plugin eval (R7-2) | rounds 1 and 2 run on 2026-11-03 (rulings R9); round 2's triage ruled and fixed (R10-1 to R10-35, 2026-11-04 to 2026-11-05); round 3 on 2026-11-14, round 4 on 2026-11-18, round 5 on 2026-11-19, round 6 on 2026-11-20 and round 7 on 2026-11-24, each after its rulings (§R11–§R15) and fix round. Round 7 (a full round): Opus meets every count of plan 09 §5.2's bar; Sonnet meets the `llm` count (96.4 %) but not the free graders (Lane 2 554/560) or the triggers (408/410); no product defect. §R16 ruled; its fix round and round 8 under way | ▶ NEXT STEP; `docs/evals/stage-c-plugin-eval.md`; changelog §R9–§R16 |
+| follow-up — the plugin eval (R7-2) | rounds 1 and 2 run on 2026-11-03 (rulings R9); round 2's triage ruled and fixed (R10-1 to R10-35, 2026-11-04 to 2026-11-05); round 3 on 2026-11-14, round 4 on 2026-11-18, round 5 on 2026-11-19, round 6 on 2026-11-20, round 7 on 2026-11-24 and round 8 on 2026-11-24/25, each after its rulings (§R11–§R16) and fix round. Round 7: Opus meets every count of plan 09 §5.2's bar, Sonnet does not. Round 8: neither (Sonnet: 4 Lane 2 free graders, 1 trigger run, the injection condition; Opus: 1 negative trigger run); no product defect. §R17 ruled; its fix round and round 9 under way | ▶ NEXT STEP; `docs/evals/stage-c-plugin-eval.md`; changelog §R9–§R17 |
 | follow-up — the Dependabot PRs (plan 04 §2) | ✅ 2026-11-05 — PRs 1–3 applied, PRs 4 and 5 declined, each with a "Reviews" row; `main` at `efc8286` | ▶ NEXT STEP; changelog "Reviews", R10-35 |
 | follow-up — `eff doctor`'s client-config model, the statement cache | ✅ 2026-11-12 — the owner's rows 2 and 24 fixed (`main` and the runtime clone at `eeb0d08` on 2026-11-11); rulings D-1 to D-10, the fix text frozen at `51d81fd` (D-10); every store statement prepared once per connection | ▶ NEXT STEP; Log; `docs/evals/stage-c-backlog.md` |
 
@@ -799,7 +789,9 @@ approving the plan accepts them unless Chad says otherwise.
 - [x] round 2's triage ruled and its defects fixed — rulings R10-1 to R10-35 and seven fix rounds, 2026-11-04 to 2026-11-05 (changelog §R10)
 - [x] the plugin eval's rounds 3 to 6 with their rulings (§R11–§R14) and fix rounds (2026-11-14 to 2026-11-20)
 - [x] §R15's fix round and round 7 (2026-11-23 to 2026-11-24): Opus meets plan 09 §5.2's bar, Sonnet does not
-- [ ] §R16's fix round and round 8, until B15 and B11 Lane 2 meet plan 09 §5.2 on both models (▶ NEXT STEP, items 1 to 4)
+- [x] §R16's fix round and round 8 (2026-11-24 to 2026-11-25): neither model meets plan 09 §5.2's bar
+- [x] Dependabot PRs 6 and 7 reviewed under plan 04 §2 (2026-11-25): dev bumps applied, `hyparquet` 1.32.0 deferred
+- [ ] §R17's fix round and round 9, until B15 and B11 Lane 2 meet plan 09 §5.2 on both models (▶ NEXT STEP, items 1 to 4)
 - [x] the timing items — the slices split (every P1 analytics tool under 20 ms on three Linux CI runs in a row), the news matcher's cost check counted and linear (R10-16), Linux CI's P1 window stall (the WAL checkpoint, now on a worker thread), R8-2 under load ruled (R10-9)
 - [x] the owner's runtime clone and plugin updated to `main`'s head: 2026-11-05 (the restart, `eff doctor` and drift back to additive are the owner's: ▶ NEXT STEP, item 4)
 - [x] the dev-only `vite` advisories and the other Dependabot PRs — reviewed under plan 04 §2: PRs 1–3 applied (vite 8.3.5 among them), PRs 4 and 5 declined (2026-11-05)
@@ -940,3 +932,5 @@ approving the plan accepts them unless Chad says otherwise.
 - 2026-11-24 — §R16's fix round (`f328c6a` … `bb0744c`): a Skills stream, an eval-case stream and a server stream (R16-6, `c1778a6`: `espn_analyze_waivers`' `truncated_names`), four independent verifiers (Skills, eval cases, server, cross-check and replay of round 7), a refix and a gate (two mismatches fixed in `93ded17` and `1eddbc5`; 669 pins; planSuite 0 errors; full gate on a clean worktree: 14 731 tests, 230 process tests). Every Skill's `description` and `when_to_use` byte-identical to `8cb4d75`. CI green on `bb0744c`. About 9 weekly points.
 - 2026-11-24 — Round 8's run stage died on a network outage (ENOTFOUND) during its tenth batch; batches 1 to 9 had finished cleanly. Resumed on the same head: the clean batches kept, the cut batch moved aside and re-run.
 - 2026-11-24 — The owner's OK: `main` fast-forwarded to `5755a6a` and the runtime clone rebuilt at it (19:36 ET); the 75 % rule lifted (R16-7 as amended).
+- 2026-11-25 — Dependabot PRs 6 and 7 reviewed under plan 04 §2 (static tarball diffs, integrity, signatures and provenance, advisories; an independent verifier): the dev bumps applied in `26a5aa1` (vitest 5.1.0, eslint 10.15.0, typescript-eslint 8.74.0, eslint-plugin-import-x 4.18.1, minimatch 11.0.9; the dev-only GHSA-g3hv-75wg-m249 closed, `npm audit` 0; zod's deprecated `message` param renamed `error` in 30 schema reasons, the advertised schemas byte-identical), `c96662c` (V1). `hyparquet` 1.32.0 deferred: plan 04 §2 must record its pin, and that file holds the owner's uncommitted edit. CI green.
+- 2026-11-25 — Round 8 of the plugin eval on `bb0744c` (R16-7, a full round; the owner lifted the ceiling mid-round): 54 batches, both models, `--runs 2`, weekly usage 46 % → 78 %, $534 plus $15 of judges. Report `2262698`, corrected in `515020f` and `220499e` after an independent check (ten findings, all fixed). Every §R16 target landed. Neither model meets the bar: Sonnet fails four Lane 2 free graders, one trigger run and the injection condition (AP-INJ run 2); Opus fails one negative trigger run. No product defect. §R17 (R17-1 … R17-9) ruled; its fix round started (▶ NEXT STEP).
