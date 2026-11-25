@@ -1968,8 +1968,14 @@ export const ROUND8_FIXED = Object.freeze({
       lineupHeaderRule:
         "The lineup table goes under this fixed header on every week, a no-move week included, printed verbatim:",
       lineupHeader: "`| Slot | Player | E | p10 | p90 | Deadline (ET) |`",
+      // a changed row's Deadline is its change's (the §R17 fix round's verifier, V-SK-1): the
+      // earliest lock among the players the change moves, the starter it benches included, as the
+      // tool's `rec.latest_execution_time` takes it (lineup.ts: members = [in, ...movers, out])
       lineupHeaderRows:
-        'one row per slot of the lineup the rec sets or keeps, its Deadline cell the `lock_at` of the player the rec moves into that slot, in Eastern Time, and "—" on a row with no move (a held coin-flip swap is no move: its fixed line below)',
+        "one row per slot of the lineup the rec sets or keeps, and \"—\" on a row with no move (a held coin-flip swap is no move: its fixed line below); a row the rec changes gives its change's deadline, in Eastern Time: the earliest `lock_at` among the players that change moves (the one it moves into the slot, the starter it takes out of the lineup, who is in no row after it, and any starter it only shifts to another slot on the way), which for a rec that makes one change is `rec.latest_execution_time`, never the incoming player's `lock_at` alone",
+      // the Deadline rule's lineup clause, the same time (V-SK-1)
+      lineupMoveLock:
+        "a lineup move's `lock_at` (the earliest kickoff among the players it moves, the starter it benches included)",
     },
   },
   retro: {
@@ -1996,6 +2002,10 @@ export const ROUND8_FIXED = Object.freeze({
         '`<team>` the partner\'s name, `<premise>` the user\'s word for the standing ("a contender", "tanking"), `<record-first standing>` and `<points-only standing>` the tool\'s two standing lines word for word after "under the record-first reading: " and "under the points-only reading: "',
       premiseOnly:
         "That line is the premise's only answer: beside the standing lines under the fixed lead, no sentence — the devil's-advocate paragraph, the verdict and the recommendation included — says whether the partner is what the premise says, or why.",
+      // trade-readings.md line 7's "say which one changes who should be buying" is answered by
+      // those lines, never by a free sentence (the §R17 fix round's verifier, V-SK-2)
+      premiseReadings:
+        'Under both readings the standing lines, and with a premise this line after them, are the sentence references/trade-readings.md asks for ("say which one changes who should be buying"): no other sentence says it.',
       // TR-3 06 and 07 (R17-7): a recommendation that leaves the tool's verdict rests on the user's
       // own Δ mean, p75, ΔP(playoffs) and ΔP(bye), on one line, never the partner's gain
       groundsRule:
@@ -2075,9 +2085,18 @@ export const ROUND8_FIXED = Object.freeze({
  * Text round 8's triage withdrew (changelog §R17, R17-7): trade §5's free-form "one sentence saying
  * why", which the fixed grounds line replaces (TR-3: the runs' sentences rested on the partner's
  * gain or a roster judgement), and start-sit's unformed "say what would confirm the report", which
- * the inactive line's confirmer replaces (SS-INJ-2).
+ * the inactive line's confirmer replaces (SS-INJ-2). And weekly's first wording of a changed lineup
+ * row's Deadline cell, the incoming player's lock — later than the change's deadline whenever the
+ * starter it benches kicks off first — with the Deadline rule's "(the player's kickoff)", which
+ * named no player (the §R17 fix round's verifier, V-SK-1).
  */
 export const ROUND8_ABSENT = Object.freeze({
+  weekly: {
+    "SKILL.md": [
+      "its Deadline cell the `lock_at` of the player the rec moves into that slot",
+      "a lineup move's `lock_at` (the player's kickoff)",
+    ],
+  },
   trade: {
     "SKILL.md": [
       'one sentence saying why (a `fair` verdict is a coin flip; turning it into "decline" or "accept" needs a reason the numbers give)',

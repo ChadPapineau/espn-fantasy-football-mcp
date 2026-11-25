@@ -182,8 +182,10 @@ const graderBy = (skill: string, name: string, lead: string): RegExp => {
 describe("round 8's fixed lines (changelog §R17; R12-1, R15-7)", () => {
   it("the committed bundle carries every one, and the check is clean", () => {
     // 36 built (R17-1's apply side and R17-7), plus apply's read-only Source line, which the §R16
-    // gate's open question 9 found unpinned (its rule and its line)
-    expect(fixedRows).toHaveLength(38);
+    // gate's open question 9 found unpinned (its rule and its line), plus the two the fix round's
+    // verifier asked for: weekly's Deadline-rule lineup clause (V-SK-1) and trade's premiseReadings
+    // (V-SK-2); round9-skill-refix.test.ts holds them
+    expect(fixedRows).toHaveLength(40);
     for (const [skill, file, , s] of fixedRows)
       expect(read(`skills/${skill}/${file}`), `${skill}: ${s}`).toContain(s);
     expect(errorsOf()).toBe("");
@@ -463,7 +465,7 @@ describe("each line where its rule prints it", () => {
     expect(why).toBeGreaterThanOrEqual(0);
     expect(out[why]).toContain(pin(ROUND5_FIXED, "trade", "whyAcceptRule"));
     expect(out[why + 1]).toBe(
-      `- ${line("trade", "premiseRule")} ${line("trade", "premiseLine")} — ${line("trade", "premiseValues")}. ${line("trade", "premiseOnly")}`,
+      `- ${line("trade", "premiseRule")} ${line("trade", "premiseLine")} — ${line("trade", "premiseValues")}. ${line("trade", "premiseOnly")} ${line("trade", "premiseReadings")}`,
     );
     const verdict = out.findIndex((l) => l.startsWith("- The verdict — `accept`"));
     expect(verdict).toBeGreaterThanOrEqual(0);
