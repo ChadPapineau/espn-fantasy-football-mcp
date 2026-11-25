@@ -15,7 +15,7 @@
         "The reply cites the opponent's implied total (regex: `(?<!\\bno\\s)implied (team )?total(?!s?\\s+(?:is|are|was|were|as)\\s+(?:null|empty|missing|unavailable|not\\b))`)",
         "The reply looks ahead to next week (regex: `next week|week 6|\\btwo-week look-?ahead\\b`)",
         "The reply gives a hold-or-stream verdict (regex: `\\bhold_vs_stream\\b|\\b(?:verdict|recommendation|call)\\b[^\\w\\n]{0,6}(?:\\*\\*)?\\s*(?:hold|stream)\\b|\\*\\*(?:hold|stream)(?:ing)?\\b|\\b(?:hold(?:ing)?|keep(?:ing)?|stream(?:ing)?(?!\\s+anyway\\b))\\b[^.\\n?]{0,60}\\b(?:over|instead of|rather than|beats?)\\b|\\b(?:hold|keep|stick with|stay with|start|stream(?:ing)?(?!\\s+anyway\\b)|add|pick up)\\b[^.\\n]{0,40}\\b(?:D/ST|DST|defen[cs]e)\\b`)",
-        "The reply gives hold_vs_stream.current_starter_delta as a number beside the verdict (+3.02 on this fixture) (llm)"
+        "The reply gives hold_vs_stream.current_starter_delta as a number beside the verdict (+3.02 on this fixture: stream-kdef's 'current starter's Δ: +3.02', on its fixed Verdict line 'Verdict: hold <starter> — <rec's reason>' or the line right under it) (llm)"
       ]
     },
     {
@@ -29,7 +29,7 @@
         "espn_analyze_waivers was called with positions K (tool_used: input_match positions K)",
         "The reply cites the game total (regex: `(?<!\\bno\\s)implied (?:team )?total(?!s?\\s+(?:is|are|was|were|as)\\s+(?:null|empty|missing|unavailable|not\\b))|(?<!\\bno\\s)game total|(?<!\\bno\\s)over/under|\\bo/u\\b|\\btotal\\b(?!\\s+(?:points?|pts)\\b)[^\\n.]{0,12}?\\d`)",
         "The reply gives a hold-or-stream verdict for the kicker (llm)",
-        "Any stream is a free-agent add now (llm)",
+        "Any stream is a free-agent add now (stream-kdef's fixed line 'Verdict: stream <name> — <how to act>' with fa_add_now's way to act, 'add him as a free agent now: first come, first served, no claim', says so — on this fixture, for one, 'Verdict: stream Tyler Loop — add him as a free agent now: first come, first served, no claim, before his game locks.') (llm)",
         "No stream is a waiver claim (llm)"
       ]
     },
@@ -53,7 +53,7 @@
       "files": ["evals/fixtures/fx-10h"],
       "expectations": [
         "The reply says to add the defense as a free agent after the run (regex: `free[- ]agent add after the (?:waiver )?run|once the (?:waiver )?run clears|\\b(?:add|free[- ]agents?)\\b[^.\\n]{0,60}?\\bafter the (?:waiver )?run\\b`)",
-        "The reply names the next run time from the league settings (llm)",
+        "The reply names the next run time from the league settings (stream-kdef's fixed line 'If you stream anyway: <name> is a free-agent add after the run — add him once the run clears, after <next_run_at, ET>.' names it — on this fixture Wed Oct 7, 3:30 AM ET) (llm)",
         "The reply does not spend waiver priority on the streamer (llm)"
       ]
     },

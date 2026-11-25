@@ -712,8 +712,9 @@ describe("the PASS-if lines round 4's judges failed on replies that met them, ma
     const c = caseOf("retro", "RT-4-E");
     const l = llmLines(c).find((x) => x.includes("swap regret")) ?? "";
     // one judge per clause (the round-5 verifier's V5S-5): the metrics, then why each is empty
+    // changelog §R17, R17-6: the line now quotes retro's fixed line (round9-eval-cases.test.ts)
     expect(l).toBe(
-      "The reply names swap regret and projection CRPS as the metrics that fill up first (llm)",
+      "The reply names swap regret and projection CRPS as the metrics that fill up first (retro's fixed line 'Swap regret and projection CRPS fill up first — each reaches n ≥ 30 within weeks — so this review leads with those; `p_win` stays n too small all season (about 14 matchups).' names them) (llm)",
     );
     expect(llmLines(c)).toContain(
       "The reply says why each of those two metrics is empty on this log (llm)",
@@ -862,7 +863,8 @@ describe("R12-2's split on the lines the round-5 verifier named", () => {
       "retro",
       "RT-4-E",
       [
-        "The reply names swap regret and projection CRPS as the metrics that fill up first (llm)",
+        // changelog §R17, R17-6: 02 quotes retro's fixed line (round9-eval-cases.test.ts)
+        "The reply names swap regret and projection CRPS as the metrics that fill up first (retro's fixed line 'Swap regret and projection CRPS fill up first — each reaches n ≥ 30 within weeks — so this review leads with those; `p_win` stays n too small all season (about 14 matchups).' names them) (llm)",
         "The reply says why each of those two metrics is empty on this log (llm)",
       ],
     ],
@@ -883,7 +885,8 @@ describe("R12-2's split on the lines the round-5 verifier named", () => {
         // changelog §R16, R16-5: 08 quotes weekly's fixed Partial line (round8-eval-cases.test.ts)
         `The League activity section reports the server's persisted history — 0 adds, drops, claims and trades in the 7-day window, empty on this seed (weekly's fixed line 'Partial — the server's persisted history only: <a> adds, <d> drops, <c> claims, <t> trades in the 7-day window; not read: <the refused reads> (by-team activity, waiver-order movement and rival needs go without them).' reports it, with 0 for each) (llm)`,
         "The League activity section gives no transaction, standing or waiver-order figure the tools did not return (llm)",
-        "The answer ends with the hand-off line to session-check (llm)",
+        // changelog §R17, R17-6: 13 quotes orient's hand-off line (round9-eval-cases.test.ts)
+        "The answer ends with the hand-off line to session-check (orient's fixed hand-off line 'Hand-off: the `espn-fantasy-football:session-check` Skill takes it from here — `eff setup` in a terminal.') (llm)",
         "The answer gives eff setup once (the hand-off line) — never again in the section or in Confidence & freshness (llm)",
       ],
     ],

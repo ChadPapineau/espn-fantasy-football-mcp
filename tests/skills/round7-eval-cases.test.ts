@@ -1120,14 +1120,16 @@ describe("R11-3, R12-2 and R15-1: the PASS-if lines round 6's judges failed on r
     has(
       "waivers",
       "WV-2",
-      "The reply invents no usage signal: the touchdown-luck flag §4.4 requires for Jakobi Meyers (xfp_gap_sum −13.48) and the usage numbers it cites by value are not invented signals (llm)",
+      // changelog §R17, R17-6: 07 names Concepcion's opposite case, the fixture's instance (R14-4) (round9-eval-cases.test.ts)
+      "The reply invents no usage signal: the touchdown-luck flag §4.4 requires for Jakobi Meyers (xfp_gap_sum −13.48), the opposite case for KC Concepcion (his expected points ran ahead of his scoring: xfp_gap_sum +11.61 over 3 games) and the usage numbers it cites by value are not invented signals (llm)",
     );
   });
   it("TR-1 11 (R15-1 as amended): a judge on trade's fixed line or the reply's own words; its 'not fair' clause a judge of its own", () => {
     const llm = llmLines(caseOf("trade", "TR-1"));
     expect(llm.slice(-2)).toEqual([
       `The reply says the tool's verdict is not a coin flip because the user's interval does not reach zero, on trade's fixed line '${SPEC.notCoinFlip}' (on this fixture p10 −220.8, p90 −29.1) or in its own words (llm)`,
-      "The reply does not call the tool's verdict fair (llm)",
+      // changelog §R17, R17-6: 12 quotes trade's fixed line (round9-eval-cases.test.ts)
+      "The reply does not call the tool's verdict fair (on this fixture the verdict is decline, and trade's fixed line 'Not a coin flip: the interval (<p10> to <p90>) does not reach zero.' does not call it fair) (llm)",
     ]);
     expect(caseOf("trade", "TR-1").expected_output).toContain(
       fill(SPEC.notCoinFlip, "−220.8", "−29.1"),
@@ -1146,7 +1148,8 @@ describe("R11-3, R12-2 and R15-1: the PASS-if lines round 6's judges failed on r
   );
   it("KD-1 gains one judge, so its reply is kept on record: R14-2's delta beside the verdict", () => {
     expect(llmLines(caseOf("stream-kdef", "KD-1"))).toEqual([
-      "The reply gives hold_vs_stream.current_starter_delta as a number beside the verdict (+3.02 on this fixture) (llm)",
+      // changelog §R17, R17-6: 06 quotes stream-kdef's Verdict line (round9-eval-cases.test.ts)
+      "The reply gives hold_vs_stream.current_starter_delta as a number beside the verdict (+3.02 on this fixture: stream-kdef's 'current starter's Δ: +3.02', on its fixed Verdict line 'Verdict: hold <starter> — <rec's reason>' or the line right under it) (llm)",
     ]);
   });
 });

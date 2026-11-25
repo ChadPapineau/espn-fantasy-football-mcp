@@ -379,7 +379,12 @@ describe("R11-3 (§R14): the PASS-if lines round 5's judges failed on replies th
     // changelog §R15, R15-1 as amended: 11 restated exactly, its "not fair" clause a judge of its
     // own (R13-1) — round7-eval-cases.test.ts holds both
     gone("trade", "TR-1", "The reply calls the tool's verdict neither fair nor a coin flip (llm)");
-    has("trade", "TR-1", "The reply does not call the tool's verdict fair (llm)");
+    // changelog §R17, R17-6: 12 quotes trade's fixed line (round9-eval-cases.test.ts)
+    has(
+      "trade",
+      "TR-1",
+      "The reply does not call the tool's verdict fair (on this fixture the verdict is decline, and trade's fixed line 'Not a coin flip: the interval (<p10> to <p90>) does not reach zero.' does not call it fair) (llm)",
+    );
     expect(llmLines(caseOf("trade", "TR-1"))).toHaveLength(8);
     expect(caseOf("trade", "TR-1").expected_output).toMatch(
       /the tool's verdict, decline, with the user's interval .* called neither fair nor a coin flip/,

@@ -15,7 +15,7 @@
         "The reply reports a proper score (regex: `Brier|CRPS`)",
         "The reply says which calls were followed (regex: `followed`)",
         "The reply names both baselines — last week's points and ESPN's projection (regex: `^(?=[\\s\\S]*?(?:\\bstart(?:ing)? by last week['’]s points\\b|\\blast_week_points\\b|\\blast[- ]week['’]s[- ]points[\\x60'’\"”*]{0,3}[ \\t]+baselines?\\b|\\blast[- ]week['’]s[- ]points[\\x60'’\"”*]{0,3}[ \\t]+(?:and|&)[ \\t]+(?:the[ \\t]+)?[\\x60'‘\"“*]{0,3}ESPN['’]s[- ]projection[\\x60'’\"”*]{0,3}[ \\t]+baselines\\b|\\bESPN['’]s[- ]projection[\\x60'’\"”*]{0,3}[ \\t]+(?:and|&)[ \\t]+(?:the[ \\t]+)?[\\x60'‘\"“*]{0,3}last[- ]week['’]s[- ]points[\\x60'’\"”*]{0,3}[ \\t]+baselines\\b))(?=[\\s\\S]*?(?:\\bstart(?:ing)? by ESPN['’]s projection\\b|\\bespn_projection_lineup\\b|\\bespn_projection[\\x60'’\"”*]{0,3}[ \\t]+baselines?\\b|\\bESPN['’]s[- ]projection[\\x60'’\"”*]{0,3}[ \\t]+baselines?\\b|\\blast[- ]week['’]s[- ]points[\\x60'’\"”*]{0,3}[ \\t]+(?:and|&)[ \\t]+(?:the[ \\t]+)?[\\x60'‘\"“*]{0,3}ESPN['’]s[- ]projection[\\x60'’\"”*]{0,3}[ \\t]+baselines\\b|\\bESPN['’]s[- ]projection[\\x60'’\"”*]{0,3}[ \\t]+(?:and|&)[ \\t]+(?:the[ \\t]+)?[\\x60'‘\"“*]{0,3}last[- ]week['’]s[- ]points[\\x60'’\"”*]{0,3}[ \\t]+baselines\\b))`)",
-        "The reply says why each baseline is empty on this log (n too small, 1 of 30; ESPN's projection baseline not informative in v1) (llm)",
+        "The reply says why each baseline is empty on this log (n too small, 1 of 30; ESPN's projection baseline not informative in v1 — retro's fixed baseline lines 'Baseline — start by last week's points: <regret>' and 'Baseline — start by ESPN's projection: <regret>', filled in on this log as 'Baseline — start by last week's points: n too small (1 of 30)' and 'Baseline — start by ESPN's projection: not informative in v1', say it) (llm)",
         "The reply reports the call's regret against its logged alternative (llm)",
         "The reply compares our projections with ESPN's, or says why it cannot yet (no projection stored before kickoff, n too small) (llm)"
       ]
@@ -56,7 +56,7 @@
       "files": ["evals/fixtures/fx-10h"],
       "expectations": [
         "The reply says the sample is too small (regex: `n too small|0 of 30|n = ?0`)",
-        "The reply names swap regret and projection CRPS as the metrics that fill up first (llm)",
+        "The reply names swap regret and projection CRPS as the metrics that fill up first (retro's fixed line 'Swap regret and projection CRPS fill up first — each reaches n ≥ 30 within weeks — so this review leads with those; `p_win` stays n too small all season (about 14 matchups).' names them) (llm)",
         "The reply says why each of those two metrics is empty on this log (llm)",
         "The reply never calls the win probability calibrated (llm)"
       ]

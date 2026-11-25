@@ -15,7 +15,7 @@
         "The steps name the FLEX slot (regex: `\\bFLEX\\b`)",
         "The steps name the bench slot (regex: `\\*\\*BE\\*\\*|\\x60BE\\x60|\\(BE\\)|\\|[ \\t]*BE[ \\t]*\\||\\bBE (?:slot|seat)\\b|(?:→|->)[ \\t]*(?:\\*\\*)?BE\\b|\\bBE(?:\\*\\*)?[ \\t]*(?:→|->)|\\b(?:in|into|from) BE\\b|\\bto BE\\b(?=[ \\t]*(?:[;,.)]|$)|[ \\t]+(?:and|then)\\b)`)",
         "The steps name the IR slot (regex: `\\bIR\\b`)",
-        "Every player in the numbered steps is quoted (llm)",
+        "Every player in the numbered steps is quoted (apply's fixed step lines quote each by name in single quotes — its Lineup line \"**Roster → Edit lineup**: tap **Move** beside '<name A>' (`player_id` <id>) in **BE**, then the **FLEX** slot; '<name B>' (`player_id` <id>) goes to **BE**; save — before <lock_at> ET.\" and its IR line \"**Roster → Edit lineup**: **Move** '<name>' (`player_id` <id>, <tag>) to **IR** — before <time> ET.\" — on this fixture 'Devaughn Vele', 'Bhayshul Tuten' and 'Tank Dell') (llm)",
         "Every player in the numbered steps carries his player_id (llm)",
         "Each numbered step carries a deadline (llm)",
         "The reply never says or implies that the change was made (apply's Source line 'read-only: this version never changes the team.', or a sentence saying nothing was changed, says the opposite) (llm)"

@@ -143,7 +143,7 @@
         "The reply shows ESPN's win probability labelled as ESPN's (regex: `ESPN(?!['’]s rule)['’]?s?\\b(?:(?!(?:\\bours\\b|\\bthis server\\b|\\bour (?:own )?(?:pre-?game )?(?:estimate|number|model|figure|projection|probability|win probability)\\b))[^.\\n]){0,60}(?:0?\\.750*\\b|75(?:\\.0+)? ?%)|(?<!(?:\\bours\\b|\\bthis server\\b|\\bour (?:own )?(?:pre-?game )?(?:estimate|number|model|figure|projection|probability|win probability)\\b)[^.\\n]{0,40})(?:0?\\.750*\\b|75(?:\\.0+)? ?%)(?:(?!(?:\\bours\\b|\\bthis server\\b|\\bour (?:own )?(?:pre-?game )?(?:estimate|number|model|figure|projection|probability|win probability)\\b))[^.\\n]){0,40}\\bESPN(?!['’]s rule)`)",
         "The reply states that the two estimates differ (llm)",
         "The reply states by how much the two estimates differ (llm)",
-        "The reply reports our estimate as a band (llm)"
+        "The reply reports our estimate as a band (start-sit's live line 'ESPN's win probability: <`win_probability_espn`>; ours: <`p_win`> [<interval>] — <N> points apart' gives ours with its interval in brackets — on this fixture the lineup tool's pre-game p_win, 0.504 [0.40–0.607]) (llm)"
       ]
     },
     {

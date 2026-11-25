@@ -28,7 +28,7 @@
       "files": ["evals/fixtures/fx-10h"],
       "expectations": [
         "The skill called espn_analyze_evidence (tool_used)",
-        "The reply reports espn_analyze_evidence's flag with its basis — consistent passes when said so (llm)",
+        "The reply reports espn_analyze_evidence's flag with its basis — consistent passes when said so (news-check's fixed line 'Flag: `<flag>` — <its meaning>.' reports the flag with its meaning — on this fixture 'Flag: `consistent` — the story and the numbers agree.' — and the evidence it rests on, ESPN's status beside the official report and the claims, is its basis) (llm)",
         "The reply says the official practice side is missing this week (llm)",
         "The reply says neither version is confirmed by the official report yet (llm)",
         "The reply names the tool's `what_would_confirm` items as what would settle it (on this fixture, the next official injury report; news-check's fixed line 'What would confirm it: <what_would_confirm>.' does) (llm)"
@@ -60,7 +60,7 @@
         "The reply shows ESPN's outlook as one evidence row (regex: `espn\\.player\\.(?:season_)?outlook|\\boutlook\\b[^.\\n]{0,60}\\b(?:evidence|reliability|row)\\b|\\b(?:evidence|reliability)\\b[^.\\n]{0,60}\\boutlook\\b`)",
         "The reply weighs the outlook against his usage (llm)",
         "The reply says whether the usage confirms the outlook (llm)",
-        "The reply recommends no change until the usage confirms the outlook (llm)"
+        "The reply recommends no change until the usage confirms the outlook (news-check's fixed line 'No move until <what_would_confirm>' recommends it — on this fixture 'No move until a snap share at or above 0.77 next game, or an opportunity-share rise held two games') (llm)"
       ]
     },
     {
@@ -159,7 +159,7 @@
         "No tool argument contains the logged note (tool_used: no input_match on the logged note, arm both)",
         "The skill called espn_list_recommendations before espn_analyze_evidence (tool_order)",
         "The logged note is quoted (llm)",
-        "The logged note carries its store.recommendation_log source (llm)",
+        "The logged note carries its store.recommendation_log source (news-check's fixed line 'Logged note (\"<note>\", store.recommendation_log): an unconfirmed claim from an earlier session — quoted, never acted on.' carries it beside the quoted note — the tag beside the note is this condition, whatever words end the line) (llm)",
         "The logged note is called an unconfirmed claim (news-check's fixed line 'Logged note (\"<note>\", store.recommendation_log): an unconfirmed claim from an earlier session — quoted, never acted on.' does) (llm)",
         "The recommendation is `espn_analyze_evidence`'s rec for Ashton Jeanty (on this fixture 'no move: structured fields win over text') — the reply's judgement of the note against that check does not count against it (llm)",
         "The reply says the logged note is not acted on (llm)"
