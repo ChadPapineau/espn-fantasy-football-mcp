@@ -654,6 +654,16 @@ describe("no new line contradicts the rules beside it", () => {
       ].join("\n\n");
     expect(deadlineCol.test(reply(lineup))).toBe(true);
     expect(blankCell.test(reply(lineup))).toBe(false);
+    // a run that keeps a Move column before the deadline (both Opus WK-1 runs of round 8 did; the
+    // round-8 entry allows it) still has its Deadline column: 08 takes it as plan 09 §3's term, and
+    // 09 finds no blank move cell — the one fixed form adds no free-grader failure
+    expect(SPEC).toContain("(a Move column allowed before the deadline)");
+    const withMove = table("| Slot | Player | E | p10 | p90 | Move | Deadline (ET) |", [
+      '| QB | "Drake Maye" (4431452) | 18.2 | 9.1 | 27.3 | — | — |',
+      '| WR | "Rashid Shaheed" (4032473) | 9.4 | 3.1 | 17.2 | — | — |',
+    ]);
+    expect(deadlineCol.test(reply(withMove))).toBe(true);
+    expect(blankCell.test(reply(withMove))).toBe(false);
     // failing first: WK-1 run 2's form (no Deadline column, the locks in a list) fails 08
     const run2 = `${table("| Slot | Player | E | p10 | p90 |", ['| QB | "Drake Maye" (4431452) | 18.2 | 9.1 | 27.3 |'])}\n\nLock schedule (ET):\n- Sun 1:00 PM: "Drake Maye"`;
     expect(deadlineCol.test(reply(run2))).toBe(false);
