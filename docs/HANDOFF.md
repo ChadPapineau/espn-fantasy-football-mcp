@@ -30,6 +30,11 @@ cases and two trigger runs. The orchestrator ruled §R16 (`docs/plan/changelog.m
 round and round 8 at once, under the owner's 75 % rule (meter 37 % when §R16 was ruled; resets
 2026-12-01, 04:00 UTC).
 
+**Owner, 2026-11-24, 19:25 ET:** OK to fast-forward `main` and rebuild the runtime clone now, and
+"Don't worry about using up all my weekly usage. Just get the work done." The 75 % rule is lifted
+(R16-7 as amended): batches stop only short of the hard limit (97 %). Done the same evening: `main` →
+`5755a6a` (round 7's build) and the runtime clone rebuilt at it (19:36 ET).
+
 - **Where it stands.** §R15's fix round landed (`02fcb3c` … `8cb4d75`: R15-7's audit, two streams,
   three verifiers, a refix and a gate; CI green on `62422e9`, and on `959f46e`, which raised the
   test job's wall-clock budget to 45 minutes). Round 7 ran on `8cb4d75`: 54 batches, both models,
@@ -50,8 +55,9 @@ round and round 8 at once, under the owner's 75 % rule (meter 37 % when §R16 wa
      and gets CI green. About 5 weekly points.
   2. Round 8 per R16-7, a full round on one head: inj-base and every Lane 2 case, then every trigger
      case, on both models at `--runs 2`, Sonnet first, judged on round 8 alone. About 28 points. A
-     batch starts only if the meter stays under 73 %; any batch that does not fit runs on the same head
-     after the 2026-12-01 reset. Then the triage, the report section and an independent check.
+     batch starts only if the meter stays under 97 % (R16-7 as the owner amended it); any batch that
+     does not fit runs on the same head after the 2026-12-01 reset. Then the triage, the report section
+     and an independent check.
   3. If round 8 meets plan 09 §5.2's bar on both models:
      - update this file and `CHANGELOG.md`;
      - fast-forward `main` (no merge commit, no-reply identity) and get CI green on `main` — the owner
@@ -60,9 +66,14 @@ round and round 8 at once, under the owner's 75 % rule (meter 37 % when §R16 wa
        away from the :00/:30 jobs), since the server code changed (R12-4, R12-5, R13-2, R16-6);
      - notify the owner.
   4. If not: rulings §R17 on round 8's triage, then its fix round and round 9 within the 75 % rule.
-- **Offered to the owner (2026-11-23, no answer yet):** fast-forward `main` to the tested head now and
-  rebuild the runtime clone, so the owner uses the newest build while the rounds continue (the runtime
-  clone is at `8ca0a6e`, 2026-11-12).
+- **Done on the owner's OK (2026-11-24):** `main` fast-forwarded `9f19939` → `5755a6a` (51 commits, no
+  merge commit, every one with the no-reply identity; round 7's build plus docs and the CI budget), and
+  the runtime clone rebuilt at `5755a6a` (`git pull --ff-only`, `npm ci`, `npm run build` under
+  heavy-lock, at 19:36 ET, away from the :00/:30 jobs). The owner restarts the apps to load it.
+- **Dependabot PRs 6 and 7** (PR 6: `hyparquet` 1.32.0 at runtime, `vitest`, `@vitest/coverage-v8` and
+  `eslint` in dev; PR 7: `minimatch` 11.0.9 with `eslint`, `eslint-plugin-import-x` and `typescript-eslint`,
+  dev only, which closes the dev-only `minimatch` advisory GHSA-g3hv-75wg-m249): reviewed under plan 04 §2
+  beside round 8, each with a "Reviews" row.
 - **The owner's own items still open:**
   - restart the apps after the runtime rebuild;
   - `eff doctor --online`;
@@ -926,3 +937,6 @@ approving the plan accepts them unless Chad says otherwise.
 - 2026-11-23 — The owner asked to use the week's remaining usage before the reset. R15-1 and R15-3 amended and R15-7 added (`531af94`). Then §R15's fix round (`02fcb3c` … `8cb4d75`): R15-7's audit of every free grader (63 non-ok graders, 94 judges on fixed lines), a Skills stream and an eval-case stream, three independent verifiers (one a regex-against-fixed-line cross-check and an offline replay of rounds 5 and 6), a refix and a gate (118 prose regexes and 499 pins cross-checked). CI green on `62422e9`; `8cb4d75` (docs only) timed out three times in the test job at 30 minutes with no failing test.
 - 2026-11-24 — The test job's wall-clock budget 30 → 45 minutes (`959f46e`; the suite takes about 23 minutes and over 30 on slower runners; coverage thresholds unchanged). CI green.
 - 2026-11-24 — Round 7 of the plugin eval on `8cb4d75` (R15-6, a full round): 54 batches, both models, `--runs 2`, weekly usage 7 % → 35 %, $533 plus $15 of judges. Report `87778b0`, corrected in `5d89287` after an independent check (two significant and eight minor findings, all fixed). Opus meets every count of plan 09 §5.2's bar for the first time (free graders 560/560, 140/140, triggers 410/410; `llm` 97.2 %). Sonnet meets the `llm` count (96.4 %) and fails six Lane 2 free graders and two trigger runs. No product defect. §R16 (R16-1 … R16-7) ruled; its fix round and round 8 started under the 75 % rule (▶ NEXT STEP).
+- 2026-11-24 — §R16's fix round (`f328c6a` … `bb0744c`): a Skills stream, an eval-case stream and a server stream (R16-6, `c1778a6`: `espn_analyze_waivers`' `truncated_names`), four independent verifiers (Skills, eval cases, server, cross-check and replay of round 7), a refix and a gate (two mismatches fixed in `93ded17` and `1eddbc5`; 669 pins; planSuite 0 errors; full gate on a clean worktree: 14 731 tests, 230 process tests). Every Skill's `description` and `when_to_use` byte-identical to `8cb4d75`. CI green on `bb0744c`. About 9 weekly points.
+- 2026-11-24 — Round 8's run stage died on a network outage (ENOTFOUND) during its tenth batch; batches 1 to 9 had finished cleanly. Resumed on the same head: the clean batches kept, the cut batch moved aside and re-run.
+- 2026-11-24 — The owner's OK: `main` fast-forwarded to `5755a6a` and the runtime clone rebuilt at it (19:36 ET); the 75 % rule lifted (R16-7 as amended).
