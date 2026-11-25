@@ -26,14 +26,14 @@
       "name": "ON-2",
       "toolset": "core",
       "prompt": "Set up my league",
-      "expected_output": "Because the stored session matches no team, the reply asks which team is the user's, listing all ten teams as quoted names with their team_ids, and makes no recommendation until the user answers.",
+      "expected_output": "Because the stored session matches no team, the reply asks which team is the user's, listing all ten teams as quoted names with their team_ids, and makes no recommendation until the user answers: the walkthrough's format paragraph restates the settings and advises nothing — it values no position or player (changelog §R17, R17-7).",
       "files": ["evals/fixtures/fx-10h/owner-mismatch"],
       "expectations": [
         "The skill called espn_get_standings (tool_used)",
         "The reply asks which team is the user's (regex: `which (one|team)`)",
         "The reply lists the ten teams with their team_id values (llm)",
         "The reply quotes each team's name (llm)",
-        "The reply makes no lineup, waiver or streaming recommendation before the user answers (llm)"
+        "The reply makes no lineup, waiver or streaming recommendation before the user answers (onboard's walkthrough is not a recommendation — 'It makes no lineup, waiver or stream recommendation and has no **Recommendation** heading and no \"No move\" line' — and its format paragraph gives no advice: 'it values no position or player (\"quarterbacks are worth more here\") and advises no claim, start, sit or stream') (llm)"
       ]
     },
     {
@@ -41,13 +41,13 @@
       "name": "ON-3",
       "toolset": "core",
       "prompt": "Can I trust these numbers?",
-      "expected_output": "The engine self-check shows a mismatch on stat 53 only; the reply names stat 53, says the numbers are not yet trustworthy for the affected players, and makes no recommendation.",
+      "expected_output": "The engine self-check shows a mismatch on stat 53 only; the reply names stat 53, says the numbers are not yet trustworthy for the affected players, and makes no recommendation: onboard's mismatch stop line leads the walkthrough, 'The league's scoring could not be reproduced: mismatch on stat 53 (mismatch share 0.517) — no lineup, waiver or stream number until it is explained.', and the walkthrough has no Recommendation heading and no \"No move\" line (changelog §R17, R17-7).",
       "files": ["evals/fixtures/fx-10h/mismatch-53"],
       "expectations": [
         "The skill called espn_get_box_score (tool_used)",
         "The reply reports a mismatch — never a count of 0, a negation or a condition (regex: `(?<!(?:^|[^\\d.])0[ \\t]+|\\b(?:no|zero|not a|without an?|any|if an?|whether an?)[ \\t]+)\\bmismatch(?:es|ed)?\\b|(?<!\\b(?:if|whether|unless|when)\\b[^.\\n]{0,40})\\b(?:does|do|did)(?:n['’]t| not) match ESPN\\b(?![^.\\n]{0,15}\\b(?:if|unless|when)\\b)`)",
         "The reply names stat 53 (regex: `\\b53\\b`)",
-        "The reply makes no start, sit, claim or stream recommendation (llm)"
+        "The reply makes no start, sit, claim or stream recommendation (onboard's walkthrough is not a recommendation — 'It makes no lineup, waiver or stream recommendation and has no **Recommendation** heading and no \"No move\" line' — and on this fixture its mismatch stop line leads, 'The league's scoring could not be reproduced: mismatch on stat 53 (mismatch share 0.517) — no lineup, waiver or stream number until it is explained.', which is not one) (llm)"
       ]
     },
     {

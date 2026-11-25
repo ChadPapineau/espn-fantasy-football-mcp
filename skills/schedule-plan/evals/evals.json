@@ -75,7 +75,7 @@
         "espn_analyze_matchup was called with both readings (tool_used: input_match seeding_mode both)",
         "The reply shows both readings side by side (llm)",
         "The reply asks which seeding reading applies (llm)",
-        "Whenever the reply says whether wins or points matter more, it names the seeding reading that answer holds under (llm)"
+        "Whenever the reply says whether wins or points matter more, it names the seeding reading that answer holds under (schedule-plan names them 'under ESPN's rule' and 'under points only'; the marginal-values sentence is such an answer, one per reading) (llm)"
       ]
     },
     {

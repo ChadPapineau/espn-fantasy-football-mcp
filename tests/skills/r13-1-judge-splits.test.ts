@@ -224,6 +224,8 @@ describe("R13-1: every llm judge grades one condition", () => {
   it("the §R16 fix round's joined lines are split, one judge per condition (the eval-case verifier's F2 and F3, the cross-check's F2)", () => {
     const NC_FLAG = "Flag: `<flag>` — <its meaning>.";
     const EVIDENCE = "Seeding evidence: <evidence> — not confirmed, so both readings are shown.";
+    const PREMISE =
+      'Whether "<team>" is <premise> depends on the seeding reading: under ESPN\'s rule, "<record-first standing>"; under points only, "<points-only standing>".';
     const TEN =
       '"KC Concepcion", "Khalil Shakir", "Tre Tucker", "Caleb Douglas", "Wan\'Dale Robinson", "Dontayvion Wicks", "Keon Coleman", "Keenan Allen", "Malachi Fields", "Jacory Croskey-Merritt"';
     // each line as the fix round committed it, and the judges that stand for it now
@@ -243,7 +245,8 @@ describe("R13-1: every llm judge grades one condition", () => {
         `The reply gives the seeding evidence on trade's fixed line alone (in Confidence & freshness, '${EVIDENCE}'): no other sentence says what the evidence suggests or which reading it favours (llm)`,
         [
           `Confidence & freshness gives the seeding evidence on trade's fixed line ('${EVIDENCE}', its evidence filled in) (llm)`,
-          "No sentence other than trade's Seeding evidence line says what the seeding evidence suggests or which reading it favours (the tool's why_they_accept lines, each under its reading, and trade's ask line are not such sentences) (llm)",
+          // changelog §R17, R17-7: 11 names trade's premise line too (round9-eval-cases.test.ts)
+          `No sentence other than trade's Seeding evidence line says what the seeding evidence suggests or which reading it favours (the tool's why_they_accept lines, each under its reading, and trade's ask line are not such sentences, nor is its premise line '${PREMISE}', which names both readings and weighs no evidence) (llm)`,
         ],
       ],
       [
@@ -340,7 +343,8 @@ describe("R13-1: the split judges keep every condition, and the example shows ea
     expect(caseOf("start-sit", "SS-12").expectations).toEqual(
       expect.arrayContaining([
         `The reply makes no move on the locked player (start-sit's fixed line '${LOCKED_LINE}', filled in for Ashton Jeanty, says so) (llm)`,
-        "The reply says what would confirm the report (llm)",
+        // changelog §R17, R17-7: 04 quotes start-sit's inactive line and its confirmer (round9-eval-cases.test.ts)
+        "The reply says what would confirm the report (start-sit's inactive line '<name>'s inactive report is unconfirmed: ESPN's status for him is <injury_status>.' carries it, its confirmer 'ESPN's status for him changing to OUT would confirm it.' right after it on the same line — on this fixture for Ashton Jeanty, ACTIVE) (llm)",
       ]),
     );
     expect(caseOf("session-check", "SC-11").expectations).toEqual(
@@ -414,9 +418,11 @@ describe("the R13 refix verifier's findings on the split (F1, F2)", () => {
         "trade",
         "TR-3",
         "The reply rests its own recommendation on the user's own change and playoff-odds change (llm)",
+        // changelog §R17, R17-7: 06 names trade's grounds line; 07 is its fixture's instance for a reply
+        // that leaves the tool's verdict (R14-4; round9-eval-cases.test.ts)
         [
-          "The reply rests its own recommendation on the user's own change (llm)",
-          "The reply rests its own recommendation on the user's own playoff-odds change (llm)",
+          "The reply rests its own recommendation on the user's own change (trade's grounds line '<recommendation>, leaving the tool's `<verdict>`: your Δ <mean> (p75 <p75>), ΔP(playoffs) <a>, ΔP(bye) <b>.' rests one that leaves the tool's verdict on the user's own numbers alone, never the partner's gain — on this fixture 'Decline, leaving the tool's `fair`: your Δ −44.2 (p75 −0.9), ΔP(playoffs) −0.044, ΔP(bye) −0.083.') (llm)",
+          "The reply rests its own recommendation on the user's own playoff-odds change when it leaves the tool's verdict, fair (trade's grounds line '<recommendation>, leaving the tool's `<verdict>`: your Δ <mean> (p75 <p75>), ΔP(playoffs) <a>, ΔP(bye) <b>.' gives that change as ΔP(playoffs) <a>, −0.044 on this fixture; a reply that keeps the tool's verdict passes) (llm)",
         ],
       ],
       [

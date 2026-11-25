@@ -661,13 +661,15 @@ describe("R16-4: the judges that read the new lines name them (R11-3: made exact
   /** 589f1ac's judge, as committed before the refix: the line's presence and its exclusivity joined */
   const JOINED_10 = `The reply gives the seeding evidence on trade's fixed line alone (in Confidence & freshness, '${R16.evidence}'): no other sentence says what the evidence suggests or which reading it favours (llm)`;
   const PRESENT_10 = `Confidence & freshness gives the seeding evidence on trade's fixed line ('${R16.evidence}', its evidence filled in) (llm)`;
-  const ONLY_11 =
-    "No sentence other than trade's Seeding evidence line says what the seeding evidence suggests or which reading it favours (the tool's why_they_accept lines, each under its reading, and trade's ask line are not such sentences) (llm)";
+  /** changelog §R17, R17-7: 08 and 11 name trade's premise line too (round9-eval-cases.test.ts) */
+  const PREMISE =
+    'Whether "<team>" is <premise> depends on the seeding reading: under ESPN\'s rule, "<record-first standing>"; under points only, "<points-only standing>".';
+  const ONLY_11 = `No sentence other than trade's Seeding evidence line says what the seeding evidence suggests or which reading it favours (the tool's why_they_accept lines, each under its reading, and trade's ask line are not such sentences, nor is its premise line '${PREMISE}', which names both readings and weighs no evidence) (llm)`;
   it("TR-5-E 08 names the seeding evidence line as asserting no reading; 10 and 11 grade that line's one place, one condition each (the verifiers' F2)", () => {
     const c = caseOf("trade", "TR-5-E");
     expect(c.expectations).not.toContain("The reply does not assert one seeding reading (llm)");
     expect(c.expectations[7]).toBe(
-      `The reply does not assert one seeding reading (trade's fixed line '${R16.evidence}', in Confidence & freshness, asserts none) (llm)`,
+      `The reply does not assert one seeding reading (trade's fixed line '${R16.evidence}', in Confidence & freshness, asserts none, nor does its premise line '${PREMISE}', which names both readings) (llm)`,
     );
     // failing first: the joined judge is gone; its two conditions stand in its place. Round 7's kept
     // replies fail them apart: Sonnet run 1 gives no evidence at all (10 fails, 11 holds), and both

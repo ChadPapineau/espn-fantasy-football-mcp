@@ -443,10 +443,11 @@ describe("R11-3 (§R14): the PASS-if lines round 5's judges failed on replies th
 
   it("SP-5-E 04: a wins-or-points answer names the reading it holds under; the fixed question is in the example", () => {
     gone("schedule-plan", "SP-5-E", "The reply does not assert a single answer (llm)");
+    // changelog §R17, R17-7: 04 names schedule-plan's two reading names (round9-eval-cases.test.ts)
     has(
       "schedule-plan",
       "SP-5-E",
-      "Whenever the reply says whether wins or points matter more, it names the seeding reading that answer holds under (llm)",
+      "Whenever the reply says whether wins or points matter more, it names the seeding reading that answer holds under (schedule-plan names them 'under ESPN's rule' and 'under points only'; the marginal-values sentence is such an answer, one per reading) (llm)",
     );
     expect(caseOf("schedule-plan", "SP-5-E").expected_output).toContain(SPEC.bothQuestion);
   });

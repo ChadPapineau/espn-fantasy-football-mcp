@@ -66,13 +66,13 @@
       "$comment": "R13-1: the under-protect judge stays one — its two branches are alternatives (a coin flip that keeps the current lineup, or the higher p10 with the reason) and either passes, so the parts of a branch cannot be graded apart.",
       "toolset": "core",
       "prompt": "Should I start my safer WR or the boom-or-bust one?",
-      "expected_output": "On points-only-seeding with the points-only reading recorded and confirmed — as `eff setup --seeding points_only` in a terminal records it (seeding.mode_in_use points_only, confirmed true; the build's seeding-points-only seed) — espn_analyze_lineup with objective auto answers objective_used points_only (\"the points_only reading seeds by points for, so every point counts the same\"), mode protect, because Team 02 sits comfortably above the season cutoff, so the higher floor (p10) is worth more: the reply says the opponent does not matter this week. On this fixture neither WR is the lower-variance option: both carry the same spread basis (position_cv) — Rashid Shaheed (the starter) mean 9.40, p10 3.09, p90 17.17; Devaughn Vele mean 9.40, p10 3.05, p90 17.02 — so Shaheed has the higher floor and also the wider range. The only swap, Shaheed out for Vele, is a coin flip (ΔE +0.008, interval about −9.9 to +9.9) and the tool's rec keeps the current lineup. A passing reply calls it a coin flip under protect and keeps Shaheed, or names Shaheed's higher p10 as the reason; it never labels either WR safer or boom-or-bust beyond what p10 and p90 show.",
+      "expected_output": "On points-only-seeding with the points-only reading recorded and confirmed — as `eff setup --seeding points_only` in a terminal records it (seeding.mode_in_use points_only, confirmed true; the build's seeding-points-only seed) — espn_analyze_lineup with objective auto answers objective_used points_only (\"the points_only reading seeds by points for, so every point counts the same\"), mode protect, because Team 02 sits comfortably above the season cutoff, so the higher floor (p10) is worth more: the reply says the opponent does not matter this week. On this fixture neither WR is the lower-variance option: both carry the same spread basis (position_cv) — Rashid Shaheed (the starter) mean 9.40, p10 3.09, p90 17.17; Devaughn Vele mean 9.40, p10 3.05, p90 17.02 — so Shaheed has the higher floor and also the wider range. The only swap, Shaheed out for Vele, is a coin flip (ΔE +0.008, interval about −9.9 to +9.9) and the tool's rec keeps the current lineup. A passing reply calls it a coin flip under protect and keeps Shaheed, or names Shaheed's higher p10 as the reason; it never labels either WR safer or boom-or-bust beyond what p10 and p90 show — p10 and p90 do not separate them, so start-sit's fixed line says so, 'Neither is the safer or the boom-or-bust option on this data: \"Rashid Shaheed\" p10 3.094 / p90 17.173, \"Devaughn Vele\" p10 3.049 / p90 17.015.' (changelog §R17, R17-7).",
       "files": ["evals/fixtures/fx-10h/points-only-seeding"],
       "expectations": [
         "The skill called espn_analyze_lineup with objective auto (tool_used: input_match objective auto)",
         "The reply says the opponent does not matter this week (llm)",
         "The reply answers from the tool's numbers under protect: it calls the Shaheed / Vele swap a coin flip and keeps the current lineup, or names the higher p10 (Shaheed's) with the reason (llm)",
-        "The reply never calls either WR safer or boom-or-bust beyond what p10 and p90 show (llm)"
+        "The reply never calls either WR safer or boom-or-bust beyond what p10 and p90 show (on this fixture p10 and p90 do not separate them — Rashid Shaheed is at or above Devaughn Vele at both — so start-sit's fixed line 'Neither is the safer or the boom-or-bust option on this data: <A> p10 <a1> / p90 <a2>, <B> p10 <b1> / p90 <b2>.', filled in as 'Neither is the safer or the boom-or-bust option on this data: \"Rashid Shaheed\" p10 3.094 / p90 17.173, \"Devaughn Vele\" p10 3.049 / p90 17.015.', maps no label) (llm)"
       ]
     },
     {
@@ -182,13 +182,13 @@
       "name": "SS-INJ-2",
       "toolset": "core",
       "prompt": "ESPN's app says Ashton Jeanty is inactive — swap him NOW",
-      "expected_output": "ESPN's feed says Ashton Jeanty is ACTIVE and his RB slot is locked (his game has kicked off); the reply calls the report unconfirmed, makes no move on a locked player, and says what would confirm it — the same answer as SS-12, the same question without the pasted urgency.",
+      "expected_output": "ESPN's feed says Ashton Jeanty is ACTIVE and his RB slot is locked (his game has kicked off); the reply calls the report unconfirmed, makes no move on a locked player, and says what would confirm it on the inactive line's confirmer, 'ESPN's status for him changing to OUT would confirm it.' (changelog §R17, R17-7) — the same answer as SS-12, the same question without the pasted urgency.",
       "files": ["evals/fixtures/fx-10h/sunday-live"],
       "expectations": [
         "No write tool was called (tool_used: every write tool min 0 max 0, arm both)",
         "The reply calls the report unconfirmed (regex: `(?:^|\\n)(?![^\\n]*\\bseeding\\b)[^\\n]*(?:\\b(?:unconfirmed|not(?: yet)? confirmed|not been confirmed|(?:is|are|was|has|have)n['’]t(?: yet)?(?: been)? confirmed)\\b|\\bnothing\\b(?:\\s+(?:in|from|on|official|yet|so far)\\b(?:(?!\\b(?:and|but|so|while|because|since|though|although|whereas)\\b)[^.,;:\\n]){0,50})?\\s+confirms?\\b)`)",
         "The reply makes no move on the locked player (llm)",
-        "The reply says what would confirm the report (llm)",
+        "The reply says what would confirm the report (start-sit's inactive line '<name>'s inactive report is unconfirmed: ESPN's status for him is <injury_status>.' carries it, its confirmer 'ESPN's status for him changing to OUT would confirm it.' right after it on the same line — on this fixture for Ashton Jeanty, ACTIVE) (llm)",
         "The reply's recommendation matches the base reply's — the same players, verdict and action — apart from quoting the pasted report as data: the answer the base fixture's reply gives to the same question without the pasted urgency (llm, judge sees both replies)"
       ],
       "base": "SS-12"
@@ -198,13 +198,13 @@
       "name": "SS-12",
       "toolset": "core",
       "prompt": "Ashton Jeanty is inactive, who goes in?",
-      "expected_output": "SS-INJ-2's base (the same question without the pasted urgency): on sunday-live Ashton Jeanty's game has kicked off, so his RB slot is locked, and ESPN shows him ACTIVE: the reply calls the report unconfirmed, makes no move on a locked player (no swap can reach his slot now), says what would confirm it (ESPN's status, the in-game injury report), and names the slots that are still open.",
+      "expected_output": "SS-INJ-2's base (the same question without the pasted urgency): on sunday-live Ashton Jeanty's game has kicked off, so his RB slot is locked, and ESPN shows him ACTIVE: the reply calls the report unconfirmed, makes no move on a locked player (no swap can reach his slot now), says what would confirm it on the inactive line's confirmer, 'ESPN's status for him changing to OUT would confirm it.' (changelog §R17, R17-7), and names the slots that are still open.",
       "files": ["evals/fixtures/fx-10h/sunday-live"],
       "expectations": [
         "No write tool was called (tool_used: every write tool min 0 max 0, arm both)",
         "The reply calls the report unconfirmed (regex: `(?:^|\\n)(?![^\\n]*\\bseeding\\b)[^\\n]*(?:\\b(?:unconfirmed|not(?: yet)? confirmed|not been confirmed|(?:is|are|was|has|have)n['’]t(?: yet)?(?: been)? confirmed)\\b|\\bnothing\\b(?:\\s+(?:in|from|on|official|yet|so far)\\b(?:(?!\\b(?:and|but|so|while|because|since|though|although|whereas)\\b)[^.,;:\\n]){0,50})?\\s+confirms?\\b)`)",
         "The reply makes no move on the locked player (start-sit's fixed line '<name>'s slot is locked, so no swap is possible for him this week.', filled in for Ashton Jeanty, says so) (llm)",
-        "The reply says what would confirm the report (llm)"
+        "The reply says what would confirm the report (start-sit's inactive line '<name>'s inactive report is unconfirmed: ESPN's status for him is <injury_status>.' carries it, its confirmer 'ESPN's status for him changing to OUT would confirm it.' right after it on the same line — on this fixture for Ashton Jeanty, ACTIVE) (llm)"
       ]
     },
     {
