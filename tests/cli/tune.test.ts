@@ -7,7 +7,7 @@
 // src/cli imports it. Every test runs in a temp sandbox; nothing touches the network or a keychain.
 import { readFileSync, readdirSync, statSync, writeFileSync, chmodSync } from "node:fs";
 import path from "node:path";
-import type { PassThrough } from "node:stream";
+import { PassThrough } from "node:stream";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import { JOBS, LABEL_PREFIX } from "../../src/cli/launchd.js";
 import { USAGE, main } from "../../src/cli/main.js";
@@ -92,8 +92,8 @@ const found =
   (): ProposalLookup => ({ kind: "found", set });
 
 /** An io whose stdin and stdout are terminals. */
-function ttyIo(env: Record<string, string> = {}): TestIo {
-  const io = makeIo(sb, { env });
+function ttyIo(env: Record<string, string> = {}, stdin = new PassThrough()): TestIo {
+  const io = makeIo(sb, { env, stdin });
   Object.assign(io.stdin, { isTTY: true });
   Object.assign(io.stdout, { isTTY: true });
   return io;
@@ -284,9 +284,10 @@ describe("--apply runs only for a human at a terminal", () => {
   });
 
   it("the default prompt reads the typed line from the terminal", async () => {
-    const io = ttyIo();
+    const stdin = new PassThrough();
+    const io = ttyIo({}, stdin);
     const p = run(io, { apply: true }, { proposals: found() });
-    setTimeout(() => (io.stdin as PassThrough).write("apply\r"), 20);
+    setTimeout(() => stdin.write("apply\r"), 20);
     expect(await p).toBe(0);
     expect(exists(file())).toBe(true);
   });

@@ -986,11 +986,11 @@ export function boundedTextSchema(maxChars: number) {
   return z
     .string()
     .max(maxChars)
-    .regex(PRINTABLE_RE, { message: "unprintable_characters" })
+    .regex(PRINTABLE_RE, { error: "unprintable_characters" })
     .refine(
       (t) =>
         !containsCredentialShape(t) && !containsCredentialShape(sanitizeText(t, maxChars).value),
-      { message: "credential_shaped" },
+      { error: "credential_shaped" },
     );
 }
 
@@ -1021,7 +1021,7 @@ export function isEspnPlayerId(n: number): boolean {
 export const playerIdSchema = z
   .number()
   .int()
-  .refine(isEspnPlayerId, { message: INVALID_ID_MESSAGE });
+  .refine(isEspnPlayerId, { error: INVALID_ID_MESSAGE });
 /** ESPN slot names (`QB`, `FLEX`, `D/ST`, `RB/WR`, `BE`, `IR`, `Rookie`). */
 export const SLOT_NAME_RE = /^[A-Za-z][A-Za-z/]{0,9}$/;
 
@@ -1052,7 +1052,7 @@ export function bareTextSchema(source: UntrustedSource) {
   return z
     .string()
     .max(TEXT_CAPS[UNTRUSTED_SOURCE_CLASS_MAP[source]])
-    .regex(PRINTABLE_RE, { message: "unprintable_characters" })
+    .regex(PRINTABLE_RE, { error: "unprintable_characters" })
     .meta({ [BARE_TEXT_META_KEY]: source });
 }
 
@@ -1237,7 +1237,7 @@ export const distSchema = z
     basis: z.enum(["position_cv", "player_sim"]),
   })
   .refine((d) => d.p10 <= d.p25 && d.p25 <= d.p50 && d.p50 <= d.p75 && d.p75 <= d.p90, {
-    message: "quantiles_not_monotone",
+    error: "quantiles_not_monotone",
   });
 
 /** One analytics `data.inputs[]` row / confidence input. */
@@ -1254,7 +1254,7 @@ const slotSchema = z.string().regex(SLOT_NAME_RE);
 export const recSubjectSchema = z
   .strictObject({
     player_id: playerIdSchema.nullable(),
-    gsis_id: z.string().regex(GSIS_ID_RE, { message: INVALID_ID_MESSAGE }).nullable(),
+    gsis_id: z.string().regex(GSIS_ID_RE, { error: INVALID_ID_MESSAGE }).nullable(),
     role: z.enum([
       "start",
       "sit",
@@ -1268,7 +1268,7 @@ export const recSubjectSchema = z
     ]),
     slot: slotSchema.nullable(),
   })
-  .refine((s) => s.player_id !== null || s.gsis_id !== null, { message: "subject_without_id" });
+  .refine((s) => s.player_id !== null || s.gsis_id !== null, { error: "subject_without_id" });
 
 /** The recommendation (plan 07 legend `Rec`); `log_id` is null everywhere but E12's output. */
 export const recSchema = z.strictObject({

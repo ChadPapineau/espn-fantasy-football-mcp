@@ -6,7 +6,7 @@
 // signal ends it by Node's default action. A refresh holds a claim for its run: its first SIGINT,
 // while a request hangs, ends that request at once (the fetch's own signal aborts as the signal is
 // delivered), raises nothing, records no source failure, exits 1 and leaves no listener behind.
-import type { PassThrough } from "node:stream";
+import { PassThrough } from "node:stream";
 import { afterEach, describe, expect, it } from "vitest";
 import { createInterrupts } from "../../src/cli/interrupt.js";
 import { main } from "../../src/cli/main.js";
@@ -59,8 +59,9 @@ describe("no command but a refresh and the setup page claims SIGINT/SIGTERM", ()
     ];
     for (const argv of cases) {
       const host = new FakeSignalHost();
-      const io = makeIo(sb, { env, fetch: noNetwork, packageRoot: fakePackage(sb) });
-      (io.stdin as PassThrough).end();
+      const stdin = new PassThrough();
+      const io = makeIo(sb, { env, fetch: noNetwork, packageRoot: fakePackage(sb), stdin });
+      stdin.end();
       const code = await main(argv, io, { interrupts: createInterrupts(host) });
       expect(Number.isInteger(code), argv.join(" ")).toBe(true);
       // no listener: a signal anywhere in this command meets Node's default action

@@ -819,7 +819,7 @@ export const getScoreboard = defineTool({
       ...detailShape,
     })
     .refine((a) => a.week === undefined || a.matchup_period === undefined, {
-      message: "week_or_matchup_period",
+      error: "week_or_matchup_period",
       path: ["matchup_period"],
     }),
   data: scoreboardSchema,
@@ -1243,7 +1243,7 @@ export const getBoxScore = defineTool({
       ...detailShape,
     })
     .refine((a) => [a.matchup_id, a.team_id].filter((x) => x !== undefined).length <= 1, {
-      message: "matchup_id_or_team_id",
+      error: "matchup_id_or_team_id",
       path: ["team_id"],
     }),
   data: boxScoreSchema,

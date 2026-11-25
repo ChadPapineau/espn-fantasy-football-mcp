@@ -396,7 +396,7 @@ export const getSchedule = defineTool({
       .array(weekSchema)
       .min(BOUNDS.scheduleWeeks.min)
       .max(BOUNDS.scheduleWeeks.max)
-      .refine((a) => new Set(a).size === a.length, { message: "duplicate_weeks" })
+      .refine((a) => new Set(a).size === a.length, { error: "duplicate_weeks" })
       .optional(),
     nfl_team: nflTeamSchema.optional(),
     include_weather: z.boolean().default(true),

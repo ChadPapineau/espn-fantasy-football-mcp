@@ -428,7 +428,7 @@ export const listPlayers = defineTool({
       ...detailShape,
     })
     .refine((a) => sortOffsetAllowed(a.sort, a.offset), {
-      message: NAME_SORT_OFFSET_REASON,
+      error: NAME_SORT_OFFSET_REASON,
       path: ["offset"],
     }),
   data: playerListSchema,

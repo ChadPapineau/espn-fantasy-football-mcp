@@ -1203,7 +1203,7 @@ export const analyzeScheduleTool = defineTool({
       .array(weekSchema)
       .min(1)
       .max(BOUNDS.week.max)
-      .refine((a) => new Set(a).size === a.length, { message: "duplicate_weeks" })
+      .refine((a) => new Set(a).size === a.length, { error: "duplicate_weeks" })
       .optional(),
     include_playoffs: z.boolean().default(true),
     seed: seedSchema.optional(),

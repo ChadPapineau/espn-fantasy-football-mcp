@@ -799,10 +799,15 @@ entry. Everything else they raised is fixed, or ruled in `docs/plan/changelog.md
   the rec holds it as gaining nothing; `lineup-no-move.test.ts` pins it.
 - **From the Dependabot review (2026-11-04 to 2026-11-05).**
   - `hyparquet` 1.32.0 (published 2026-10-29) is not reviewed: no PR proposed it. It comes through
-    Dependabot's next monthly group with its own "Reviews" row.
+    Dependabot's next monthly group with its own "Reviews" row. **Reviewed** (Dependabot PR 6,
+    2026-11-25): safe with one condition, and deferred until plan 04 §2 can record the pin, once the
+    owner's own edit to that file has landed (its "Reviews" row says how it is applied).
   - A moderate advisory in the dev lint toolchain (`minimatch`, GHSA-g3hv-75wg-m249, through eslint
     and typescript-eslint); the runtime audit is 0. npm's only fix is a breaking
     `npm audit fix --force`; re-check when eslint or typescript-eslint take a fixed `minimatch`.
+    **Resolved** (2026-11-25, Dependabot PR 7): eslint 10.15.0, typescript-eslint 8.74.0 and
+    eslint-plugin-import-x 4.18.1 take `minimatch` 11.0.9, and the full `npm audit` report is 0
+    (`docs/plan/changelog.md` "Reviews").
   - The keyring's Linux binaries embed `ctutils` 0.4.3 (RUSTSEC-2026-0385, a timing issue in the
     Secret Service session crypto) and three crates marked unmaintained (`zvariant`,
     `zvariant_derive`, `zbus_names`). They run in CI only, where no credential is stored; re-check

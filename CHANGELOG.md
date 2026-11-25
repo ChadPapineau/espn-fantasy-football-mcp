@@ -619,6 +619,14 @@ minor version (plan 04 §4.4; plan 09 K6). One version covers the server, the Sk
   v7.0.2, download-artifact v8.0.2. Declined: `@types/node` 26 (its types accept APIs Node 24 lacks)
   and TypeScript 7 (typescript-eslint does not support it yet); Dependabot skips `@types/node`
   majors and TypeScript 7.x until their re-check triggers (`docs/plan/changelog.md` "Reviews").
+- **Dependencies, reviewed under plan 04 §2 (Dependabot PRs 6 and 7, 2026-11-25).** The dev
+  toolchain: vitest and `@vitest/coverage-v8` 5.0.5 → 5.1.0, eslint 10.13.0 → 10.15.0 (PR 7's,
+  over PR 6's 10.14.0), typescript-eslint 8.72.1 → 8.74.0 and eslint-plugin-import-x 4.17.1 →
+  4.18.1, with their transitive packages (minimatch 11.0.9, rolldown 1.2.16, magic-string 1.4.5).
+  typescript-eslint 8.74.0's `no-deprecated` now reads zod 4's deprecated `message` param, so the
+  30 schema reasons in `src/mcp` name it `error`, zod's name for the same param: every check, issue
+  and advertised schema is as before (`tests/mcp/zod-error-param.test.ts`). `hyparquet` 1.32.0 is
+  reviewed and deferred until plan 04 §2 can record it (`docs/plan/changelog.md` "Reviews").
 - **Skills on a public league with no stored session (rulings R9-1, R9-2; `docs/plan/changelog.md`
   §R9).** They say so in one Session line and answer keylessly instead of stopping at setup; a
   private or unknown league still hands over to `session-check`. "My RB1", "my WR2" and "my TE" name
@@ -1093,6 +1101,10 @@ minor version (plan 04 §4.4; plan 09 K6). One version covers the server, the Sk
 - **`vite` 8.3.2 → 8.3.5** (dev only, through vitest 5.0.5; Dependabot PR 2): GHSA-698v-4r3x-3vcv,
   GHSA-r825-w8mm-5pxw, GHSA-587h-7wmj-h5pm, GHSA-9jrq-w75r-8gcw, GHSA-rq7h-c2jc-7f22 and
   GHSA-vfpm-58rq-9qcg, all in the dev server's HTTP paths, which vitest never starts here; the
+  runtime audit was 0 throughout.
+- **`minimatch` 10.2.6 → 11.0.9** (dev only, through eslint, typescript-eslint and
+  eslint-plugin-import-x; Dependabot PR 7): GHSA-g3hv-75wg-m249, a denial of service in glob
+  matching that only the lint toolchain reached; the full `npm audit` report is now 0, and the
   runtime audit was 0 throughout.
 - **The recommendation log refuses text that becomes credential-shaped once read back** (entities
   decoded, tags dropped), not only text that is credential-shaped as written: `SWID&#61;&#123;…&#125;`

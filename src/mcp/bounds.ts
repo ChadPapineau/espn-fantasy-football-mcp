@@ -134,7 +134,7 @@ export const offsetSchema = int(BOUNDS.offset.min, BOUNDS.offset.max).default(
 /** `detail` (plan 07 C2), default `compact`. */
 export const detailSchema = z.enum(["compact", "full"]).default("compact");
 /** A gsis id. */
-export const gsisIdSchema = z.string().regex(GSIS_ID_RE, { message: INVALID_ID_MESSAGE });
+export const gsisIdSchema = z.string().regex(GSIS_ID_RE, { error: INVALID_ID_MESSAGE });
 /** An ISO-8601 instant, ≤ 40 chars. */
 export const isoInstantSchema = z.iso.datetime({ offset: true }).max(40);
 /** A stat id (`stats{statId}` keys). */
@@ -154,7 +154,7 @@ const NFLVERSE_TO_ESPN: Readonly<Record<string, string>> = Object.freeze(
 export const nflTeamSchema = z
   .string()
   .refine((s) => ESPN_PRO_TEAM_ABBREVS.includes(s) || (isNflTeam(s) && s in NFLVERSE_TO_ESPN), {
-    message: "unknown_team",
+    error: "unknown_team",
   })
   .transform((s) => NFLVERSE_TO_ESPN[s] ?? s);
 
@@ -164,7 +164,7 @@ const idList = (max: number) =>
     .array(playerIdSchema)
     .min(1)
     .max(max)
-    .refine((a) => new Set(a).size === a.length, { message: "duplicate_ids" });
+    .refine((a) => new Set(a).size === a.length, { error: "duplicate_ids" });
 
 /** 1..25 distinct ESPN player ids (plan 02 §5; larger sets go through a selector — T-11). */
 export const playerIdsSchema = idList(BOUNDS.playerIds.max);
@@ -173,7 +173,7 @@ export const gsisIdsSchema = z
   .array(gsisIdSchema)
   .min(1)
   .max(BOUNDS.playerIds.max)
-  .refine((a) => new Set(a).size === a.length, { message: "duplicate_ids" });
+  .refine((a) => new Set(a).size === a.length, { error: "duplicate_ids" });
 
 /** The pool selector (plan 07 legend) — the sanctioned way past 25 players. */
 export const poolSelectorSchema = z.strictObject({
@@ -197,7 +197,7 @@ export type PlayerSelector = z.output<typeof playerSelectorSchema>;
 /** A single-player selector (E7 `player`, E10 `player`): one id or one gsis id. */
 export const singlePlayerSelectorSchema = z.union([
   z.strictObject({ player_ids: idList(1) }),
-  z.strictObject({ gsis_ids: gsisIdsSchema.refine((a) => a.length === 1, { message: "too_big" }) }),
+  z.strictObject({ gsis_ids: gsisIdsSchema.refine((a) => a.length === 1, { error: "too_big" }) }),
 ]);
 
 /** C4's selector: ≤ 12 ids (the worst case stays under 20 000 chars — plan 07 C4). */
@@ -212,14 +212,14 @@ export const searchQuerySchema = z
   .trim()
   .min(BOUNDS.searchChars.min)
   .max(BOUNDS.searchChars.max)
-  .regex(PRINTABLE_RE, { message: "unprintable_characters" });
+  .regex(PRINTABLE_RE, { error: "unprintable_characters" });
 
 /** `client_ref` (plan 07 E12). */
 export const clientRefSchema = z.string().regex(CLIENT_REF_RE);
 /** A recommendation `log_id`. */
-export const logIdSchema = z.string().max(30).regex(LOG_ID_RE, { message: INVALID_ID_MESSAGE });
+export const logIdSchema = z.string().max(30).regex(LOG_ID_RE, { error: INVALID_ID_MESSAGE });
 /** A request id (`meta.request_id`). */
-export const requestIdSchema = z.string().regex(REQUEST_ID_RE, { message: INVALID_ID_MESSAGE });
+export const requestIdSchema = z.string().regex(REQUEST_ID_RE, { error: INVALID_ID_MESSAGE });
 /** E1/E3 `seed`. */
 export const seedSchema = int(BOUNDS.seed.min, BOUNDS.seed.max);
 /** E1/E3 (`pre`/`live`) `n_sims`. */
@@ -251,13 +251,13 @@ export const positionsSchema = z
   .array(positionSchema)
   .min(BOUNDS.positions.min)
   .max(BOUNDS.positions.max)
-  .refine((a) => new Set(a).size === a.length, { message: "duplicate_positions" });
+  .refine((a) => new Set(a).size === a.length, { error: "duplicate_positions" });
 /** E13 `kinds[]`: 1..14 distinct recommendation kinds. */
 export const recommendationKindsSchema = z
   .array(z.enum(RECOMMENDATION_KINDS))
   .min(BOUNDS.kinds.min)
   .max(BOUNDS.kinds.max)
-  .refine((a) => new Set(a).size === a.length, { message: "duplicate_kinds" });
+  .refine((a) => new Set(a).size === a.length, { error: "duplicate_kinds" });
 /** A6 `count`. */
 export const txnCountSchema = int(BOUNDS.txnCount.min, BOUNDS.txnCount.max).default(
   BOUNDS.txnCount.default,
@@ -365,6 +365,6 @@ export const recordRecommendationInputSchema = z
     note: boundedTextSchema(BOUNDS.recNoteChars).optional(),
   })
   .refine((v) => JSON.stringify(v).length <= BOUNDS.recordInputChars, {
-    message: "input_too_large",
+    error: "input_too_large",
   });
 export type RecordRecommendationArgs = z.output<typeof recordRecommendationInputSchema>;

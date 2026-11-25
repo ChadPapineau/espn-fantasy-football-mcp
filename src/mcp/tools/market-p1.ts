@@ -363,7 +363,7 @@ export const tradeSchema = z.discriminatedUnion("kind", [
 export const TRADE_WIRE_MAX = 12;
 
 const tradeSideSchema = playerIdsSchema.refine((a) => a.length <= BOUNDS.tradeSide.max, {
-  message: "too_big",
+  error: "too_big",
 });
 
 /** The positions a league starts (its starter and flex slots' eligible positions): E6's needs. */
@@ -545,7 +545,7 @@ export const analyzeTradeTool = defineTool({
       ...detailShape,
     })
     .refine((a) => (a.offer === undefined) !== (a.find_partners === undefined), {
-      message: "offer_xor_find_partners",
+      error: "offer_xor_find_partners",
       path: ["offer"],
     }),
   data: tradeSchema,

@@ -575,7 +575,7 @@ export const getPlayerOutlook = defineTool({
       .array(weekSchema)
       .min(1)
       .max(BOUNDS.scheduleWeeks.max)
-      .refine((a) => new Set(a).size === a.length, { message: "duplicate_weeks" })
+      .refine((a) => new Set(a).size === a.length, { error: "duplicate_weeks" })
       .optional(),
     include_season_outlook: z.boolean().default(false),
     ...analyticsFreshnessShape,

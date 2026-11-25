@@ -395,7 +395,7 @@ export const getRoster = defineTool({
       ...detailShape,
     })
     .refine((a) => !(a.all && a.team_id !== undefined), {
-      message: "team_id_or_all",
+      error: "team_id_or_all",
       path: ["all"],
     }),
   data: rosterToolSchema,

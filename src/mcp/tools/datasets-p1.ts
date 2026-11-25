@@ -405,7 +405,7 @@ export const getDepthChart = defineTool({
       ...analyticsFreshnessShape,
     })
     .refine((a) => (a.nfl_team === undefined) !== (a.player === undefined), {
-      message: "nfl_team_xor_player",
+      error: "nfl_team_xor_player",
       path: ["nfl_team"],
     }),
   data: depthChartSchema,
@@ -1055,12 +1055,12 @@ export const getNews = defineTool({
         .array(z.enum(["rotowire", "espn", "cbs"]))
         .min(1)
         .max(3)
-        .refine((a) => new Set(a).size === a.length, { message: "duplicate_sources" })
+        .refine((a) => new Set(a).size === a.length, { error: "duplicate_sources" })
         .optional(),
       ...analyticsFreshnessShape,
     })
     .refine((a) => a.players === undefined || a.nfl_team === undefined, {
-      message: "players_or_nfl_team",
+      error: "players_or_nfl_team",
       path: ["nfl_team"],
     }),
   data: newsSchema,
