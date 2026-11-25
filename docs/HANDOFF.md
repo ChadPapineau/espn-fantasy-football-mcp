@@ -30,6 +30,21 @@ round at once. The owner lifted the weekly ceiling on 2026-11-24 ("Don't worry a
 usage. Just get the work done."): batches stop only short of the hard limit (97 %). The meter read 79 % when
 §R17 was ruled; it resets 2026-12-01, 04:00 UTC.
 
+**Owner, 2026-11-25, ~10:00 ET (R17-9 as amended):** the owner can refresh the weekly usage for free, up to
+two times. Use the rest of this week first: a batch starts only if the meter plus its estimate stays under
+98.5 %, and any long-running agent stops at a clean point at 98 %; never run into 100 %. When the next step
+does not fit, stop, send the push notification "Usage at X % — refresh now, then reply 'refreshed'." and
+wait (no polling). After "refreshed": read the meter once, resume where it stopped (or re-run the run stage
+on the same head from the batches on disk), and carry on without waiting for the 2026-12-01 reset — round 9,
+its triage and check, §R18, its fix round, round 10, and the ship steps if it passes — under the same rule.
+The 2026-11-30 check-in is a fallback until work resumes after the refresh, then deleted.
+
+**Orchestrator, 2026-11-25, 09:50 ET.** §R17's fix round landed (gate head `8f1c406`, CI green). Round 9 ran
+20 of 54 batches (Sonnet: inj-base, every Lane 2 case, 6 of 13 trigger batches) before the old 97 % gate:
+every Sonnet Lane 2 free grader passes (560/560, the first time), but injury-cascade neg-03 fires on both
+Sonnet runs (R17-2's guide drew it) and `matches-base` fails 9 of 30 runs (not yet read). Round 9 resumed
+under the owner's rule the same morning.
+
 - **Where it stands.**
   - `main` is at `5755a6a` (round 7's build, which Opus passed), and the runtime clone was rebuilt at it on
     2026-11-24 (19:36 ET); the owner restarts the apps to load it.
@@ -50,10 +65,10 @@ usage. Just get the work done."): batches stop only short of the hard limit (97 
   1. §R17's fix round in three streams (Skills; eval cases with the build; the server: R17-2's guide and R17-8's
      test), each with an independent verifier and a refix, then a gate that runs R15-7's cross-check and gets
      CI green.
-  2. Round 9 per R17-9, a full round on one head: inj-base and every Lane 2 case, then every trigger case with
-     traces kept, on both models at `--runs 2`, Sonnet first, judged on round 9 alone. About 32 points: what
-     does not fit under 97 % before the 2026-12-01 reset runs on the same head after it. Then the triage, the
-     report section and an independent check.
+  2. Round 9 per R17-9 as the owner amended it, a full round on one head (`8f1c406`): inj-base and every Lane 2
+     case, then every trigger case with traces kept, on both models at `--runs 2`, Sonnet first, judged on
+     round 9 alone, under the owner's usage rule (above). Then the triage, the report section and an
+     independent check.
   3. If round 9 meets plan 09 §5.2's bar on both models:
      - update this file and `CHANGELOG.md`;
      - fast-forward `main` (no merge commit, no-reply identity) and get CI green on `main` (the owner
@@ -934,3 +949,4 @@ approving the plan accepts them unless Chad says otherwise.
 - 2026-11-24 — The owner's OK: `main` fast-forwarded to `5755a6a` and the runtime clone rebuilt at it (19:36 ET); the 75 % rule lifted (R16-7 as amended).
 - 2026-11-25 — Dependabot PRs 6 and 7 reviewed under plan 04 §2 (static tarball diffs, integrity, signatures and provenance, advisories; an independent verifier): the dev bumps applied in `26a5aa1` (vitest 5.1.0, eslint 10.15.0, typescript-eslint 8.74.0, eslint-plugin-import-x 4.18.1, minimatch 11.0.9; the dev-only GHSA-g3hv-75wg-m249 closed, `npm audit` 0; zod's deprecated `message` param renamed `error` in 30 schema reasons, the advertised schemas byte-identical), `c96662c` (V1). `hyparquet` 1.32.0 deferred: plan 04 §2 must record its pin, and that file holds the owner's uncommitted edit. CI green.
 - 2026-11-25 — Round 8 of the plugin eval on `bb0744c` (R16-7, a full round; the owner lifted the ceiling mid-round): 54 batches, both models, `--runs 2`, weekly usage 46 % → 78 %, $534 plus $15 of judges. Report `2262698`, corrected in `515020f` and `220499e` after an independent check (ten findings, all fixed). Every §R16 target landed. Neither model meets the bar: Sonnet fails four Lane 2 free graders, one trigger run and the injection condition (AP-INJ run 2); Opus fails one negative trigger run. No product defect. §R17 (R17-1 … R17-9) ruled; its fix round started (▶ NEXT STEP).
+- 2026-11-25 — §R17's fix round (`3160171` … `8f1c406`; three streams, four verifiers, a refix and a gate; CI green; about 10 weekly points). Round 9 on `8f1c406`: 20 of 54 batches (Sonnet) before the old 97 % gate; Sonnet's Lane 2 free graders 560/560; injury-cascade neg-03 fires on both Sonnet runs; `matches-base` 9 of 30 failing, unread. The owner amended R17-9 (use the rest of the week to 98 %/98.5 %, then refresh the weekly usage up to twice, notified by push; no wait for the reset); round 9 resumed.
