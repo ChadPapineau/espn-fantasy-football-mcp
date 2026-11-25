@@ -37,7 +37,10 @@ does not fit, stop, send the push notification "Usage at X % — refresh now, th
 wait (no polling). After "refreshed": read the meter once, resume where it stopped (or re-run the run stage
 on the same head from the batches on disk), and carry on without waiting for the 2026-12-01 reset — round 9,
 its triage and check, §R18, its fix round, round 10, and the ship steps if it passes — under the same rule.
-The 2026-11-30 check-in is a fallback until work resumes after the refresh, then deleted.
+The 2026-11-30 check-in is a fallback until work resumes after the refresh, then deleted. Updated the same
+day: "Go ahead and proceed with everything you need to do. I will monitor the usage meter and refresh at
+99%" — work proceeds past 98 %; at a reading of 99 % agents start nothing and wait for the refresh (re-read
+every 5 minutes, at most 90 minutes), then stop and the orchestrator notifies the owner.
 
 **Orchestrator, 2026-11-25, 09:50 ET.** §R17's fix round landed (gate head `8f1c406`, CI green). Round 9 ran
 20 of 54 batches (Sonnet: inj-base, every Lane 2 case, 6 of 13 trigger batches) before the old 97 % gate:
