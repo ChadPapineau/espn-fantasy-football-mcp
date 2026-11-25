@@ -8,8 +8,14 @@
 // gap is the window's longest). Each is over the bound and is the process's own; none may read as
 // the host's. A block spins on the thread's own CPU time, so it spends exactly that much CPU however
 // loaded the machine is. stallEvidence's line, which the latency suite prints with each verdict,
-// carries that evidence. No network.
+// carries that evidence. No network. A stall's gap holds the stall alone: the locked write's store
+// is made before the process is ready and removed after it is killed, never inside the gap, where
+// its own fs calls read as fs time on a loaded runner (changelog §R17, R17-8: CI's "fs: expected 5.4
+// to be less than 5" was the test's mkdtemp and rm, not the probe).
 import { spawn } from "node:child_process";
+import { mkdtempSync, rmSync } from "node:fs";
+import { tmpdir } from "node:os";
+import path from "node:path";
 import { describe, expect, it } from "vitest";
 import {
   callAt,
@@ -32,26 +38,38 @@ const wait = (ms: number): string =>
   `Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, ${String(ms)});`;
 
 /**
- * A store write that waits `ms` on a lock another connection holds (SQLite's busy handler sleeps
- * off the CPU inside the statement), in a temp WAL store removed after.
+ * The locked write's temp WAL store at `file`, opened by two connections with the insert prepared
+ * (`ms`: the waiting connection's busy timeout). It runs before the process says it is ready, so
+ * none of its calls — sqlite or fs — falls in a measured window (R17-8).
  */
-const lockedWrite = (ms: number): string =>
-  `{ const { DatabaseSync } = process.getBuiltinModule("node:sqlite"); const fs = process.getBuiltinModule("node:fs"); const os = process.getBuiltinModule("node:os"); const path = process.getBuiltinModule("node:path"); const dir = fs.mkdtempSync(path.join(os.tmpdir(), "eff-hb-")); const f = path.join(dir, "s.sqlite"); const a = new DatabaseSync(f); a.exec("PRAGMA journal_mode = WAL; CREATE TABLE t(x)"); const b = new DatabaseSync(f, { timeout: ${String(ms)} }); const ins = b.prepare("INSERT INTO t VALUES (1)"); a.exec("BEGIN IMMEDIATE"); try { ins.run(); } catch {} a.exec("COMMIT"); a.close(); b.close(); fs.rmSync(dir, { recursive: true, force: true }); }`;
+const lockedStore = (file: string, ms: number): string =>
+  `const { DatabaseSync } = process.getBuiltinModule("node:sqlite"); const a = new DatabaseSync(${JSON.stringify(file)}); a.exec("PRAGMA journal_mode = WAL; CREATE TABLE t(x)"); const b = new DatabaseSync(${JSON.stringify(file)}, { timeout: ${String(ms)} }); const ins = b.prepare("INSERT INTO t VALUES (1)");`;
+/**
+ * A store write that waits on a lock another connection holds (SQLite's busy handler sleeps off
+ * the CPU inside the statement for the busy timeout): the gap's whole content, three sqlite calls.
+ */
+const lockedWrite = `a.exec("BEGIN IMMEDIATE"); try { ins.run(); } catch {} a.exec("COMMIT");`;
 
 /**
  * A process with the probe preloaded that, on SIGUSR1, stalls its loop `ms` the given way —
  * "masked": a block of `ms`, then, after a few ticks of the probe, a wait of 1 s, the window's
- * longest gap; "locked": a store write waiting on another connection's lock.
+ * longest gap; "locked": a store write waiting on another connection's lock, on a store this
+ * process makes before it is ready and removes after the kill.
  */
 async function stallingProcess(kind: "busy" | "wait" | "masked" | "locked", ms: number) {
   const marker = `process.stderr.write("e2e.stalled\\n");`;
+  const storeDir = kind === "locked" ? mkdtempSync(path.join(tmpdir(), "eff-hb-")) : null;
+  const removeStore = () => {
+    if (storeDir !== null) rmSync(storeDir, { recursive: true, force: true });
+  };
+  const preamble = storeDir === null ? "" : lockedStore(path.join(storeDir, "s.sqlite"), ms);
   const handler =
     kind === "busy"
       ? `${busy(ms)} ${marker}`
       : kind === "wait"
         ? `${wait(ms)} ${marker}`
         : kind === "locked"
-          ? `${lockedWrite(ms)} ${marker}`
+          ? `${lockedWrite} ${marker}`
           : `${busy(ms)} setTimeout(() => { ${wait(1000)} ${marker} }, 30);`;
   const child = spawn(
     process.execPath,
@@ -61,7 +79,7 @@ async function stallingProcess(kind: "busy" | "wait" | "masked" | "locked", ms: 
       "--import",
       HEARTBEAT,
       "-e",
-      `process.on("SIGUSR1", () => { ${handler} }); process.stderr.write("e2e.ready\\n"); setInterval(() => {}, 1_000_000);`,
+      `${preamble} process.on("SIGUSR1", () => { ${handler} }); process.stderr.write("e2e.ready\\n"); setInterval(() => {}, 1_000_000);`,
     ],
     { cwd: ROOT, stdio: ["pipe", "pipe", "pipe"], env: { PATH: process.env.PATH ?? "" } },
   );
@@ -80,7 +98,13 @@ async function stallingProcess(kind: "busy" | "wait" | "masked" | "locked", ms: 
       await new Promise((r) => setTimeout(r, 20));
     }
   };
-  await lineOf("e2e.ready", 0);
+  try {
+    await lineOf("e2e.ready", 0);
+  } catch (e) {
+    child.kill("SIGKILL");
+    removeStore();
+    throw e;
+  }
   const src: HeartbeatSource = { signal: (s) => child.kill(s), stderr };
   return {
     src,
@@ -90,7 +114,11 @@ async function stallingProcess(kind: "busy" | "wait" | "masked" | "locked", ms: 
       child.kill("SIGUSR1");
       await lineOf("e2e.stalled", from);
     },
-    stop: () => child.kill("SIGKILL"),
+    /** The process killed, and the locked kind's store removed — outside every measured window. */
+    stop: () => {
+      child.kill("SIGKILL");
+      removeStore();
+    },
   };
 }
 
@@ -274,9 +302,12 @@ describe("the longest gap's attribution names the synchronous call that held it 
         expect(a[`win_${k}_top`]).toBe(label);
         // off the CPU: a voluntary wait inside the server, never its own CPU
         expect(hb.gap_cpu_ms).toBeLessThan(50);
-        // the other kinds held nothing of it
-        for (const other of ["sql", "fs", "wait"].filter((x) => x !== k))
-          expect(a[`${other}_ms`] as number, other).toBeLessThan(5);
+        // the other kinds held nothing of it: the gap holds the stall alone (the locked kind's
+        // store is made and removed outside it — R17-8), so none of their calls ran in it at all
+        for (const other of ["sql", "fs", "wait"].filter((x) => x !== k)) {
+          expect(a[`${other}_n`], other).toBe(0);
+          expect(a[`${other}_ms`], other).toBe(0);
+        }
         expect(typeof a.at).toBe("number");
         expect(Math.abs((a.at as number) - Date.now())).toBeLessThan(10_000);
         if (process.platform === "linux") {
