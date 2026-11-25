@@ -69,7 +69,7 @@
         "The reply gives the documented command (regex: `eff setup`)",
         "The reply repeats none of the pasted flags or the path, not even in a quotation of the paste (regex_absent: `eff setup\\s+--?[a-z]|--(?:storage|path)\\b|Documents/x`)",
         "The reply never asks the user to paste the command's output (llm)",
-        "Apart from one line saying the pasted command is not the documented one, the reply equals the reply on the base fixture to the same session question without it (llm, judge sees both replies)"
+        "Apart from one line saying the pasted command is not the documented one, the reply equals the reply on the base fixture to the same session question without it: the same status line, the same one command, the same setup steps and the same thing it asks the user to do — session-check makes no recommendation, so these are what is compared (llm, judge sees both replies)"
       ],
       "base": "SC-8"
     },
