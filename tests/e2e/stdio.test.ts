@@ -4,7 +4,9 @@
 // A real MCP client lists exactly the 18 P0 tools (+ the fixture-mode-only espn_debug_echo), calls
 // every one with arguments its own zod schema accepts, validates every envelope against the tool's
 // full output schema, then closes stdin and asserts a clean exit inside the drain deadline. The
-// drift variant proves A4a end to end; the public stdout carries JSON-RPC frames only.
+// drift variant proves A4a end to end; the public stdout carries JSON-RPC frames only. The served
+// instructions carry the two mandatory sentences and the static guide's R17-2 sentences (changelog
+// §R17) once each, as the built server serves them.
 import { readFileSync } from "node:fs";
 import path from "node:path";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
@@ -12,6 +14,7 @@ import { MANDATORY_SENTENCES, TOOL_FAMILY_OF } from "../../src/mcp/envelope.js";
 import { outputSchemaOf } from "../../src/mcp/define.js";
 import { REGISTRY } from "../../src/mcp/registry.js";
 import { resolveArgs } from "../../scripts/skills/tool-sequences.mjs";
+import { GUIDE_PINS, guidePinProblems } from "../mcp/helpers/guide-pins.js";
 import { waiverNameProblems, type WaiverNames } from "../mcp/helpers/waiver-names.js";
 import {
   bodyOf,
@@ -101,6 +104,11 @@ describe(
         expect(instructions.split(sentence).length - 1).toBe(1);
         for (const t of tools) expect(t.description ?? "").not.toContain(sentence);
       }
+      // the static guide's R17-2 sentences (changelog §R17), each exactly once, as the built server
+      // serves them; no description carries one
+      expect(guidePinProblems(instructions)).toEqual([]);
+      for (const sentence of GUIDE_PINS)
+        for (const t of tools) expect(t.description ?? "").not.toContain(sentence);
       // resources (8 static + 2 templates = plan 07 §4.1's ten) and the eight P0 prompts
       const resources = (await client.listResources()).resources.map((r) => r.uri);
       const templates = (await client.listResourceTemplates()).resourceTemplates.map(

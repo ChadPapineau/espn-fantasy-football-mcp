@@ -3,7 +3,10 @@
 // whatever EFF_ENABLE_WRITES says (PHASE W SEAM); `instructions` carry each mandatory sentence
 // exactly once in both eras and no description carries either; every description ends with the
 // 40-char pointer; annotations by family (plan 01 §4.1); list results carry ttlMs + cacheScope
-// private; ten resources (8 + 2 templates); the eight P0 prompts; the fixture-only echo spike.
+// private; ten resources (8 + 2 templates); the eight P0 prompts; the fixture-only echo spike. The
+// static guide after the two sentences is its fixed text, word for word (plan 07 §5.4), with
+// changelog §R17, R17-2's two sentences and the session-start reads scoped to a session that loads
+// no Skill, each exactly once in every era and mode (tests/mcp/helpers/guide-pins.ts).
 import { readFileSync } from "node:fs";
 import path from "node:path";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
@@ -28,6 +31,7 @@ import {
 } from "../../src/mcp/registry.js";
 import {
   LIST_TTL_MS,
+  SERVER_GUIDE,
   SERVER_INSTRUCTIONS,
   SERVER_NAME,
   instructionsFor,
@@ -35,6 +39,13 @@ import {
 } from "../../src/mcp/server.js";
 import { DEBUG_ECHO_TEXT, DEBUG_TOOL_NAME } from "../../src/mcp/tools/debug.js";
 import { ALL_PROMPTS, PROMPTS } from "../../src/mcp/prompts/index.js";
+import {
+  GUIDE_PINS,
+  NO_SKILL_START,
+  R17_2_DATA_TIME,
+  R17_2_SKILL_FIRST,
+  guidePinProblems,
+} from "./helpers/guide-pins.js";
 import { ROOT, call, connect, makeWorld, type World } from "./helpers/world.js";
 
 const expected = JSON.parse(
@@ -197,6 +208,7 @@ describe("instructions: each mandatory sentence exactly once (plan 02 §6.3; pla
     expect(i).toBe(SERVER_INSTRUCTIONS);
     expect(count(i, UNTRUSTED_TEXT_RULE)).toBe(1);
     expect(count(i, ESPN_ESTIMATE_RULE)).toBe(1);
+    expect(guidePinProblems(i)).toEqual([]);
     expect(client.getServerVersion()?.name).toBe(SERVER_NAME);
     await close();
   });
@@ -213,6 +225,7 @@ describe("instructions: each mandatory sentence exactly once (plan 02 §6.3; pla
       cacheScope: string;
     };
     for (const s of MANDATORY_SENTENCES) expect(count(d.instructions, s)).toBe(1);
+    expect(guidePinProblems(d.instructions)).toEqual([]);
     expect(d.ttlMs).toBe(LIST_TTL_MS);
     expect(d.cacheScope).toBe("private");
     await close();
@@ -224,13 +237,73 @@ describe("instructions: each mandatory sentence exactly once (plan 02 §6.3; pla
     const fx = instructionsFor({ fixtureMode: true, spikeNonce: nonce });
     expect(fx).toBe(`${SERVER_INSTRUCTIONS}\n\n${spikeLine(nonce)}`);
     for (const s of MANDATORY_SENTENCES) expect(count(fx, s)).toBe(1);
+    expect(guidePinProblems(fx)).toEqual([]);
     expect(instructionsFor({ fixtureMode: false, spikeNonce: nonce })).toBe(SERVER_INSTRUCTIONS);
     expect(instructionsFor({ fixtureMode: true })).toBe(SERVER_INSTRUCTIONS);
     const { client, close } = await connect(world, {
       options: { fixtureMode: true, spikeNonce: nonce },
     });
     expect(client.getInstructions()).toContain(nonce);
+    expect(guidePinProblems(client.getInstructions() ?? "")).toEqual([]);
     await close();
+  });
+});
+
+describe("the static guide (plan 07 §5.4; changelog §R17, R17-2)", () => {
+  it("is its fixed text, word for word: R17-2's two sentences, and the session-start reads for a session that loads no Skill", () => {
+    expect(SERVER_GUIDE).toBe(
+      [
+        "Fantasy-football analysis of the operator's own ESPN league, read-only: no tool changes the league.",
+        R17_2_SKILL_FIRST,
+        NO_SKILL_START,
+        "Every result is an envelope {data, meta, page, truncated, partial, warnings}; every Dist carries its basis.",
+        R17_2_DATA_TIME,
+        "Log a recommendation with espn_record_recommendation before presenting it.",
+      ].join(" "),
+    );
+    expect(SERVER_INSTRUCTIONS).toBe(
+      `${UNTRUSTED_TEXT_RULE}\n\n${ESPN_ESTIMATE_RULE}\n\n${SERVER_GUIDE}`,
+    );
+    expect(guidePinProblems(SERVER_INSTRUCTIONS)).toEqual([]);
+    // the guide never repeats a mandatory sentence (each lives once, before it)
+    for (const s of MANDATORY_SENTENCES) expect(SERVER_GUIDE).not.toContain(s);
+  });
+
+  it("the pin check fails on a missing, doubled, reworded, reordered or unscoped sentence", () => {
+    const ok = SERVER_INSTRUCTIONS;
+    const cases: readonly [string, string][] = [
+      ["the Skill rule missing", ok.replace(R17_2_SKILL_FIRST, "")],
+      ["the data-time sentence doubled", `${ok} ${R17_2_DATA_TIME}`],
+      [
+        "the data-time sentence without its field marks",
+        ok.replace(R17_2_DATA_TIME, R17_2_DATA_TIME.replaceAll("`", "")),
+      ],
+      [
+        "the Skill rule's plain-lookup half dropped",
+        ok.replace(" A plain lookup (a status, a score, a setting) needs no Skill.", ""),
+      ],
+      [
+        "the session-start reads unscoped",
+        ok.replace(
+          NO_SKILL_START,
+          NO_SKILL_START.replace("When no Skill is loaded, start", "Start"),
+        ),
+      ],
+      [
+        "the session-start reads also given unscoped",
+        `${ok} Start with espn_get_status and espn_get_league once per session.`,
+      ],
+      [
+        "the session-start reads before the Skill rule",
+        ok
+          .replace(R17_2_SKILL_FIRST, "\u0000")
+          .replace(NO_SKILL_START, R17_2_SKILL_FIRST)
+          .replace("\u0000", NO_SKILL_START),
+      ],
+    ];
+    for (const [label, text] of cases)
+      expect(guidePinProblems(text).length, label).toBeGreaterThan(0);
+    expect(GUIDE_PINS).toEqual([R17_2_SKILL_FIRST, NO_SKILL_START, R17_2_DATA_TIME]);
   });
 });
 

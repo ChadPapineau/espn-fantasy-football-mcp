@@ -1,13 +1,16 @@
 // server.ts — createServer (plan 01 §3.1/§4): one McpServer named `espn-fantasy-football-mcp-server`
 // whose `instructions` carry both mandatory sentences exactly once (plan 02 §6.3; plan 01 §4.1 the
-// ESPN sentence) plus a short static guide; tools/resources/prompts capabilities, each declared
-// `listChanged: false` — the sets are fixed at process start and no list_changed is ever sent (plan
-// 01 §3.1, plan 02 §3.2, plan 07 §5.4; changelog R5), so initialize and server/discover advertise it
-// (the SDK would otherwise default the bit to true on the first registration); `ttlMs` and
-// `cacheScope: "private"` on every cacheable list (300 000 ms — the tool set is fixed at process
-// start); the registry's tools in order (EFF_TOOLSET), the PHASE W SEAM registration point (registers
-// nothing), the ten resources and the eight P0 prompts. No I/O here: the composition root injects
-// everything. Ported from sibling @5daa625 (src/mcp/server.ts), adapted.
+// ESPN sentence) plus a short static guide (plan 07 §5.4: no dynamic text) that carries changelog
+// §R17, R17-2's two sentences verbatim — a request one of the plugin's Skills covers loads that
+// Skill before any tool call or question, and data time comes from the envelope's meta — with the
+// session-start reads scoped to a session that loads no Skill; tools/resources/prompts
+// capabilities, each declared `listChanged: false` — the sets are fixed at process start and no
+// list_changed is ever sent (plan 01 §3.1, plan 02 §3.2, plan 07 §5.4; changelog R5), so initialize
+// and server/discover advertise it (the SDK would otherwise default the bit to true on the first
+// registration); `ttlMs` and `cacheScope: "private"` on every cacheable list (300 000 ms — the tool
+// set is fixed at process start); the registry's tools in order (EFF_TOOLSET), the PHASE W SEAM
+// registration point (registers nothing), the ten resources and the eight P0 prompts. No I/O here:
+// the composition root injects everything. Ported from sibling @5daa625 (src/mcp/server.ts), adapted.
 import { McpServer, type CacheHint } from "@modelcontextprotocol/server";
 import { ESPN_ESTIMATE_RULE, UNTRUSTED_TEXT_RULE } from "./envelope.js";
 import { registerDefinedTool } from "./define.js";
@@ -23,11 +26,28 @@ export const SERVER_NAME = "espn-fantasy-football-mcp-server";
 /** `ttlMs` for the list results and discovery (plan 01 §3.1). */
 export const LIST_TTL_MS = 300_000;
 
-/** The short usage guide after the two sentences (static; no dynamic text — plan 07 §5.4). */
+/**
+ * Changelog §R17, R17-2, verbatim: a request one of the plugin's Skills covers loads that Skill
+ * before any tool call and any question (the Skill makes the session's first reads); a plain lookup
+ * needs none.
+ */
+export const SKILL_FIRST_RULE =
+  "When one of this plugin's Skills covers the request (a lineup, start/sit, waiver, trade, roster or season question about this league), load it before any tool call and before asking the user anything: it makes the session's first reads and says what to ask. A plain lookup (a status, a score, a setting) needs no Skill.";
+
+/** Changelog §R17, R17-2, verbatim: the data's time is the envelope's, never the conversation's. */
+export const DATA_TIME_RULE =
+  "Data time comes from `meta.as_of` and `meta.freshness`, never from comparing a date in the data with the conversation's date.";
+
+/**
+ * The short usage guide after the two sentences (static; no dynamic text — plan 07 §5.4). The
+ * session-start reads stay for a session that loads no Skill (R17-2), scoped by the clause in front.
+ */
 export const SERVER_GUIDE = [
   "Fantasy-football analysis of the operator's own ESPN league, read-only: no tool changes the league.",
-  "Start with espn_get_status and espn_get_league once per session; espn-ff://docs/tool-outputs lists every tool's fields.",
+  SKILL_FIRST_RULE,
+  "When no Skill is loaded, start with espn_get_status and espn_get_league once per session; espn-ff://docs/tool-outputs lists every tool's fields.",
   "Every result is an envelope {data, meta, page, truncated, partial, warnings}; every Dist carries its basis.",
+  DATA_TIME_RULE,
   "Log a recommendation with espn_record_recommendation before presenting it.",
 ].join(" ");
 
