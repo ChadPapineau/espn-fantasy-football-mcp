@@ -2127,7 +2127,7 @@ export const ROUND9_FIXED = Object.freeze({
     "SKILL.md": {
       // R18-5
       irRead:
-        "That team read also gives step 5 the IR block on a valid roster — `ir.eligible_now[]` and the open IR seats (`ir.slots` less the players in `ir.occupied[]`) — so call it once whenever a bench player is `OUT` or `INJURY_RESERVE` (changelog §R18, R18-5).",
+        "That team read also gives §5 (Injuries and byes) the IR block on a valid roster — `ir.eligible_now[]` and the open IR seats (`ir.slots` less the players in `ir.occupied[]`) — so call it once whenever a bench player is `OUT` or `INJURY_RESERVE` (changelog §R18, R18-5).",
       irRule:
         "**More than one IR-eligible player** (changelog §R18, R18-5): when `ir.eligible_now[]` holds more than one player, weekly moves no one to IR — no IR move of its own in any table, the **Deadlines** block or the **Not actionable here** list — and prints the `espn-fantasy-football:injury-cascade` Skill's fixed line under the Injuries and byes table, verbatim with its values filled in, naming them all:",
       irLine:
