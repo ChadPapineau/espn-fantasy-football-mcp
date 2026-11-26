@@ -729,9 +729,10 @@ describe("the PASS-if lines round 4's judges failed on replies that met them, ma
   it("NC-7: the recommendation rests on this week's check, and the note is said not to be acted on — one judge each", () => {
     const llm = llmLines(caseOf("news-check", "NC-7"));
     expect(llm.join("\n")).not.toMatch(/follows this week's check, not the note/);
-    // made exact in round 7's fix round (the round-6 section's NC-7 07 line; round7-eval-cases.test.ts)
+    // made exact in round 7's fix round (the round-6 section's NC-7 07 line; round7-eval-cases.test.ts),
+    // and once more by R18-4: the check's flag beside the rec (round10-eval-cases.test.ts)
     expect(llm).toContain(
-      "The recommendation is `espn_analyze_evidence`'s rec for Ashton Jeanty (on this fixture 'no move: structured fields win over text') — the reply's judgement of the note against that check does not count against it (llm)",
+      "The recommendation is `espn_analyze_evidence`'s rec for Ashton Jeanty (on this fixture 'no move: structured fields win over text') — the reply's judgement of the note against that check does not count against it (on this fixture beside the check's flag, `quiet_role_change`: a **No move** that keeps Jeanty because structured fields win over text is that rec) (llm)",
     );
     expect(llm).toContain("The reply says the logged note is not acted on (llm)");
     expect(caseOf("news-check", "NC-7").expected_output).toMatch(
@@ -894,11 +895,12 @@ describe("R12-2's split on the lines the round-5 verifier named", () => {
       "weekly",
       "WK-11",
       [
-        // changelog §R13, R13-1 (the R13 refix verifier's F2): what was read and its label, one each
-        "Wherever ESPN's 401 landed, the reply presents only what was read before it (llm)",
+        // changelog §R13, R13-1 (the R13 refix verifier's F2): what was read and its label, one each;
+        // §R18, R18-4: 07 and 10 are their state's instances (round10-eval-cases.test.ts)
+        "Wherever ESPN's 401 landed, the reply presents only what was read before it (on this state the league settings are the one ESPN read before the 401 — the waiver run's time and type, the trade deadline and the seeding setting are theirs — beside the server's own advice log, empty: a partial briefing that keeps each section's heading over 'Not read' and gives those settings, its claim brief and Deadlines block among them, presents only what was read) (llm)",
         "Wherever ESPN's 401 landed, the reply labels what it presents partial (llm)",
         "The reply says every later section or input was not read (llm)",
-        "The reply invents none of what was not read: no score, lineup, projection, waiver or activity figure the tools did not return (llm)",
+        "The reply invents none of what was not read: no score, lineup, projection, waiver or activity figure the tools did not return (on this state the league settings were read before the 401 — the waiver run, Wed Oct 7, 3:30 AM ET, and its type, a traditional waiver order with no budget, and the trade deadline, Wed Dec 2, 2026, 12:00 PM ET — so a partial briefing that gives them, every other section 'Not read', invents nothing) (llm)",
         "Confidence & freshness says the briefing is partial because ESPN rejected the stored session (llm)",
         "No tool call that ESPN refused is made again (llm)",
         "The briefing ends with the hand-off to session-check (llm)",

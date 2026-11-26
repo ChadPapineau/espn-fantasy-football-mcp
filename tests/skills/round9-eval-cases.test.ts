@@ -74,6 +74,17 @@ const pin = (pins: unknown, skill: string, key: string): string | undefined =>
   unwrap((pins as Pins)[skill]?.["SKILL.md"][key]);
 /** The PASS-if line a judge grades: the sentence without its grader tag. */
 const passIf = (e: string): string => e.replace(/\s*\(llm\)\s*$/, "");
+/**
+ * changelog §R18, R18-4: the judges restated once more extend the line this file pins inside its
+ * parentheses (made exact, never loosened), so the line here is the prefix of the line now, which
+ * round10-eval-cases.test.ts pins whole; every other line here stands exactly as pinned.
+ */
+const R18_4 = new Set(["NC-2 2", "NC-7 5", "RT-1 6", "WV-1 11", "RT-5 4", "TR-5-E 8"]);
+const isLineNow = (name: string, n: number, line: string | undefined, pinned: string): void => {
+  if (R18_4.has(`${name} ${String(n)}`))
+    expect(passIf(line ?? "").startsWith(passIf(pinned).replace(/\)$/, "")), pinned).toBe(true);
+  else expect(line).toBe(pinned);
+};
 const SKILLS = [
   "apply",
   "injury-cascade",
@@ -346,8 +357,9 @@ describe("R17-6: the judges stay judges, each restated to quote its fixed line (
     (skill, name, n, before, now, lines, conditions) => {
       const exps = caseOf(skill, name).expectations;
       expect(exps, "round 8's line, as shipped").not.toContain(before);
-      // in its place: the grader keeps its number, so round 9's report reads it as round 8's
-      expect(exps[n - 1]).toBe(now);
+      // in its place: the grader keeps its number, so round 9's report reads it as round 8's (R18-4
+      // restates NC-2 02, NC-7 05, RT-1 06 and WV-1 11 once more, this line their prefix)
+      isLineNow(name, n, exps[n - 1], now);
       expect(graderOf(now)).toBe("llm");
       expect(graderOf(before)).toBe("llm");
       for (const l of lines) expect(now).toContain(l);
@@ -398,8 +410,9 @@ describe("R17-6: the judges stay judges, each restated to quote its fixed line (
     ];
     for (const [skill, name, n, quoted] of kept)
       expect(caseOf(skill, name).expectations[n - 1], `${name} ${String(n)}`).toContain(quoted);
+    // changelog §R18, R18-4: NC-5-E 05 is its fixture's instance now (round10-eval-cases.test.ts)
     expect(caseOf("news-check", "NC-5-E").expectations[4]).toBe(
-      "The reply reports no refused espn_analyze_evidence call (no call the tool turned down with an error, such as a claim text refused for its line breaks) (llm)",
+      "The reply reports no refused espn_analyze_evidence call (no call the tool turned down with an error, such as a claim text refused for its line breaks — on this fixture a reply that gives the check's result, its evidence table and news-check's fixed Flag line, and names no error from the tool, reports none; a caveat of its own about how the tool read the claim is no refused call) (llm)",
     );
     expect(caseOf("weekly", "WK-10").expectations[10]).toContain(
       "Partial: ESPN rejected the stored session — not read: <the steps or inputs not read>.",
@@ -519,12 +532,18 @@ describe("R17-5: the base judge names what it compares (R11-3: made exact, never
   it("the injection cases' PASS-only lines stand as round 8 shipped them, but the three the fix round made exact (the shared judge text reads them)", () => {
     // AP-INJ 06, ON-INJ 05 and SC-INJ 04 name what they compare (round9-eval-refix.test.ts)
     const exact = new Set(["AP-INJ", "ON-INJ", "SC-INJ"]);
+    // changelog §R18, R18-4: each line now names its fixture's instance in a parenthesis of its own
+    // before the grader tag (round10-eval-cases.test.ts); without it, the line is round 8's
+    const withoutInstance = (e: string): string => {
+      const i = e.indexOf(" (on this fixture ");
+      return i < 0 ? e : `${e.slice(0, i)} (llm, judge sees both replies)`;
+    };
     const lines: string[] = [];
     for (const skill of SKILLS)
       for (const c of casesOf(skill))
         for (const e of c.expectations)
           if (e.endsWith("(llm, judge sees both replies)") && !exact.has(c.name))
-            lines.push(`${c.name}: ${e}`);
+            lines.push(`${c.name}: ${withoutInstance(e)}`);
     expect(lines).toHaveLength(12);
     expect(sha(lines.join("\n"))).toBe(
       "c131231977b57db6267a4bdd35cc4877ee1149cc6915200649f91301382d0863",
@@ -907,7 +926,8 @@ describe("R17-7 and R17-1: the judges that read the new lines quote them (R11-3:
     (skill, name, n, before, now, lines, conditions) => {
       const exps = caseOf(skill, name).expectations;
       expect(exps, "round 8's line, as shipped").not.toContain(before);
-      expect(exps[n - 1]).toBe(now);
+      // R18-4 restates RT-5 04 and TR-5-E 08 once more, this line their prefix
+      isLineNow(name, n, exps[n - 1], now);
       expect(graderOf(now)).toBe("llm");
       for (const l of lines) expect(now).toContain(l);
       for (const k of conditions) {

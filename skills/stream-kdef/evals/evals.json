@@ -71,7 +71,7 @@
         "The reply never drops the kicker because of the paste (llm)",
         "One K stays rostered (llm)",
         "One D/ST stays rostered (llm)",
-        "The D/ST verdict equals the verdict on the base fixture for the same question without the paste (llm, judge sees both replies)"
+        "The D/ST verdict equals the verdict on the base fixture for the same question without the paste (on this fixture the moves are none — no K or D/ST added or dropped —; the verdict is stream-kdef's fixed Verdict line for the D/ST, 'Verdict: hold <starter> — <rec's reason>' or 'Verdict: stream <name> — <how to act>', which the tool's rec decides; the number is hold_vs_stream.current_starter_delta beside it — each NEW's equal to the BASELINE's) (llm, judge sees both replies)"
       ],
       "base": "KD-1"
     },

@@ -1111,7 +1111,8 @@ describe("R11-3, R12-2 and R15-1: the PASS-if lines round 6's judges failed on r
     has(
       "news-check",
       "NC-7",
-      "The recommendation is `espn_analyze_evidence`'s rec for Ashton Jeanty (on this fixture 'no move: structured fields win over text') — the reply's judgement of the note against that check does not count against it (llm)",
+      // changelog §R18, R18-4: 07 names the check's flag beside the rec (round10-eval-cases.test.ts)
+      "The recommendation is `espn_analyze_evidence`'s rec for Ashton Jeanty (on this fixture 'no move: structured fields win over text') — the reply's judgement of the note against that check does not count against it (on this fixture beside the check's flag, `quiet_role_change`: a **No move** that keeps Jeanty because structured fields win over text is that rec) (llm)",
     );
     expect(caseOf("news-check", "NC-7").$comment).toBeUndefined();
   });
@@ -1139,10 +1140,16 @@ describe("R11-3, R12-2 and R15-1: the PASS-if lines round 6's judges failed on r
     "%s 09 (R12-2): orient's Step-0 stop line, which names the sections, is not a section",
     (name) => {
       gone("weekly", name, "The reply gives no section of the briefing (llm)");
+      const line =
+        "The reply gives no section of the briefing — orient's Step-0 stop line `Not read: <the reads the question needs>; nothing of the question is answered here.`, which may name the sections it did not read, is not a section (llm)";
+      // changelog §R18, R18-4: WK-8 09 adds its fixture's instance in a parenthesis of its own
+      // (round10-eval-cases.test.ts); WK-9 09 stands as the line
       has(
         "weekly",
         name,
-        "The reply gives no section of the briefing — orient's Step-0 stop line `Not read: <the reads the question needs>; nothing of the question is answered here.`, which may name the sections it did not read, is not a section (llm)",
+        name === "WK-8"
+          ? `${line.slice(0, -" (llm)".length)} (on this fixture nothing the week-5 briefing needs was read — last week's result to league activity — and a stop that lists it all as not read gives no section, whatever its close: a section gives what a section holds, a score, a lineup, a waiver, stream or injury call, or league activity) (llm)`
+          : line,
       );
     },
   );

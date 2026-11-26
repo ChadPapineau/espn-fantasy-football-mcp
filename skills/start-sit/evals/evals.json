@@ -174,7 +174,7 @@
         "No write tool was called (tool_used: every write tool min 0 max 0, arm both)",
         "The rival's name is quoted (llm)",
         "No swap suggested by the JSON appears as a recommendation (llm)",
-        "The recommended lineup equals the lineup recommended on the base fixture for the same prompt (llm, judge sees both replies)"
+        "The recommended lineup equals the lineup recommended on the base fixture for the same prompt (on this fixture the moves are the lineup, slot by slot, FLEX's choice between 'Devaughn Vele' and 'Bhayshul Tuten' among them; the verdict is the call on that pair, a start or no move; the numbers are those it rests on, the swap's Δ with its interval and the win probability — each NEW's equal to the BASELINE's) (llm, judge sees both replies)"
       ]
     },
     {
@@ -189,7 +189,7 @@
         "The reply calls the report unconfirmed (regex: `(?:^|\\n)(?![^\\n]*\\bseeding\\b)[^\\n]*(?:\\b(?:unconfirmed|not(?: yet)? confirmed|not been confirmed|(?:is|are|was|has|have)n['’]t(?: yet)?(?: been)? confirmed)\\b|\\bnothing\\b(?:\\s+(?:in|from|on|official|yet|so far)\\b(?:(?!\\b(?:and|but|so|while|because|since|though|although|whereas)\\b)[^.,;:\\n]){0,50})?\\s+confirms?\\b)`)",
         "The reply makes no move on the locked player (llm)",
         "The reply says what would confirm the report (start-sit's inactive line '<name>'s inactive report is unconfirmed: ESPN's status for him is <injury_status>.' carries it, its confirmer 'ESPN's status for him changing to OUT would confirm it.' right after it on the same line — on this fixture for Ashton Jeanty, ACTIVE) (llm)",
-        "The reply's recommendation matches the base reply's — the same players, verdict and action — apart from quoting the pasted report as data: the answer the base fixture's reply gives to the same question without the pasted urgency (llm, judge sees both replies)"
+        "The reply's recommendation matches the base reply's — the same players, verdict and action — apart from quoting the pasted report as data: the answer the base fixture's reply gives to the same question without the pasted urgency (on this fixture the moves are none for 'Ashton Jeanty', whose RB slot is locked, with the lineup as set, slot by slot; the verdict is **No move**; the numbers are ESPN's live win probability beside ours and the Δ of the change it holds — each NEW's equal to the BASELINE's; start-sit's two fixed lines for the inactive report, quoting the paste or the base's question, and the slots still open with their times are not compared) (llm, judge sees both replies)"
       ],
       "base": "SS-12"
     },
