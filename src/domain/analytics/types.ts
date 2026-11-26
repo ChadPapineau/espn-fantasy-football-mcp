@@ -790,10 +790,11 @@ export interface TradeEvaluationData extends AnalyticsResult {
 export interface TradeProposalPlayer {
   readonly player_id: number;
   /**
-   * His name from the roster the call read, wrapped as the partner's own name is (`untrusted_text`
-   * from `espn.player.name`); `Player <id>`, wrapped alike, when that roster does not hold him.
+   * His name from the roster the call read: that row's own bare `espn.player.name` string, the form
+   * every player name ships in (plan 01 §4.4 after A7a; the tool's schema lists its path), never
+   * re-wrapped; `Player <id>` (unresolvedPlayerName) when that roster does not hold him.
    */
-  readonly name: UntrustedText;
+  readonly name: BareText;
 }
 
 /** E6 partner search. */

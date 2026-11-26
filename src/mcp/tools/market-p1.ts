@@ -3,9 +3,10 @@
 // the configured seeding reading — both readings only when `seeding_mode: "both"` is passed — the
 // deadline from tradeSettings, veto as risk, ESPN's auction value as a comparator only; every uneven
 // trade names its implied drop; a partner search names every player its proposals list, each name
-// wrapped as the partner's is — changelog §R18, R18-9), E7 espn_analyze_injury_cascade (vacated
-// opportunity by role affinity, an honest evidence grade, `hypothesis_only`, the IR consequence from
-// the STRUCTURED status only, and a claim / pass per available beneficiary from E5), E10
+// the bare, path-listed espn.player.name every player name is — changelog §R18, R18-9), E7
+// espn_analyze_injury_cascade (vacated opportunity by role affinity, an honest evidence grade,
+// `hypothesis_only`, the IR consequence from the STRUCTURED status only, and a claim / pass per
+// available beneficiary from E5), E10
 // espn_analyze_evidence (structured fields win; outlooks, RSS items and the user's pasted claim enter
 // only wrapped — plan 02 §6.4; the result is invariant to the text) and E11
 // espn_analyze_league_activity (what rivals did, priority spent, who needs what, who is IR-blocked).
@@ -354,10 +355,10 @@ export const tradeSchema = z.discriminatedUnion("kind", [
             get: z.array(playerId).max(BOUNDS.tradeSide.max),
           }),
           // the proposal's players named, one per id of give then get, in that order, from the
-          // rosters the call read: each name an untrusted_text from espn.player.name, wrapped as
-          // the partner's own name is (changelog §R18, R18-9; plan 02 §6)
+          // rosters the call read: each name the row's own bare espn.player.name, path-listed by
+          // this schema as every player name is (changelog §R18, R18-9; plan 01 §4.4 after A7a)
           players: z
-            .array(z.strictObject({ player_id: playerId, name: ut }))
+            .array(z.strictObject({ player_id: playerId, name: playerName }))
             .max(2 * BOUNDS.tradeSide.max),
           delta_me: dist,
           delta_partner: dist,

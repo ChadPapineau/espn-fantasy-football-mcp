@@ -13,15 +13,15 @@
 // partner's `tradeBlock` is untrusted text and is not an input at all (research 05 §6 case 4).
 // Partner search: the partner's weakest starting position and the proposal maximising Δ_me subject
 // to Δ_partner ≥ ε (sib §5.7), each proposal's players named from the rosters read — `give` from the
-// user's, `get` from the partner's, in that order, each name wrapped as the partner's is (changelog
-// §R18, R18-9; proposalPlayers). The rec's action keeps its ids. Cooperative over Monte-Carlo paths.
-// Pure. New here.
+// user's, `get` from the partner's, in that order, each name the row's own bare string, as every
+// player name ships (changelog §R18, R18-9; plan 01 §4.4 after A7a; proposalPlayers). The rec's
+// action keeps its ids. Cooperative over Monte-Carlo paths. Pure. New here.
 import type { Clock, Rng } from "../clock.js";
 import type { SeedingMode } from "../../config/schema.js";
 import { regularSeasonWeeks, tradeDeadlineStatus } from "../league/rules.js";
 import { slotClassOf } from "../league/slots.js";
 import type { BareText, LeagueRules, RosterSlots, UntrustedText, Week } from "../league/types.js";
-import { isIrEligible, unresolvedPlayerName, wrapUntrusted } from "../league/types.js";
+import { isIrEligible, unresolvedPlayerName } from "../league/types.js";
 import { P_ACTIVE_BY_STATUS } from "./constants.js";
 import {
   drainSteps,
@@ -659,10 +659,12 @@ function findPlayers(players: readonly TradePlayer[], ids: readonly number[]): T
  * The players a partner's proposal lists, named (changelog §R18, R18-9; plan 07 E6
  * `partners[].players[]`): one entry per id of `give`, then of `get`, in that order — `mine` (the
  * user's roster the call read) names `give`, `theirs` (the partner's) names `get`. Each name is
- * third-party text wrapped as the partner's own name is (`untrusted_text`, `espn.player.name`: plan
- * 02 §6), so it carries its injection flags. An id its side's roster does not hold is named as every
- * analytics answer names a player it cannot (`Player <id>`, unresolvedPlayerName), wrapped alike —
- * never from the other side's roster.
+ * third-party text in the form every player name ships (plan 01 §4.4 after A7a; plan 07's legend
+ * reads R18-9's `name: UT` so, as for R16-6's `truncated_names[].name`): the row's own bare
+ * `espn.player.name` string, capped and stripped by the normaliser, never re-wrapped — the tool's
+ * schema lists its path. An id its side's roster does not hold is named as every analytics answer
+ * names a player it cannot (`Player <id>`, unresolvedPlayerName) — never from the other side's
+ * roster.
  */
 export function proposalPlayers(
   proposal: { readonly give: readonly number[]; readonly get: readonly number[] },
@@ -672,10 +674,7 @@ export function proposalPlayers(
   const side = (ids: readonly number[], roster: readonly TradePlayer[]): TradeProposalPlayer[] =>
     ids.map((id) => ({
       player_id: id,
-      name: wrapUntrusted(
-        roster.find((p) => p.player_id === id)?.name ?? unresolvedPlayerName(id),
-        "espn.player.name",
-      ),
+      name: roster.find((p) => p.player_id === id)?.name ?? unresolvedPlayerName(id),
     }));
   return [...side(proposal.give, mine), ...side(proposal.get, theirs)];
 }
