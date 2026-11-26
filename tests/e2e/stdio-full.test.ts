@@ -5,7 +5,8 @@
 // seedHome — the state `eff refresh all` leaves), no network (a preload exits 98 on any socket),
 // EFF_TEST_STUBS. A real MCP client lists exactly the 34 read tools in registry order (+ the
 // fixture-mode debug tool) and no write tool, 13 prompts and the ten resources, and instructions
-// carrying the mandatory sentences and the guide's R17-2 sentences (changelog §R17) once each;
+// carrying the mandatory sentences, the guide's R17-2 sentences (changelog §R17) and R18-1's after
+// them (§R18) once each;
 // calls EVERY tool with arguments its own zod schema accepts; validates every envelope against the
 // tool's full output schema and the A6 walk; then closes stdin and asserts a clean exit inside the
 // drain deadline. B8:
@@ -24,7 +25,12 @@ import { outputSchemaOf } from "../../src/mcp/define.js";
 import { REGISTRY } from "../../src/mcp/registry.js";
 import { resolveArgs } from "../../scripts/skills/tool-sequences.mjs";
 import { INJECTIONS } from "../../scripts/fx10h/variants.js";
-import { GUIDE_PINS, guidePinProblems } from "../mcp/helpers/guide-pins.js";
+import {
+  GUIDE_PINS,
+  R18_1_INSTRUCTIONS_CHARS,
+  guidePinProblems,
+  withoutSpikeLine,
+} from "../mcp/helpers/guide-pins.js";
 import { waiverNameProblems, type WaiverNames } from "../mcp/helpers/waiver-names.js";
 import { envelopeViolations, identifierLeaks, stringLeaves } from "../mcp/helpers/walk.js";
 import {
@@ -296,8 +302,11 @@ describe(
         expect(instructions.split(sentence).length - 1).toBe(1);
         for (const t of tools) expect(t.description ?? "").not.toContain(sentence);
       }
-      // the static guide's R17-2 sentences (changelog §R17), each exactly once under full too
+      // the static guide's R17-2 sentences (changelog §R17) and R18-1's after them (§R18), each
+      // exactly once under full too — the production text 1,355 characters before the spike line
       expect(guidePinProblems(instructions)).toEqual([]);
+      expect(withoutSpikeLine(instructions)).toHaveLength(R18_1_INSTRUCTIONS_CHARS);
+      expect(withoutSpikeLine(instructions)).not.toBe(instructions);
       for (const sentence of GUIDE_PINS)
         for (const t of tools) expect(t.description ?? "").not.toContain(sentence);
       expect((await client.listPrompts()).prompts).toHaveLength(13);
