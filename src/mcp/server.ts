@@ -4,8 +4,9 @@
 // §R17, R17-2's two sentences verbatim — a request one of the plugin's Skills covers loads that
 // Skill before any tool call or question, and data time comes from the envelope's meta — and §R18,
 // R18-1's sentence right after the first (a question that only asks whether a player is healthy is
-// a plain lookup), with the session-start reads scoped to a session that loads no Skill (1,355
-// characters in all); tools/resources/prompts
+// a plain lookup) and R18-11's right after R18-1's (a question about a league on another platform
+// is not about this league: no Skill covers it), with the session-start reads scoped to a session
+// that loads no Skill (1,477 characters in all); tools/resources/prompts
 // capabilities, each declared `listChanged: false` — the sets are fixed at process start and no
 // list_changed is ever sent (plan 01 §3.1, plan 02 §3.2, plan 07 §5.4; changelog R5), so initialize
 // and server/discover advertise it (the SDK would otherwise default the bit to true on the first
@@ -33,10 +34,14 @@ export const LIST_TTL_MS = 300_000;
  * before any tool call and any question (the Skill makes the session's first reads); a plain lookup
  * needs none. Then changelog §R18, R18-1's sentence, verbatim, one space after R17-2's two (which
  * stay byte-identical): a question that only asks whether a player is healthy is such a lookup,
- * even when the read shows him hurt — R17-3's reading, in the text the model reads.
+ * even when the read shows him hurt — R17-3's reading, in the text the model reads. Then §R18,
+ * R18-11's sentence, verbatim, one space after R18-1's (R17-2's two and R18-1's stay
+ * byte-identical): a question about a league on another platform is not about this league, so no
+ * Skill covers it — R17-2's own condition (a "question about this league") negated in R17-2's
+ * words. The instructions are 1,477 characters in all (1,355 before R18-11).
  */
 export const SKILL_FIRST_RULE =
-  "When one of this plugin's Skills covers the request (a lineup, start/sit, waiver, trade, roster or season question about this league), load it before any tool call and before asking the user anything: it makes the session's first reads and says what to ask. A plain lookup (a status, a score, a setting) needs no Skill. A question that only asks whether a player is healthy is such a lookup, even when he turns out to be hurt.";
+  "When one of this plugin's Skills covers the request (a lineup, start/sit, waiver, trade, roster or season question about this league), load it before any tool call and before asking the user anything: it makes the session's first reads and says what to ask. A plain lookup (a status, a score, a setting) needs no Skill. A question that only asks whether a player is healthy is such a lookup, even when he turns out to be hurt. A question about a league on another platform (Sleeper, Yahoo and the like) is not about this league: no Skill covers it.";
 
 /** Changelog §R17, R17-2, verbatim: the data's time is the envelope's, never the conversation's. */
 export const DATA_TIME_RULE =

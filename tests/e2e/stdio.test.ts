@@ -6,8 +6,8 @@
 // full output schema, then closes stdin and asserts a clean exit inside the drain deadline. The
 // drift variant proves A4a end to end; the public stdout carries JSON-RPC frames only. The served
 // instructions carry the two mandatory sentences, the static guide's R17-2 sentences (changelog
-// §R17) and R18-1's after them (§R18) once each, as the built server serves them in both protocol
-// eras — the production text 1,355 characters before the fixture-mode spike line.
+// §R17) and R18-1's and R18-11's after them (§R18) once each, as the built server serves them in
+// both protocol eras — the production text 1,477 characters before the fixture-mode spike line.
 import { readFileSync } from "node:fs";
 import path from "node:path";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
@@ -17,7 +17,7 @@ import { REGISTRY } from "../../src/mcp/registry.js";
 import { resolveArgs } from "../../scripts/skills/tool-sequences.mjs";
 import {
   GUIDE_PINS,
-  R18_1_INSTRUCTIONS_CHARS,
+  R18_11_INSTRUCTIONS_CHARS,
   guidePinProblems,
   withoutSpikeLine,
 } from "../mcp/helpers/guide-pins.js";
@@ -110,11 +110,11 @@ describe(
         expect(instructions.split(sentence).length - 1).toBe(1);
         for (const t of tools) expect(t.description ?? "").not.toContain(sentence);
       }
-      // the static guide's R17-2 sentences (changelog §R17) and R18-1's after them (§R18), each
-      // exactly once, as the built server serves them — the production text R18-1's 1,355
-      // characters before the fixture-mode spike line; no description carries one
+      // the static guide's R17-2 sentences (changelog §R17) and R18-1's and R18-11's after them
+      // (§R18), each exactly once, as the built server serves them — the production text R18-11's
+      // 1,477 characters before the fixture-mode spike line; no description carries one
       expect(guidePinProblems(instructions)).toEqual([]);
-      expect(withoutSpikeLine(instructions)).toHaveLength(R18_1_INSTRUCTIONS_CHARS);
+      expect(withoutSpikeLine(instructions)).toHaveLength(R18_11_INSTRUCTIONS_CHARS);
       expect(withoutSpikeLine(instructions)).not.toBe(instructions);
       for (const sentence of GUIDE_PINS)
         for (const t of tools) expect(t.description ?? "").not.toContain(sentence);
@@ -253,13 +253,15 @@ describe(
       try {
         const s = await serve(h, { modern: true });
         expect(s.client.getProtocolEra()).toBe("modern");
-        // server/discover's instructions: the two mandatory sentences, R17-2's and R18-1's guide
-        // sentences, each exactly once (changelog §R17, §R18), as the built server serves them
+        // server/discover's instructions: the two mandatory sentences, R17-2's, R18-1's and
+        // R18-11's guide sentences, each exactly once (changelog §R17, §R18), as the built server
+        // serves them — the production text 1,477 characters before the spike line
         const d = s.client.getDiscoverResult() as unknown as { instructions: string };
         for (const sentence of MANDATORY_SENTENCES)
           expect(d.instructions.split(sentence).length - 1).toBe(1);
         expect(guidePinProblems(d.instructions)).toEqual([]);
-        expect(withoutSpikeLine(d.instructions)).toHaveLength(R18_1_INSTRUCTIONS_CHARS);
+        expect(withoutSpikeLine(d.instructions)).toHaveLength(R18_11_INSTRUCTIONS_CHARS);
+        expect(withoutSpikeLine(d.instructions)).not.toBe(d.instructions);
         expect((await s.client.listTools()).tools.map((t) => t.name)).toEqual([
           ...EXPECTED.core,
           DEBUG_TOOL,

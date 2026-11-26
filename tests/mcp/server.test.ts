@@ -5,9 +5,10 @@
 // 40-char pointer; annotations by family (plan 01 §4.1); list results carry ttlMs + cacheScope
 // private; ten resources (8 + 2 templates); the eight P0 prompts; the fixture-only echo spike. The
 // static guide after the two sentences is its fixed text, word for word (plan 07 §5.4), with
-// changelog §R17, R17-2's two sentences, §R18, R18-1's sentence right after R17-2's pair, and the
-// session-start reads scoped to a session that loads no Skill, each exactly once in every era and
-// mode (tests/mcp/helpers/guide-pins.ts); the production instructions are R18-1's 1,355 characters.
+// changelog §R17, R17-2's two sentences, §R18, R18-1's sentence right after R17-2's pair and
+// R18-11's right after R18-1's (the Skill rule's three parts), and the session-start reads scoped to
+// a session that loads no Skill, each exactly once in every era, toolset and mode
+// (tests/mcp/helpers/guide-pins.ts); the production instructions are R18-11's 1,477 characters.
 import { readFileSync } from "node:fs";
 import path from "node:path";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
@@ -35,6 +36,7 @@ import {
   SERVER_GUIDE,
   SERVER_INSTRUCTIONS,
   SERVER_NAME,
+  SKILL_FIRST_RULE,
   instructionsFor,
   spikeLine,
 } from "../../src/mcp/server.js";
@@ -45,8 +47,9 @@ import {
   NO_SKILL_START,
   R17_2_DATA_TIME,
   R17_2_SKILL_FIRST,
+  R18_11_INSTRUCTIONS_CHARS,
+  R18_11_OTHER_PLATFORM,
   R18_1_HEALTH_LOOKUP,
-  R18_1_INSTRUCTIONS_CHARS,
   guidePinProblems,
   withoutSpikeLine,
 } from "./helpers/guide-pins.js";
@@ -213,7 +216,7 @@ describe("instructions: each mandatory sentence exactly once (plan 02 §6.3; pla
     expect(count(i, UNTRUSTED_TEXT_RULE)).toBe(1);
     expect(count(i, ESPN_ESTIMATE_RULE)).toBe(1);
     expect(guidePinProblems(i)).toEqual([]);
-    expect(i).toHaveLength(R18_1_INSTRUCTIONS_CHARS);
+    expect(i).toHaveLength(R18_11_INSTRUCTIONS_CHARS);
     expect(client.getServerVersion()?.name).toBe(SERVER_NAME);
     await close();
   });
@@ -231,10 +234,29 @@ describe("instructions: each mandatory sentence exactly once (plan 02 §6.3; pla
     };
     for (const s of MANDATORY_SENTENCES) expect(count(d.instructions, s)).toBe(1);
     expect(guidePinProblems(d.instructions)).toEqual([]);
-    expect(d.instructions).toHaveLength(R18_1_INSTRUCTIONS_CHARS);
+    expect(d.instructions).toHaveLength(R18_11_INSTRUCTIONS_CHARS);
     expect(d.ttlMs).toBe(LIST_TTL_MS);
     expect(d.cacheScope).toBe("private");
     await close();
+  });
+
+  it("under full the same text in both eras: the static guide does not change with the toolset", async () => {
+    for (const modern of [false, true]) {
+      const { client, close } = await connect(world, {
+        modern,
+        options: { toolset: "full", fixtureMode: false },
+      });
+      expect(client.getProtocolEra()).toBe(modern ? "modern" : "legacy");
+      expect((await client.listTools()).tools).toHaveLength(34);
+      const i = modern
+        ? (client.getDiscoverResult() as unknown as { instructions: string }).instructions
+        : (client.getInstructions() ?? "");
+      expect(i).toBe(SERVER_INSTRUCTIONS);
+      for (const s of MANDATORY_SENTENCES) expect(count(i, s)).toBe(1);
+      expect(guidePinProblems(i)).toEqual([]);
+      expect(i).toHaveLength(R18_11_INSTRUCTIONS_CHARS);
+      await close();
+    }
   });
 
   it("fixture mode adds the spike nonce line once; the sentences stay exactly once", async () => {
@@ -245,7 +267,7 @@ describe("instructions: each mandatory sentence exactly once (plan 02 §6.3; pla
     for (const s of MANDATORY_SENTENCES) expect(count(fx, s)).toBe(1);
     expect(guidePinProblems(fx)).toEqual([]);
     expect(withoutSpikeLine(fx)).toBe(SERVER_INSTRUCTIONS);
-    expect(withoutSpikeLine(fx)).toHaveLength(R18_1_INSTRUCTIONS_CHARS);
+    expect(withoutSpikeLine(fx)).toHaveLength(R18_11_INSTRUCTIONS_CHARS);
     expect(instructionsFor({ fixtureMode: false, spikeNonce: nonce })).toBe(SERVER_INSTRUCTIONS);
     expect(instructionsFor({ fixtureMode: true })).toBe(SERVER_INSTRUCTIONS);
     const { client, close } = await connect(world, {
@@ -253,7 +275,9 @@ describe("instructions: each mandatory sentence exactly once (plan 02 §6.3; pla
     });
     expect(client.getInstructions()).toContain(nonce);
     expect(guidePinProblems(client.getInstructions() ?? "")).toEqual([]);
-    expect(withoutSpikeLine(client.getInstructions() ?? "")).toHaveLength(R18_1_INSTRUCTIONS_CHARS);
+    expect(withoutSpikeLine(client.getInstructions() ?? "")).toHaveLength(
+      R18_11_INSTRUCTIONS_CHARS,
+    );
     await close();
     // and in the 2026-07-28 era, fixture mode (server/discover through serveStdio)
     const modern = await connect(world, {
@@ -264,17 +288,23 @@ describe("instructions: each mandatory sentence exactly once (plan 02 §6.3; pla
     const d = modern.client.getDiscoverResult() as unknown as { instructions: string };
     expect(d.instructions).toBe(fx);
     expect(guidePinProblems(d.instructions)).toEqual([]);
+    expect(withoutSpikeLine(d.instructions)).toHaveLength(R18_11_INSTRUCTIONS_CHARS);
     await modern.close();
   });
 });
 
-describe("the static guide (plan 07 §5.4; changelog §R17, R17-2; §R18, R18-1)", () => {
-  it("is its fixed text, word for word: R17-2's two sentences, R18-1's after them, and the session-start reads for a session that loads no Skill", () => {
+describe("the static guide (plan 07 §5.4; changelog §R17, R17-2; §R18, R18-1 and R18-11)", () => {
+  it("is its fixed text, word for word: R17-2's two sentences, R18-1's and R18-11's after them, and the session-start reads for a session that loads no Skill", () => {
+    // the Skill rule is R17-2's pair, then R18-1's sentence, then R18-11's, one space between each
+    expect(SKILL_FIRST_RULE).toBe(
+      [R17_2_SKILL_FIRST, R18_1_HEALTH_LOOKUP, R18_11_OTHER_PLATFORM].join(" "),
+    );
     expect(SERVER_GUIDE).toBe(
       [
         "Fantasy-football analysis of the operator's own ESPN league, read-only: no tool changes the league.",
         R17_2_SKILL_FIRST,
         R18_1_HEALTH_LOOKUP,
+        R18_11_OTHER_PLATFORM,
         NO_SKILL_START,
         "Every result is an envelope {data, meta, page, truncated, partial, warnings}; every Dist carries its basis.",
         R17_2_DATA_TIME,
@@ -285,9 +315,12 @@ describe("the static guide (plan 07 §5.4; changelog §R17, R17-2; §R18, R18-1)
       `${UNTRUSTED_TEXT_RULE}\n\n${ESPN_ESTIMATE_RULE}\n\n${SERVER_GUIDE}`,
     );
     expect(guidePinProblems(SERVER_INSTRUCTIONS)).toEqual([]);
-    // R18-1 grows the instructions from 1,248 to 1,355 characters (changelog §R18)
-    expect(SERVER_INSTRUCTIONS).toHaveLength(R18_1_INSTRUCTIONS_CHARS);
-    expect(SERVER_INSTRUCTIONS.replace(` ${R18_1_HEALTH_LOOKUP}`, "")).toHaveLength(1_248);
+    // R18-11 grows the instructions from 1,355 to 1,477 characters, as R18-1 grew them from 1,248
+    // (changelog §R18): without R18-11's sentence and its space the text is R18-1's
+    expect(SERVER_INSTRUCTIONS).toHaveLength(R18_11_INSTRUCTIONS_CHARS);
+    const beforeR18_11 = SERVER_INSTRUCTIONS.replace(` ${R18_11_OTHER_PLATFORM}`, "");
+    expect(beforeR18_11).toHaveLength(1_355);
+    expect(beforeR18_11.replace(` ${R18_1_HEALTH_LOOKUP}`, "")).toHaveLength(1_248);
     // the guide never repeats a mandatory sentence (each lives once, before it)
     for (const s of MANDATORY_SENTENCES) expect(SERVER_GUIDE).not.toContain(s);
   });
@@ -295,6 +328,7 @@ describe("the static guide (plan 07 §5.4; changelog §R17, R17-2; §R18, R18-1)
   it("the pin check fails on a missing, doubled, reworded, reordered or unscoped sentence", () => {
     const ok = SERVER_INSTRUCTIONS;
     const health = R18_1_HEALTH_LOOKUP;
+    const other = R18_11_OTHER_PLATFORM;
     const cases: readonly [string, string][] = [
       ["the Skill rule missing", ok.replace(R17_2_SKILL_FIRST, "")],
       ["the data-time sentence doubled", `${ok} ${R17_2_DATA_TIME}`],
@@ -329,6 +363,50 @@ describe("the static guide (plan 07 §5.4; changelog §R17, R17-2; §R18, R18-1)
       ],
       ["R18-1's sentence two spaces after the pair", ok.replace(` ${health}`, `  ${health}`)],
       ["R18-1's sentence on a line of its own", ok.replace(` ${health}`, `\n${health}`)],
+      // R18-11's sentence: cut, reworded, doubled, moved, or no longer one space after R18-1's
+      ["R18-11's sentence cut", ok.replace(` ${other}`, "")],
+      [
+        "R18-11's sentence without a platform it names",
+        ok.replace(other, other.replace("(Sleeper, Yahoo and the like)", "(Sleeper and the like)")),
+      ],
+      [
+        "R18-11's sentence without its examples",
+        ok.replace(other, other.replace(" (Sleeper, Yahoo and the like)", "")),
+      ],
+      [
+        "R18-11's sentence off R17-2's words",
+        ok.replace(other, other.replace("is not about this league", "is not this league")),
+      ],
+      [
+        "R18-11's sentence without its last clause",
+        ok.replace(other, other.replace(": no Skill covers it.", ".")),
+      ],
+      [
+        "R18-11's sentence on another verb",
+        ok.replace(other, other.replace("no Skill covers it", "no Skill loads for it")),
+      ],
+      ["R18-11's sentence without its period", ok.replace(other, other.slice(0, -1))],
+      ["R18-11's sentence doubled", `${ok} ${other}`],
+      [
+        "R18-11's sentence moved before R18-1's",
+        ok.replace(` ${other}`, "").replace(health, `${other} ${health}`),
+      ],
+      [
+        "R18-11's sentence moved before R17-2's pair",
+        ok.replace(` ${other}`, "").replace(R17_2_SKILL_FIRST, `${other} ${R17_2_SKILL_FIRST}`),
+      ],
+      [
+        "R18-11's sentence moved after the session-start reads",
+        ok.replace(` ${other}`, "").replace(NO_SKILL_START, `${NO_SKILL_START} ${other}`),
+      ],
+      ["R18-11's sentence two spaces after R18-1's", ok.replace(` ${other}`, `  ${other}`)],
+      ["R18-11's sentence on a line of its own", ok.replace(` ${other}`, `\n${other}`)],
+      [
+        "R18-11's sentence between R17-2's two sentences",
+        ok
+          .replace(` ${other}`, "")
+          .replace("says what to ask. A plain lookup", `says what to ask. ${other} A plain lookup`),
+      ],
       [
         "the session-start reads unscoped",
         ok.replace(
@@ -352,9 +430,12 @@ describe("the static guide (plan 07 §5.4; changelog §R17, R17-2; §R18, R18-1)
       expect(text, `${label}: the mutation changes nothing`).not.toBe(ok);
       expect(guidePinProblems(text).length, label).toBeGreaterThan(0);
     }
+    // each mutation is its own text: no case repeats another's
+    expect(new Set(cases.map(([, text]) => text)).size).toBe(cases.length);
     expect(GUIDE_PINS).toEqual([
       R17_2_SKILL_FIRST,
       R18_1_HEALTH_LOOKUP,
+      R18_11_OTHER_PLATFORM,
       NO_SKILL_START,
       R17_2_DATA_TIME,
     ]);
