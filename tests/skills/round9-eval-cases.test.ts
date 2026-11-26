@@ -606,7 +606,7 @@ describe("one judge per condition (R13-1) and no new free grader (R17-6)", () =>
       ).toHaveLength(free);
     }
   });
-  it("the suite's judges and free-grader lines are round 8's in number: 311 judges, 15 base judges, 270 free graders", () => {
+  it("the suite's judges and free-grader lines are round 8's in number: 311 judges (312 since §R18's TR-4 08), 15 base judges, 270 free graders", () => {
     let llm = 0;
     let base = 0;
     let free = 0;
@@ -618,7 +618,9 @@ describe("one judge per condition (R13-1) and no new free grader (R17-6)", () =>
           else if (g === "llm") llm++;
           else free++;
         }
-    expect(llm).toBe(311);
+    // changelog §R18, R13-1: TR-4's names became a judge of their own, 08, in the §R18 fix round's refix
+    // (round10-eval-refix.test.ts); round 8's 311 stand beside it
+    expect(llm).toBe(311 + 1);
     expect(base).toBe(15);
     expect(free).toBe(270);
   });
