@@ -2,8 +2,8 @@
 // check-skills (docs/evals/stage-c-plugin-eval.md, "Run of 2026-11-25, round 9 (after §R17)",
 // #### skill_text_defect, the hardenings of #### eval_case_defect and #### model_variance and "Next
 // steps, in order" item 3; changelog §R18, R18-5 to R18-9): every fixed line fails the check when it is
-// cut or reworded, orient's Step-0 close fails in every copy, the cheat-sheet's trade row names R18-9's
-// field, the text the fixes withdraw fails when restored, the lines the rulings quote are their text
+// cut or reworded, orient's Step-0 close fails in every copy, trade names R18-9's field, the
+// text the fixes withdraw fails when restored, the lines the rulings quote are their text
 // character for character, each line sits where its rule prints it and contradicts no rule beside it,
 // the free graders that read those places take the lines filled in from their fixtures, and every
 // Skill's frontmatter is 8f1c406's byte for byte (R18-1, R17-3: no listing changes).
@@ -23,9 +23,7 @@ import {
   ROUND9_FIXED,
   ROUND9_ORIENT,
   TOOLSET_STOP,
-  TOOL_OUTPUT_PHRASES,
   checkSkills,
-  toolOutputFieldProblems,
 } from "../../scripts/skills/check-skills.mjs";
 import { CASCADE } from "../../src/domain/analytics/marketConstants.js";
 import { waiverActionText } from "../../src/domain/analytics/waivers.js";
@@ -130,7 +128,6 @@ const absentRows = Object.entries(
 ).flatMap(([skill, files]) =>
   Object.entries(files).flatMap(([file, gone]) => gone.map((g) => [skill, file, g] as const)),
 );
-const tradePhrase = TOOL_OUTPUT_PHRASES.espn_analyze_trade[0] ?? "?";
 
 interface Case {
   name: string;
@@ -271,35 +268,22 @@ describe("orient's Step-0 close, in every copy (R18-8, WK-8)", () => {
   });
 });
 
-describe("the cheat-sheet's trade row names R18-9's field", () => {
-  const sheet = read("skills/_shared/references/tool-outputs.md");
-  const row = sheet.split("\n").find((l) => l.startsWith("| (P1) `espn_analyze_trade` |")) ?? "";
-
-  it("the row carries it inside partners[], with the partner's other fields, in every copy", () => {
-    expect(row).toContain(
-      `— or \`partners[]\` (\`team_id\`, \`name\`, \`weakest_slot\`, \`proposal\` (\`give\`, \`get\` — \`player_id\`s), \`delta_me\`, \`delta_partner\`, ${tradePhrase}) |`,
-    );
-    expect(toolOutputFieldProblems(sheet)).toEqual([]);
-    for (const skill of SKILLS)
-      expect(read(`skills/${skill}/references/tool-outputs.md`), skill).toBe(sheet);
-    // the ruling's field, its two keys and its order
+describe("R18-9's field in the trade text (the cheat-sheet's row waits for the server's schema)", () => {
+  it("trade names each proposal player from partners[].players[], the ruling's field, its keys and order", () => {
     expect(RULINGS).toContain(
       "each partner gains `players[]: { player_id, name: UT }` for its `give` and `get` ids",
     );
-    expect(tradePhrase).toContain(
-      "`players[]` (`player_id`, `name` — one entry per id of that proposal's `give` and `get`, in that order",
+    expect(line("trade", "namesRule")).toContain(
+      "that partner's `players[]` (`{ player_id, name }`, one entry per id of its `give` and `get`, in that order;",
     );
+    // the cheat-sheet lists only fields the committed output schema has (gen-tool-docs); its trade
+    // row gains players[] with the server stream's field (fixed-lines.md row 18, held until then)
+    const row =
+      read("skills/_shared/references/tool-outputs.md")
+        .split("\n")
+        .find((l) => l.startsWith("| (P1) `espn_analyze_trade` |")) ?? "";
+    expect(row).toContain("`rec` — or `partners[]` |");
   });
-
-  it.each(["cut", "reword"] as const)(
-    "the phrase %s: the check fails on the shared file",
-    (how) => {
-      const to = how === "cut" ? "" : reword(tradePhrase);
-      expect(withSharedEdit("tool-outputs.md", every(tradePhrase), to)).toContain(
-        `skills/_shared/references/tool-outputs.md: the \`espn_analyze_trade\` row does not carry "${tradePhrase}"`,
-      );
-    },
-  );
 });
 
 describe("the text round 9's triage withdrew", () => {
