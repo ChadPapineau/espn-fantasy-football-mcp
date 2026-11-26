@@ -826,6 +826,39 @@ minor version (plan 04 §4.4; plan 09 K6). One version covers the server, the Sk
   server test. Plan 01 §4.1's guide paragraph says what R18-1 adds. The gate's built server in fixture
   mode serves the sentence once, right after R17-2's pair, in the legacy `initialize` and the
   2026-07-28 era's `server/discover`; without it the production text equals `8f1c406`'s byte for byte.
+- **The server's static guide says a league on another platform is not this league (ruling R18-11;
+  `docs/plan/changelog.md` §R18).** `SKILL_FIRST_RULE` gains R18-11's sentence verbatim, one space
+  after R18-1's: "A question about a league on another platform (Sleeper, Yahoo and the like) is not
+  about this league: no Skill covers it." R17-2's two sentences, R18-1's, the data-time sentence, the
+  mandatory sentences and the rest of the guide are byte-identical, and the instructions grow from
+  1 355 to 1 477 characters (1 538 in fixture mode, with the spike line). No Skill's listing changes
+  (R17-3), and the rule equals, byte for byte, the one the orchestrator's diagnostic build served
+  when it measured the sentence. Plan 01 §4.1's guide paragraph says what R18-11 adds.
+  - The guide's pins (`tests/mcp/helpers/guide-pins.ts`; `b881a07`) hold the sentence once and
+    directly after R18-1's in the unit server test (both protocol eras, production and fixture mode,
+    and now under `full` in both eras) and in both stdio end-to-end suites; the server test also pins
+    the Skill rule as R17-2's pair, then R18-1's sentence, then R18-11's, and the production text at
+    1 477 characters (1 355 without the sentence, 1 248 without R18-1's too). On `b563c1a` every new
+    pin fails, over real stdio in both eras under both toolsets too; sixteen source mutations each
+    fail the server test, among them the sentence moved into a guide element of its own, which serves
+    the same text and which only the Skill-rule pin catches.
+  - The SDK smoke holds the guide on the built server (F3 of R18-11's verifiers; `c8a24df`).
+    `npm run smoke`, which CI's `smoke` job runs, checked only the two mandatory sentences in the
+    served `instructions`, and passed a build without R18-11's sentence. Its instructions check
+    (`tests/smoke/smoke-lib.mjs`) now also holds, in both protocol eras under `core` and `full`, each
+    of R17-2's sentences, R18-1's and R18-11's exactly once, R18-1's directly after R17-2's pair and
+    R18-11's directly after R18-1's (one space between each), the session-start reads only in their
+    scoped sentence and after the Skill rule, and the production text (fixture mode's spike line
+    removed) at 1 477 characters, so the 2026-07-28 era under `full` holds the guide over real stdio
+    too. The smoke keeps its own copy of the sentences, and `tests/smoke/smoke-lib.test.ts` holds it
+    equal to the guide pins. On `b563c1a`'s build the new smoke fails in all four runs, and it passes
+    on `b881a07`'s; fourteen mutations of the check and nine of the built guide each fail it, where
+    the old smoke passed all nine built mutations.
+  - The gate's built server in fixture mode (no cookie; a scratch HOME, config and cache) serves the
+    sentence once, right after R18-1's and before the no-Skill session start, in the legacy
+    `initialize` (2025-11-25 and 2025-06-18) and the 2026-07-28 era's `server/discover`, under `core`
+    and `full`: 1 538 characters, the 1 477-character production text and the spike line. Without the
+    sentence and its space the production text equals `b563c1a`'s byte for byte.
 - **`espn_analyze_trade`'s partner search names every proposal player (ruling R18-9;
   `docs/plan/changelog.md` §R18).** Each `partners[]` entry gains `players[]: { player_id, name }`:
   one entry per id of its `proposal.give`, then of its `proposal.get`, in that order, named from the

@@ -2388,6 +2388,9 @@ them, before the pre-flight (R18-2) and round 10: the Skills stream (`7f70069`, 
 `a9701cc`), a verifier per stream and a cross verifier, the server refix (`22ce708`), the eval-case
 refix (`ed37883`, `c2d0cb4`; the Skills refix committed nothing and left a verified patch for the
 gate) and the gate (`ff77b98`, then this record). What it built and what stays open, by stream.
+R18-2's pre-flight then stopped on `b563c1a`, and §R18 gained R18-11 and R18-12 (2026-11-26).
+R18-11's fix followed: the server stream (`b881a07`), two verifiers, the server refix (`c8a24df`)
+and the gate before round 10 (this record's R18-11 and R18-12 items).
 
 ### §R18 built
 
@@ -2396,6 +2399,23 @@ gate) and the gate (`ff77b98`, then this record). What it built and what stays o
   (both protocol eras, production and fixture mode) and both stdio end-to-end suites. The
   instructions grow from 1 248 to 1 355 characters. The gate's built server in fixture mode serves
   the sentence once, right after R17-2's pair (below). No Skill's listing changed.
+- **R18-11** (the guide's other-platform sentence, after the pre-flight's stop on injury-cascade
+  neg-05; §R18): `SKILL_FIRST_RULE` gains the sentence verbatim, one space after R18-1's, R17-2's two
+  and R18-1's staying byte-identical (`b881a07`): "A question about a league on another platform
+  (Sleeper, Yahoo and the like) is not about this league: no Skill covers it." It is pinned by the
+  unit server test (both protocol eras, production and fixture mode, and under `full` in both eras),
+  both stdio end-to-end suites and the built server's SDK smoke (`npm run smoke`, CI's `smoke` job,
+  both eras under core and full; `c8a24df`, the verifiers' F3). The instructions grow from 1 355 to
+  1 477 characters (1 538 with fixture mode's spike line); with the sentence and its space removed
+  the production text equals `b563c1a`'s byte for byte, and the rule is byte-identical to the one the
+  diagnostic build served. On `b563c1a` the new pins fail (the unit server test 6 of 20; the stdio
+  suites 3 of 11, the guide pins only; a probe over real stdio, both eras under core and full: every
+  R18-11 pin, the length 1 355 against 1 477 among them), 16 source mutations each fail the server
+  test, and the new smoke fails in all four runs, as it does on 9 built mutations the old smoke
+  passed. The gate's built server in fixture mode, on a clean worktree of `c8a24df`, serves the
+  sentence once, right after R18-1's and before the no-Skill session start, in the legacy
+  `initialize` (2025-11-25 and 2025-06-18) and the 2026-07-28 era's `server/discover`, under core
+  and full. No Skill file, eval case or grader changed; every `SKILL.md` frontmatter is `8f1c406`'s.
 - **R18-4** (judges on fixed lines, compliant stops and replies equal to their bases): no judge
   became a free grader. The 26 judges R18-4 lists are restated once more, round 9's PASS-if line their
   prefix, each quoting its fixed line or as its fixture's instance (`ff3df81`, `a9701cc`; AP-4 04 and
@@ -2423,8 +2443,20 @@ gate) and the gate (`ff77b98`, then this record). What it built and what stays o
 - **R18-9** (the trade partner search's player names): `partners[].players[]` with plan 07 E6
   (`89977e9`; the bare, path-listed name form, `22ce708`), trade's names rule (`7f70069`), the
   cheat-sheet row (`b28f228`; its name form, `ff77b98`), and TR-4 04 and 08 (`a9701cc`, `ed37883`).
-- R18-2 (the pre-flight), R18-3 (round 10's scope) and R18-10 (the variance cases SC-6 and SS-2, run
-  again) are the runs, not yet run.
+- **R18-12** (round 10's order and stop rule; amends R18-2 and R18-3; §R18): R18-2's pre-flight ran
+  on `b563c1a` and stopped after its second batch (neg-03 clean on 12 of 12 Sonnet runs; neg-05
+  fired on Sonnet run 1, the Skill loaded first), and no separate pre-flight runs again. Round 10 is
+  R18-3's full round on the gate's head, run in this order: (1) the extras, which count toward no
+  verdict: injury-cascade neg-03 and neg-05, each alone at `--runs 10`, then NC-2, RA-4-E and
+  IC-CORE, each alone at `--runs 2`, on Sonnet, then on Opus; (2) every Skill's trigger batch at
+  `--runs 2`, on Sonnet, then on Opus. After each batch of steps 1 and 2, if a trigger run failed, an
+  extra fired, or a run of the three Lane 2 extras loaded no Skill or failed a free grader, nothing
+  more runs and the orchestrator rules: the round can no longer meet the bar. Then (3) Sonnet's
+  inj-base pass with `--baselines`, then Sonnet's Lane 2, and (4) Opus's inj-base pass into
+  `suite-opus`, then Opus's Lane 2. The bar, the flags, the batch names, the usage rule and R18-3's
+  other terms are unchanged; B11 Lane 2 and B15 are judged on round 10 alone, and R18-10's variance
+  cases (SC-6 on Sonnet, SS-2 on Opus) run in it with no change of their own. Round 10 is not yet
+  run.
 
 ### Found in round 10's Skill fixes and their refix (2026-11-25)
 
@@ -2652,6 +2684,41 @@ with `--seed --seed-datasets`, against round 9's two suites (`8f1c406`).
   judges on round-9 replies; WK-8 09 and WK-9 09; IC-INJ's compared numbers; TR-4 08's count and
   WK-11 07's form; RA-1 and R18-7; and the owners of the round-N Skill tests and of Lane 1's
   sequences in a fix round.
+
+### Found in R18-11's fix and by its verifiers (2026-11-26)
+
+- **Round 10's set-up check (the verifiers' F1).** The pre-flight's set-up script checks R18-1's
+  sentence directly followed by the no-Skill session start ("When no Skill is loaded, start with
+  espn_get_status and espn_get_league once per session;"). R18-11's sentence now sits between them,
+  so the script, unchanged, stops on every build that carries R18-11's sentence: it fails all 46
+  plugins of the head's suite. The server refix's drop-in replacement (outside the repository, same
+  usage) checks R18-11's sentence once, right after R18-1's, then the no-Skill session start, and the
+  1 477-character production text. It fails on the pre-flight's suite and on nine built mutations,
+  and passes on all 46 plugins of the head's suite. Round 10's set-up uses it, or makes the same
+  change to its own copy.
+- **SC-2's synthetic value (the verifiers' F2; by design, no change).** The suite build draws SC-2's
+  cookie-shaped value at random on every build (`syntheticCookie()`), so SC-2's `prompt.md` and its
+  graders 01 to 03 differ between any two builds. Any "suite unchanged" comparison masks the value
+  (`AEB[A-Za-z0-9]{60}%2B[A-Za-z0-9]{40}%2F[A-Za-z0-9]*%3D` → `<SYNTHETIC_ESPN_S2>`) or allows
+  exactly those four files to differ.
+- **The SDK smoke (the verifiers' F3; fixed in `c8a24df`).** It checked only the two mandatory
+  sentences; it now holds the guide's sentences, their order and the 1 477 characters (R18-11,
+  above).
+- **Three copies of the guide's sentences.** A guide ruling now updates `src/mcp/server.ts`,
+  `tests/mcp/helpers/guide-pins.ts` and `tests/smoke/smoke-lib.mjs` together (the unit tests fail
+  until all three agree), and the eval set-up's check with them.
+- **Watch in round 10 (R18-11's reach).** Of the suite's 310 prompts, the only ones that name
+  another platform are the 26 other-platform negatives (two per Skill); no positive trigger case and
+  no Lane 2 prompt names Sleeper, Yahoo or any other platform. The server's own Sleeper data (the
+  `sleeper:trending` dataset, the `sleeper_trend` and `sleeper_cross_check` fields) is about this
+  league's players, not a league on another platform: a reply that declines a this-league question
+  because a tool cites Sleeper data would be the sentence read wider than written.
+- **Open after the bar.** The served-text pins (the stdio suites, the guide pins and the smoke) do
+  not hold the character after R18-11's sentence: a newline before "When no Skill is loaded" keeps
+  every sentence and the length. The unit server test holds it (`SERVER_GUIDE` word for word, the
+  served text equal to `SERVER_INSTRUCTIONS`), and so does round 10's set-up check. The stdio suites
+  could compare the served production text with `SERVER_INSTRUCTIONS` to hold the built text word
+  for word.
 
 ### R18-4: the judges that stay judges, for the conversion after the bar
 
