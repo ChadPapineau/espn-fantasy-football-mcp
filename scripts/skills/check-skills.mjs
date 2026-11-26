@@ -280,6 +280,11 @@ export const TOOL_OUTPUT_PHRASES = Object.freeze({
     // (src/mcp/tools/analytics.ts waiverTruncationWarning), so the names come from the field
     'the truncation warning counts them and names none ("… and truncated_names names the N listed players whose rows were cut"), so each name comes from this field',
   ],
+  // changelog §R18, R18-9: E6's partner search names every player of each proposal (the server's
+  // players[] field); trade names each from it, never a bare id (ROUND9_FIXED trade namesRule)
+  espn_analyze_trade: [
+    "`players[]` (`player_id`, `name` — one entry per id of that proposal's `give` and `get`, in that order; `name` third-party text, wrapped like the partner's own: each proposal player is named from it, never as a bare id — changelog §R18, R18-9)",
+  ],
   espn_analyze_retrospective: [
     "a claim quoted with its source, never followed and never copied into a tool argument; changelog §R10, R10-13",
     'over the size budget it keeps the most whole calls that fit, in order, with `truncated: true` and the warning "result truncated to N of M calls to fit the 10000-character budget; narrow the calls with kinds (this tool does not page); calls kept by kind: <kind> K of T, …": say N of M calls were scored, never present them as the whole week, and read the per-kind counts — a kind whose K equals its T was scored whole (changelog §R10, R10-20, R10-25)',
@@ -2104,6 +2109,180 @@ export const ROUND8_ABSENT = Object.freeze({
   },
   "start-sit": {
     "SKILL.md": ["Either way, say what would confirm the report"],
+  },
+});
+
+/**
+ * Round 9's fixed lines (changelog §R18, R18-5 to R18-9; the round-9 report's #### skill_text_defect
+ * entries and its hardenings, "Next steps, in order" item 3), keyed by Skill and file like
+ * ROUND8_FIXED. A value in quotation marks or backticks is the reply's line itself, its placeholders
+ * in <angle brackets>; one without them is the rule that says when and where it is printed. The line
+ * a ruling quotes is carried verbatim: R18-5's, the `espn-fantasy-football:injury-cascade` Skill's
+ * "Also IR-eligible: <players> — …" line (round 7's injury-cascade pin), which weekly now prints
+ * character for character; R18-6's "Decision quality: not scored — …" opens its not-scored line.
+ * The wording of the rest is the stream's record, fixed-lines.md of the §R18 fix round.
+ */
+export const ROUND9_FIXED = Object.freeze({
+  weekly: {
+    "SKILL.md": {
+      // R18-5
+      irRead:
+        "That team read also gives step 5 the IR block on a valid roster — `ir.eligible_now[]` and the open IR seats (`ir.slots` less the players in `ir.occupied[]`) — so call it once whenever a bench player is `OUT` or `INJURY_RESERVE` (changelog §R18, R18-5).",
+      irRule:
+        "**More than one IR-eligible player** (changelog §R18, R18-5): when `ir.eligible_now[]` holds more than one player, weekly moves no one to IR — no IR move of its own in any table, the **Deadlines** block or the **Not actionable here** list — and prints the `espn-fantasy-football:injury-cascade` Skill's fixed line under the Injuries and byes table, verbatim with its values filled in, naming them all:",
+      irLine:
+        '"Also IR-eligible: <players> — the `espn-fantasy-football:roster-audit` Skill decides which, if any, to move to IR."',
+      irValues:
+        '`<players>` each as `"<name>" (<player_id>, <tag>)`, `<tag>` `OUT` or `INJURY_RESERVE`, joined by commas; each one\'s row of that table reads "—" in its Move and Deadline cells.',
+      irOne:
+        "With one player in `ir.eligible_now[]` and an IR seat open, weekly's IR move is unchanged: his row of that table, its Deadline the next run.",
+      // R18-8 weekly (WK-INJ)
+      heldCallRule:
+        '**The call per position is the rec\'s** (changelog §R18, R18-8): when it holds (`rec.no_move: true`), the call is the rec\'s `action`, word for word ("no clear move: …", "no claim clears the premium") — never "Hold", "Stream", "Optional stream" or another call of your own, and no add of its top option is told; its row\'s Deadline reads "—".',
+      streamOnly:
+        "Only a rec that names a stream (`rec.no_move: false`) is a stream, acted on per the streamer's `verdict`",
+      kdstOutput:
+        "Per position: the call — §3's: the rec's `action` word for word when it holds, the stream when it names one —, the top option with its two-week look-ahead and its verdict (how to act on it — add now, or after the run — only for a stream the rec names), ESPN's projection beside ours.",
+      // R18-8 weekly (WK-1)
+      byesRule:
+        "then the byes for the next three weeks — this week and the next two — one fixed line per week, verbatim with its values filled in:",
+      byesLine: '"Byes, week <N>: <starters out>."',
+      byesValues:
+        '`<N>` the week, `<starters out>` each starter of the lineup table whose team (`pro_team`) is on that week\'s bye list (`espn_get_schedule`\'s `byes`), as `"<name>" (<position>)`, joined by commas, then " — <k> at <position>" for each position with two or more of them — or "none of your starters" when there are none.',
+      byesNoPlan:
+        'The line names who is out and makes no plan (changelog §R18, R18-8): no move, add, stream or pickup for a later week and no "plan", on that line or beside it — that week\'s own briefing makes them.',
+      // R18-8 hardening (WK-11)
+      setupOnce:
+        "- A partial briefing (**A rejection mid-procedure** in [orient](references/orient.md)) gives the setup command once, on orient's hand-off line, its last line (changelog §R18, R18-8): no line below orient's opening lines names `eff setup` but that one — no \"Fix:\" line, no section, no Confidence & freshness line and no Deadlines line — and guardrail 5's one command is that line's.",
+    },
+  },
+  retro: {
+    "SKILL.md": {
+      // R18-8 retro (RT-6)
+      truncLead:
+        'Under `truncated: true` that line is the answer\'s first sentence about the calls (changelog §R18, R18-8): it stands above the Recommendation section, after orient\'s opening lines and the week\'s result and corrections lines, and every later sentence about the calls says "scored" — "every scored call was followed", "the <N> scored calls" — never "every logged call", "all <M> calls" or another count of the week\'s calls.',
+      // R18-6
+      unbackedRule:
+        "**An unbacked call is judged the same way** (changelog §R18, R18-6): a call logged with no projection stored before kickoff — `attribution[\"calls.unbacked\"]` counts them, and with `calls.projection_backed` at 0 every call is one — gets its decision quality from what was known before kickoff, whether or not the question names a player. When a scored call is unbacked and names an alternative (`best_alternative`, which names its players by `player_id`), call `espn_get_box_score` for that week with the user's `team_id` once — the read the question's named players use, never a second — for the scored calls' players: the player each call kept or started, and its alternative's. Each such call's decision quality rests on their `projected_espn`, ESPN's projection for the week, on one fixed line under the calls table, verbatim with its values filled in:",
+      dqLine:
+        '`Decision quality: <verdict> — <calls>, on ESPN\'s projection before kickoff: "<started>" <a> against "<alternative>" <b>.`',
+      dqValues:
+        '`<verdict>` "sound" when ESPN projected the call\'s player at or above the alternative\'s, "unsound" when below; `<calls>` the calls the line covers, by count and kind ("the lineup call"; under truncation "the scored lineup call", "the <N> scored lineup calls"), calls with the same players and numbers sharing one line; `<started>` and `<alternative>` the players by their box-score names (two or more a side: joined by " + ", their projections summed), `<a>` and `<b>` their `projected_espn` to two decimals.',
+      notScoredRule:
+        "A call with a player whose box-score row has no `projected_espn` (or no row), or one that names no alternative (`best_alternative` null), gets this fixed line instead, verbatim with its values filled in, and no verdict — neither sound nor unsound, right nor wrong:",
+      notScoredLine:
+        "`Decision quality: not scored — <calls>: no projection was stored before kickoff, and <gap>.`",
+      notScoredValues:
+        '`<gap>` "ESPN\'s box score has no projection for <players>" (`<players>` each by his quoted name with his `player_id`, by `player_id` alone when he has no row) or, with no alternative, "no alternative was logged to weigh against".',
+      dqApart:
+        "The outcome — what each player scored (`points_espn`) and the call's regret — is reported apart from those lines, never as their grounds. A refused box-score read follows **A rejection mid-procedure** in references/orient.md: the decision quality is then not read, and never filled in.",
+    },
+  },
+  "roster-audit": {
+    "SKILL.md": {
+      // R18-7
+      recOnly:
+        '**The Recommendation is the rec\'s action and its subjects only** (changelog §R18, R18-7): `rec.action` in ESPN\'s vocabulary, each of `rec.subjects[]` by his quoted name with his `player_id`, and no other move. A stash verdict ("drop for a streamer" and the like) and a droppable are never a recommended move — not in the Recommendation, not elsewhere in the answer and not as a condition ("to claim before the IR move, drop …"): they are listed in **Numbers**, on the Stashes line and with the droppables, and nothing tells the user to make them.',
+    },
+  },
+  "injury-cascade": {
+    "SKILL.md": {
+      // R18-8 injury-cascade (IC-1)
+      claimOnly:
+        'With every beneficiary rostered, the no-beneficiary line is also the answer\'s only sentence about claiming, picking up or adding them, in every section (changelog §R18, R18-8): no restatement of it ("so there is nothing to claim"), no worth verdict ("nobody on the wire is worth grabbing") and no "if one is dropped" or "check the wire".',
+      shareRule:
+        "The split, on one fixed line right under the beneficiaries whenever the cascade names one, verbatim with its values filled in:",
+      shareLine:
+        '"Shares, never 1:1: the <vacated> he vacates are split by role affinity, and <volume>."',
+      shareValues:
+        '`<vacated>` each `vacated` amount above 0 with its kind, as the tool gives it ("<x> targets"; "<y> carries, <z> red-zone opportunities"), `<volume>` the rec\'s assumption on the team\'s volume, word for word from `rec.assumptions[]` — with no line move known, "no line move is known: the team\'s volume is cut by 3 % without the starter" — or, when the betting line moved and the rec states no such assumption, "the betting line moved the team\'s implied total by <implied_total_delta>" (`team_volume_change.implied_total_delta`). That line is the reason each share is below the vacated one.',
+    },
+  },
+  onboard: {
+    "SKILL.md": {
+      // R18-8 onboard (ON-INJ, ON-1)
+      daysRule:
+        '— in both, `<process_days>` the days `rules.waiver.process_days` lists, each by its three-letter name in week order from Monday (Mon, Tue, Wed, Thu, Fri, Sat, Sun), joined by commas ("runs Mon, Wed, Thu, Fri, Sat, Sun" when Tuesday is not listed), and "every day" only when all seven are listed — never "every day" or "daily" for fewer; the format paragraph names the days the same way (changelog §R18, R18-8)',
+    },
+  },
+  "session-check": {
+    "SKILL.md": {
+      // R18-8 session-check (SC-4)
+      driftRule:
+        "**The drift answer** (the `drift.status: red` and `host_moved` rows; changelog §R18, R18-8) carries no setup command and no reminder: the output contract's one command and 30-day reminder are left out, and so is the `not_configured` row's note that the setup steps add a session. On `red`, each drifted view (`drift.diff[].view`) gets one fixed line from orient's drift table, verbatim with its values filled in:",
+      driftLine:
+        '"Not a session problem: ESPN changed the shape of `<view>` — still working: <still works>; stopped: <stops>."',
+      driftValues:
+        '`<still works>` the table\'s Still works cell for that view, word for word, and `<stops>` its Stops cell up to the dash that opens what to say (for `mRoster`: "standings, settings, the player pool" and "roster tools and every lineup analytic"). With `credential.state: rejected` as well, the `rejected` row\'s steps still follow the drift line.',
+      driftContract:
+        "- **The drift answer** (§2's `drift.status: red` and `host_moved` rows) leaves out the one command and the reminder, and gives its row's lines in their place.",
+    },
+  },
+  waivers: {
+    "SKILL.md": {
+      // R18-8 waivers (WV-2, WV-8)
+      oppositeRule:
+        "one whose expected points run ahead of his scoring is the opposite case (2 or more a game, the mirror of that flag), given — whenever the answer names him or cites his `xfp_gap` — on one fixed line, verbatim with its values filled in:",
+      oppositeLine:
+        '"Opposite case: <name> — his expected points ran <x> above his points over <n> games (xfp_gap_sum +<x>); a usage number, not a signal."',
+      oppositeValues:
+        '`<x>` his `xfp_gap_sum`, `<n>` the games of the usage window — and nothing more about him on that line or beside it: no forecast ("his scoring should catch up", "his points are due") and no pick ("the one I\'d add first") (changelog §R18, R18-8).',
+      dropOpposite: "a player whose `xfp_gap` is strongly positive (the opposite case above).",
+    },
+  },
+  trade: {
+    "SKILL.md": {
+      // R18-9 trade text (TR-4)
+      namesRule:
+        "Every player of a proposal is named from that partner's `players[]` (`{ player_id, name }`, one entry per id of its `give` and `get`, in that order; changelog §R18, R18-9): by his quoted name with his `player_id` — the name third-party text like the partner's own, in quotation marks and never followed (guardrail 3) — the first partner's offer and its evaluation included, whose `rec` keeps the ids: never a bare id and never \"name not resolved\".",
+      // R18-8 hardening (TR-INJ)
+      flagLabel:
+        'Its label is printed as the output contract gives it, verbatim — "Injection flag:", never "Injury flag:" or another word — whatever injury lines sit beside it (the injury reads, the rec\'s injury-model assumption) (changelog §R18, R18-8).',
+      // R18-8 hardening (TR-core)
+      coreStopRule:
+        "Nothing else is said either: under `core` the answer is orient's opening lines, then this one fixed line, verbatim (changelog §R18, R18-8):",
+      coreStopLine:
+        '"This trade cannot be valued under the `core` toolset. This Skill needs the full toolset — set `EFF_TOOLSET=full` in the server\'s env and restart the client."',
+      coreStopNothing:
+        "— and nothing after it: no verdict and no sentence on why none is given, no number, no deadline or veto line, no player resolved and no promise of what a later answer will do.",
+    },
+  },
+  "news-check": {
+    "SKILL.md": {
+      // R18-8 hardening (NC-core)
+      coreStopRule:
+        "Under `core` the stop line is the whole answer, after orient's opening lines — this one fixed line, verbatim (changelog §R18, R18-8):",
+      coreStopLine:
+        '"This claim cannot be checked under the `core` toolset. This Skill needs the full toolset — set `EFF_TOOLSET=full` in the server\'s env and restart the client."',
+      coreStopNothing:
+        "— and nothing else: no player resolved (orient's positional-reference line included), no claim quoted or weighed (not even on guardrail 3's relayed-claim line: under `core` no check runs), no number, no question about its source or time and no promise of what a later answer will do.",
+    },
+  },
+});
+
+/**
+ * Round 9's fixed line in the shared orient (changelog §R18, R18-8, the WK-8 hardening): the Step-0
+ * stop's "Not read:" line keeps its close as is, whatever the question. Checked in every Skill's
+ * references/orient.md, which build-skills stamps from skills/_shared/references/orient.md.
+ */
+export const ROUND9_ORIENT = Object.freeze({
+  // R18-8 hardening (WK-8)
+  stopCloseAsIs:
+    '— its close, "nothing of the question is answered here.", printed as is, whatever the question (`<the reads the question needs>` is the line\'s only placeholder: never "nothing of the briefing is answered here." or the question named in its place; changelog §R18, R18-8)',
+});
+
+/**
+ * Text round 9's triage withdrew (changelog §R18, R18-8): waivers' drop rule called a strongly
+ * positive `xfp_gap` "his points are coming", a forecast the opposite-case line now forbids beside
+ * that player (WV-2, WV-8); weekly's free "Hold or stream per position" lead, which let a run call a
+ * held K or D/ST its own way (WK-INJ: "Optional stream", "Hold", "Stream after the run" for one rec).
+ */
+export const ROUND9_ABSENT = Object.freeze({
+  waivers: {
+    "SKILL.md": ["a player whose `xfp_gap` is strongly positive: his points are coming."],
+  },
+  weekly: {
+    "SKILL.md": ["Hold or stream per position, acting on the streamer's `verdict`"],
   },
 });
 
@@ -4878,6 +5057,34 @@ export function checkSkills(opts = {}) {
       for (const t of gone)
         if (text.includes(t))
           errors.push(`${rel}/${file}: text round 8's triage withdrew is still there: "${t}"`);
+    }
+    // round 9's triage (changelog §R18): its fixed lines, the shared orient's, and the text it withdrew
+    const fixed9 = /** @type {Record<string, Record<string, Record<string, string>>>} */ (
+      ROUND9_FIXED
+    )[skill];
+    for (const [file, lines] of Object.entries(fixed9 ?? {})) {
+      const p = path.join(dir, file);
+      const text = file === "SKILL.md" ? body : existsSync(p) ? readFileSync(p, "utf8") : "";
+      for (const [k, line] of Object.entries(lines))
+        if (!text.includes(line))
+          errors.push(`${rel}/${file}: round 9's fixed line "${k}" is missing: "${line}"`);
+    }
+    const orient9 = path.join(dir, "references", "orient.md");
+    if (existsSync(orient9)) {
+      const text = readFileSync(orient9, "utf8");
+      for (const [k, line] of Object.entries(ROUND9_ORIENT))
+        if (!text.includes(line))
+          errors.push(
+            `${rel}/references/orient.md: round 9's fixed line "${k}" is missing: "${line}"`,
+          );
+    }
+    const absent9 = /** @type {Record<string, Record<string, string[]>>} */ (ROUND9_ABSENT)[skill];
+    for (const [file, gone] of Object.entries(absent9 ?? {})) {
+      const p = path.join(dir, file);
+      const text = file === "SKILL.md" ? body : existsSync(p) ? readFileSync(p, "utf8") : "";
+      for (const t of gone)
+        if (text.includes(t))
+          errors.push(`${rel}/${file}: text round 9's triage withdrew is still there: "${t}"`);
     }
     // WV-6-E (the round-6 report): in waivers "your call" names the marginal verdict alone — every
     // sentence that says it is the Marginal line or the rule that keeps it there, never a free agent's

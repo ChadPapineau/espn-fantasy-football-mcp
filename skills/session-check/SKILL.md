@@ -42,6 +42,8 @@ Run Step 0 of [orient](references/orient.md): `espn_get_status` with `include_ch
 | `credential.state: validated` | ESPN accepted the cookies at `last_accepted_at`; say so with `age_days`. No probe needed. |
 | `credential.stale_warning: true` | The session is about a month old or more: suggest re-running `eff setup` now, before a game-day failure. |
 
+**The drift answer** (the `drift.status: red` and `host_moved` rows; changelog §R18, R18-8) carries no setup command and no reminder: the output contract's one command and 30-day reminder are left out, and so is the `not_configured` row's note that the setup steps add a session. On `red`, each drifted view (`drift.diff[].view`) gets one fixed line from orient's drift table, verbatim with its values filled in: "Not a session problem: ESPN changed the shape of `<view>` — still working: <still works>; stopped: <stops>." — `<still works>` the table's Still works cell for that view, word for word, and `<stops>` its Stops cell up to the dash that opens what to say (for `mRoster`: "standings, settings, the player pool" and "roster tools and every lineup analytic"). With `credential.state: rejected` as well, the `rejected` row's steps still follow the drift line.
+
 **A league not known to be public.** In the `not_configured` and `rejected` rows, when `league.is_public` is null, say so on this fixed line, verbatim: "Whether this league is public is not known yet (`league.is_public` null), so I treat it as private."
 
 ### 3. The setup steps (said once, in order)
@@ -77,6 +79,7 @@ If the user pastes anything cookie-shaped: **do not repeat it**, do not put it i
 - For `rejected`: "this usually means `espn_s2` expired."
 - The reminder: re-running `eff setup` about every 30 days avoids game-day failures.
 - No recommendation and no log entry: this Skill does not call `espn_record_recommendation` (a `session` entry is logged only when a question produced advice).
+- **The drift answer** (§2's `drift.status: red` and `host_moved` rows) leaves out the one command and the reminder, and gives its row's lines in their place.
 
 ## Guardrails specific to session-check
 - Never recommend a browser extension, a cookie-database reader or an automated login.
