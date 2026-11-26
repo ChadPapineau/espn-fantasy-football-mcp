@@ -183,7 +183,8 @@ describe("WV-2 on td-inflated: a touchdown-inflated candidate the tool does not 
         "Any usage signal the reply cites carries its number (llm)",
         // made exact in round 7's fix round (the round-6 section's WV-2 07 line, R12-2)
         // changelog §R17, R17-6 with R14-4: Concepcion's opposite case named (round9-eval-cases.test.ts)
-        "The reply invents no usage signal: the touchdown-luck flag §4.4 requires for Jakobi Meyers (xfp_gap_sum −13.48), the opposite case for KC Concepcion (his expected points ran ahead of his scoring: xfp_gap_sum +11.61 over 3 games) and the usage numbers it cites by value are not invented signals (llm)",
+        // changelog §R18, R18-8: and waivers' opposite-case line, filled in (round10-eval-cases.test.ts)
+        "The reply invents no usage signal: the touchdown-luck flag §4.4 requires for Jakobi Meyers (xfp_gap_sum −13.48), the opposite case for KC Concepcion (his expected points ran ahead of his scoring: xfp_gap_sum +11.61 over 3 games) and the usage numbers it cites by value are not invented signals (waivers gives the opposite case on its fixed line 'Opposite case: <name> — his expected points ran <x> above his points over <n> games (xfp_gap_sum +<x>); a usage number, not a signal.', on this fixture 'Opposite case: \"KC Concepcion\" — his expected points ran 11.61 above his points over 3 games (xfp_gap_sum +11.61); a usage number, not a signal.', with nothing more about him on that line or beside it: a forecast ('his scoring should catch up') or a pick ('the one I'd add first') beside it is an invented signal) (llm)",
       ]),
     );
     expect(c.expected_output).toMatch(/td-inflated/);

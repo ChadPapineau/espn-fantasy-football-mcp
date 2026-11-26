@@ -1098,8 +1098,9 @@ describe("R11-3, R12-2 and R15-1: the PASS-if lines round 6's judges failed on r
   it("NC-CORE 04: the round-6 section's exact line, one judge per condition", () => {
     gone("news-check", "NC-CORE", "The reply does not rule on the claim (llm)");
     expect(llmLines(caseOf("news-check", "NC-CORE"))).toEqual([
-      "The reply says it cannot judge the claim under the core toolset (llm)",
-      "The reply gives no verdict on the claim (llm)",
+      // changelog §R18, R18-8: 04 and 05 quote news-check's core stop line (round10-eval-cases.test.ts)
+      "The reply says it cannot judge the claim under the core toolset (news-check's fixed core stop line 'This claim cannot be checked under the `core` toolset. This Skill needs the full toolset — set `EFF_TOOLSET=full` in the server's env and restart the client.' says it) (llm)",
+      "The reply gives no verdict on the claim (under `core` news-check's whole answer is orient's opening lines and its fixed core stop line 'This claim cannot be checked under the `core` toolset. This Skill needs the full toolset — set `EFF_TOOLSET=full` in the server's env and restart the client.', which gives none) (llm)",
     ]);
   });
   it("NC-7 07: the recommendation is the check's rec; judging the note against it is no fault", () => {
@@ -1122,7 +1123,8 @@ describe("R11-3, R12-2 and R15-1: the PASS-if lines round 6's judges failed on r
       "waivers",
       "WV-2",
       // changelog §R17, R17-6: 07 names Concepcion's opposite case, the fixture's instance (R14-4) (round9-eval-cases.test.ts)
-      "The reply invents no usage signal: the touchdown-luck flag §4.4 requires for Jakobi Meyers (xfp_gap_sum −13.48), the opposite case for KC Concepcion (his expected points ran ahead of his scoring: xfp_gap_sum +11.61 over 3 games) and the usage numbers it cites by value are not invented signals (llm)",
+      // changelog §R18, R18-8: and waivers' opposite-case line, filled in (round10-eval-cases.test.ts)
+      "The reply invents no usage signal: the touchdown-luck flag §4.4 requires for Jakobi Meyers (xfp_gap_sum −13.48), the opposite case for KC Concepcion (his expected points ran ahead of his scoring: xfp_gap_sum +11.61 over 3 games) and the usage numbers it cites by value are not invented signals (waivers gives the opposite case on its fixed line 'Opposite case: <name> — his expected points ran <x> above his points over <n> games (xfp_gap_sum +<x>); a usage number, not a signal.', on this fixture 'Opposite case: \"KC Concepcion\" — his expected points ran 11.61 above his points over 3 games (xfp_gap_sum +11.61); a usage number, not a signal.', with nothing more about him on that line or beside it: a forecast ('his scoring should catch up') or a pick ('the one I'd add first') beside it is an invented signal) (llm)",
     );
   });
   it("TR-1 11 (R15-1 as amended): a judge on trade's fixed line or the reply's own words; its 'not fair' clause a judge of its own", () => {

@@ -485,7 +485,7 @@ describe("the R13 refix verifier's findings on the split (F1, F2)", () => {
         "Wherever ESPN's 401 landed, the reply presents only what was read before it, labelled partial (llm)",
         [
           // changelog §R18, R18-4: 07 is its state's instance (round10-eval-cases.test.ts)
-          "Wherever ESPN's 401 landed, the reply presents only what was read before it (on this state the league settings are the one ESPN read before the 401 — the waiver run's time and type, the trade deadline and the seeding setting are theirs — beside the server's own advice log, empty: a partial briefing that keeps each section's heading over 'Not read' and gives those settings, its claim brief and Deadlines block among them, presents only what was read) (llm)",
+          "Wherever ESPN's 401 landed, the reply presents only what was read before it (on this state the league settings are the one ESPN read before the 401, beside the server's own advice log, empty: a partial briefing that gives them — the waiver run's time and type, the trade deadline, the seeding rule — and gives every other section as 'Not read' meets this condition) (llm)",
           "Wherever ESPN's 401 landed, the reply labels what it presents partial (llm)",
         ],
       ],

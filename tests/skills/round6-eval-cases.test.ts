@@ -435,7 +435,8 @@ describe("R11-3 (§R14): the PASS-if lines round 5's judges failed on replies th
     has(
       "waivers",
       "WV-8",
-      "The reply invents no signal: waivers §4.4's usage numbers, which the reply may cite by value, are not signals (on this fixture the detailed candidates' — Carnell Tate's snap share 0.837, target share 0.255, WOPR 0.653 and xfp_gap_sum +5.396 over 3 games; Ollie Gordon II has no usage in the window — and the rest of the usage read's, such as KC Concepcion's xfp_gap_sum +11.6 and Wan'Dale Robinson's −4.09 over 3 games) (llm)",
+      // changelog §R18, R18-8: 06 quotes waivers' opposite-case line too (round10-eval-cases.test.ts)
+      "The reply invents no signal: waivers §4.4's usage numbers, which the reply may cite by value, are not signals (on this fixture the detailed candidates' — Carnell Tate's snap share 0.837, target share 0.255, WOPR 0.653 and xfp_gap_sum +5.396 over 3 games; Ollie Gordon II has no usage in the window — and the rest of the usage read's, such as KC Concepcion's xfp_gap_sum +11.6 and Wan'Dale Robinson's −4.09 over 3 games; KC Concepcion's is the opposite case, which waivers gives on its fixed line 'Opposite case: <name> — his expected points ran <x> above his points over <n> games (xfp_gap_sum +<x>); a usage number, not a signal.' with nothing more about him beside it — a forecast or a pick there is an invented signal) (llm)",
     );
     expect(c.expected_output).toContain(SPEC.signalsNone);
   });
@@ -483,7 +484,8 @@ describe("R11-3 (§R14): the PASS-if lines round 5's judges failed on replies th
     has(
       "session-check",
       "SC-4",
-      "The reply gives none of session-check's setup steps (copying the cookies, running `eff setup` to enter them) — saying `eff setup` would not fix the drift is not a step (llm)",
+      // changelog §R18, R18-8: 05 quotes session-check's drift rule (round10-eval-cases.test.ts)
+      "The reply gives none of session-check's setup steps (copying the cookies, running `eff setup` to enter them) — saying `eff setup` would not fix the drift is not a step (session-check's drift answer carries no setup command and no reminder: the output contract's one command and its 30-day reminder are left out, so a line telling the user to run `eff setup`, now or later, or to re-run it every 30 days is such a step here, and the fixed drift line in their place is none) (llm)",
     );
   });
 

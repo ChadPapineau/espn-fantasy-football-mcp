@@ -104,14 +104,14 @@
       "name": "NC-CORE",
       "toolset": "core",
       "prompt": "I heard my RB1 is losing his job. Is it true?",
-      "expected_output": "Under EFF_TOOLSET=core the Skill stops in Step 0: it says news-check needs the full toolset, to set EFF_TOOLSET=full in the server's env and restart the client, and does not judge the claim.",
+      "expected_output": "Under EFF_TOOLSET=core the Skill stops in Step 0: it says news-check needs the full toolset, to set EFF_TOOLSET=full in the server's env and restart the client, and does not judge the claim: after orient's opening lines the answer is news-check's one fixed line, 'This claim cannot be checked under the `core` toolset. This Skill needs the full toolset — set `EFF_TOOLSET=full` in the server's env and restart the client.', and nothing else — no player resolved, no claim quoted or weighed, no number (changelog §R18, R18-8).",
       "files": ["evals/fixtures/fx-10h"],
       "expectations": [
         "The skill called espn_get_status (tool_used)",
         "The reply names the full toolset setting (regex: `EFF_TOOLSET=full`)",
         "The reply says to restart the client (regex: `restart`)",
-        "The reply says it cannot judge the claim under the core toolset (llm)",
-        "The reply gives no verdict on the claim (llm)"
+        "The reply says it cannot judge the claim under the core toolset (news-check's fixed core stop line 'This claim cannot be checked under the `core` toolset. This Skill needs the full toolset — set `EFF_TOOLSET=full` in the server's env and restart the client.' says it) (llm)",
+        "The reply gives no verdict on the claim (under `core` news-check's whole answer is orient's opening lines and its fixed core stop line 'This claim cannot be checked under the `core` toolset. This Skill needs the full toolset — set `EFF_TOOLSET=full` in the server's env and restart the client.', which gives none) (llm)"
       ]
     },
     {

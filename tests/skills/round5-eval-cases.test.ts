@@ -527,9 +527,11 @@ describe("WK-1: the deadline criterion is graded free, on weekly's fixed lines (
       /^Every move the reply recommends outside a table's Deadline column — in a sentence, a list line, the Deadlines block or a table without that column — names when it is due/,
     );
     // one condition (changelog §R12, R12-2): its second sentence only says what is no move — since
-    // changelog §R16, R16-4, weekly's held-swap line among them (round8-eval-cases.test.ts)
+    // changelog §R16, R16-4, weekly's held-swap line among them (round8-eval-cases.test.ts); since
+    // §R18, R18-4, a later week's byes line, the IR-eligible line and a held K or D/ST call too, its
+    // fixture's instance in the same parenthesis (round10-eval-cases.test.ts)
     expect(deadlineJudges[0]).toMatch(
-      /\. A pass, a hold or a row the tool holds is no move and needs none \(weekly's held-swap line 'Top swap: coin flip — no move \(<a> ↔ <b>, Δ <x>\)' is one\) \(llm\)$/,
+      /\. A pass, a hold or a row the tool holds is no move and needs none \(weekly's held-swap line 'Top swap: coin flip — no move \(<a> ↔ <b>, Δ <x>\)' is one; on this fixture [^\n]*\) \(llm\)$/,
     );
   });
 
@@ -897,14 +899,15 @@ describe("R12-2's split on the lines the round-5 verifier named", () => {
       [
         // changelog §R13, R13-1 (the R13 refix verifier's F2): what was read and its label, one each;
         // §R18, R18-4: 07 and 10 are their state's instances (round10-eval-cases.test.ts)
-        "Wherever ESPN's 401 landed, the reply presents only what was read before it (on this state the league settings are the one ESPN read before the 401 — the waiver run's time and type, the trade deadline and the seeding setting are theirs — beside the server's own advice log, empty: a partial briefing that keeps each section's heading over 'Not read' and gives those settings, its claim brief and Deadlines block among them, presents only what was read) (llm)",
+        "Wherever ESPN's 401 landed, the reply presents only what was read before it (on this state the league settings are the one ESPN read before the 401, beside the server's own advice log, empty: a partial briefing that gives them — the waiver run's time and type, the trade deadline, the seeding rule — and gives every other section as 'Not read' meets this condition) (llm)",
         "Wherever ESPN's 401 landed, the reply labels what it presents partial (llm)",
         "The reply says every later section or input was not read (llm)",
         "The reply invents none of what was not read: no score, lineup, projection, waiver or activity figure the tools did not return (on this state the league settings were read before the 401 — the waiver run, Wed Oct 7, 3:30 AM ET, and its type, a traditional waiver order with no budget, and the trade deadline, Wed Dec 2, 2026, 12:00 PM ET — so a partial briefing that gives them, every other section 'Not read', invents nothing) (llm)",
         "Confidence & freshness says the briefing is partial because ESPN rejected the stored session (llm)",
         "No tool call that ESPN refused is made again (llm)",
         "The briefing ends with the hand-off to session-check (llm)",
-        "The briefing gives eff setup once (the hand-off line) (llm)",
+        // changelog §R18, R18-8: 14 quotes weekly's rule for a partial briefing (round10-eval-cases.test.ts)
+        "The briefing gives eff setup once (the hand-off line) (weekly's rule for a partial briefing: no line below orient's opening lines names `eff setup` but orient's hand-off line 'Hand-off: the `espn-fantasy-football:session-check` Skill takes it from here — `eff setup` in a terminal.', its last — no 'Fix:' line, no section, no Confidence & freshness line and no Deadlines line) (llm)",
       ],
     ],
   ])("%s %s: one judge per clause", (skill, name, judges) => {

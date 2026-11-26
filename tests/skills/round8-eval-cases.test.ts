@@ -662,9 +662,14 @@ describe("R16-4 and R16-2: the regex graders that read the new lines stand as ro
 describe("R16-4: the judges that read the new lines name them (R11-3: made exact), one judge per condition (R13-1)", () => {
   it("WK-1 10: weekly's held-swap line is a hold, which needs no time", () => {
     const c = caseOf("weekly", "WK-1");
-    expect(c.expectations).toContain(
-      `Every move the reply recommends outside a table's Deadline column — in a sentence, a list line, the Deadlines block or a table without that column — names when it is due: a time, or the waiver run or kickoff it is timed by. A pass, a hold or a row the tool holds is no move and needs none (weekly's held-swap line '${R16.heldSwap}' is one) (llm)`,
-    );
+    // changelog §R18, R18-4: 10 is its fixture's instance now, this line its prefix (round10-eval-cases.test.ts)
+    expect(
+      c.expectations.some((e) =>
+        e.startsWith(
+          `Every move the reply recommends outside a table's Deadline column — in a sentence, a list line, the Deadlines block or a table without that column — names when it is due: a time, or the waiver run or kickoff it is timed by. A pass, a hold or a row the tool holds is no move and needs none (weekly's held-swap line '${R16.heldSwap}' is one`,
+        ),
+      ),
+    ).toBe(true);
     expect(c.expectations).not.toContain(
       "Every move the reply recommends outside a table's Deadline column — in a sentence, a list line, the Deadlines block or a table without that column — names when it is due: a time, or the waiver run or kickoff it is timed by. A pass, a hold or a row the tool holds is no move and needs none (llm)",
     );
@@ -839,7 +844,8 @@ describe("R16-6 and R16-5 on the waivers cases: the scramble list named as the t
       "The reply invents no signal: waivers §4.4's usage numbers, which the reply may cite by value, are not signals (on this fixture, KC Concepcion's xfp_gap_sum +11.6 and Wan'Dale Robinson's −4.09 over 3 games) (llm)",
     );
     expect(c.expectations[5]).toBe(
-      "The reply invents no signal: waivers §4.4's usage numbers, which the reply may cite by value, are not signals (on this fixture the detailed candidates' — Carnell Tate's snap share 0.837, target share 0.255, WOPR 0.653 and xfp_gap_sum +5.396 over 3 games; Ollie Gordon II has no usage in the window — and the rest of the usage read's, such as KC Concepcion's xfp_gap_sum +11.6 and Wan'Dale Robinson's −4.09 over 3 games) (llm)",
+      // changelog §R18, R18-8: 06 quotes waivers' opposite-case line too (round10-eval-cases.test.ts)
+      "The reply invents no signal: waivers §4.4's usage numbers, which the reply may cite by value, are not signals (on this fixture the detailed candidates' — Carnell Tate's snap share 0.837, target share 0.255, WOPR 0.653 and xfp_gap_sum +5.396 over 3 games; Ollie Gordon II has no usage in the window — and the rest of the usage read's, such as KC Concepcion's xfp_gap_sum +11.6 and Wan'Dale Robinson's −4.09 over 3 games; KC Concepcion's is the opposite case, which waivers gives on its fixed line 'Opposite case: <name> — his expected points ran <x> above his points over <n> games (xfp_gap_sum +<x>); a usage number, not a signal.' with nothing more about him beside it — a forecast or a pick there is an invented signal) (llm)",
     );
     expect(c.expected_output).toContain(
       "the detailed candidates (on this fixture Carnell Tate and Ollie Gordon II: the character budget cut the other rows, changelog §R16, R16-6) carry no signal",

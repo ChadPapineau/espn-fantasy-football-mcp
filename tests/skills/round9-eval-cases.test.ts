@@ -75,11 +75,22 @@ const pin = (pins: unknown, skill: string, key: string): string | undefined =>
 /** The PASS-if line a judge grades: the sentence without its grader tag. */
 const passIf = (e: string): string => e.replace(/\s*\(llm\)\s*$/, "");
 /**
- * changelog §R18, R18-4: the judges restated once more extend the line this file pins inside its
- * parentheses (made exact, never loosened), so the line here is the prefix of the line now, which
+ * changelog §R18, R18-4: the judges restated once more — and the graders of §R18's new lines (the
+ * Skills stream's 7f70069) — extend the line this file pins inside its parentheses or by a parenthesis
+ * of their own (made exact, never loosened), so the line here is the prefix of the line now, which
  * round10-eval-cases.test.ts pins whole; every other line here stands exactly as pinned.
  */
-const R18_4 = new Set(["NC-2 2", "NC-7 5", "RT-1 6", "WV-1 11", "RT-5 4", "TR-5-E 8"]);
+const R18_4 = new Set([
+  "NC-2 2",
+  "NC-7 5",
+  "RT-1 6",
+  "WV-1 11",
+  "RT-5 4",
+  "TR-5-E 8",
+  "TR-CORE 4",
+  "RT-5 6",
+  "IC-1 8",
+]);
 const isLineNow = (name: string, n: number, line: string | undefined, pinned: string): void => {
   if (R18_4.has(`${name} ${String(n)}`))
     expect(passIf(line ?? "").startsWith(passIf(pinned).replace(/\)$/, "")), pinned).toBe(true);
@@ -448,7 +459,9 @@ describe("R14-4: the judges whose clause the fixture never meets, restated as th
     // selector for WR: KC Concepcion xfp_gap_sum +11.608, Jakobi Meyers −13.483
     const now =
       "The reply invents no usage signal: the touchdown-luck flag §4.4 requires for Jakobi Meyers (xfp_gap_sum −13.48), the opposite case for KC Concepcion (his expected points ran ahead of his scoring: xfp_gap_sum +11.61 over 3 games) and the usage numbers it cites by value are not invented signals (llm)";
-    expect(c.expectations[6]).toBe(now);
+    // changelog §R18, R18-8: 07 quotes waivers' opposite-case line in a parenthesis of its own, this
+    // line its prefix (round10-eval-cases.test.ts)
+    expect((c.expectations[6] ?? "").startsWith(now.slice(0, -" (llm)".length))).toBe(true);
     // made exact, never loosened: round 8's prohibition and its two named exceptions stand
     for (const k of [
       "The reply invents no usage signal: the touchdown-luck flag §4.4 requires for Jakobi Meyers (xfp_gap_sum −13.48)",
