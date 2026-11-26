@@ -12,13 +12,16 @@
 // a risk, never a value (sib §14.6); ESPN's auction value as a labelled comparator, never Δ. The
 // partner's `tradeBlock` is untrusted text and is not an input at all (research 05 §6 case 4).
 // Partner search: the partner's weakest starting position and the proposal maximising Δ_me subject
-// to Δ_partner ≥ ε (sib §5.7). Cooperative over Monte-Carlo paths. Pure. New here.
+// to Δ_partner ≥ ε (sib §5.7), each proposal's players named from the rosters read — `give` from the
+// user's, `get` from the partner's, in that order, each name wrapped as the partner's is (changelog
+// §R18, R18-9; proposalPlayers). The rec's action keeps its ids. Cooperative over Monte-Carlo paths.
+// Pure. New here.
 import type { Clock, Rng } from "../clock.js";
 import type { SeedingMode } from "../../config/schema.js";
 import { regularSeasonWeeks, tradeDeadlineStatus } from "../league/rules.js";
 import { slotClassOf } from "../league/slots.js";
 import type { BareText, LeagueRules, RosterSlots, UntrustedText, Week } from "../league/types.js";
-import { isIrEligible } from "../league/types.js";
+import { isIrEligible, unresolvedPlayerName, wrapUntrusted } from "../league/types.js";
 import { P_ACTIVE_BY_STATUS } from "./constants.js";
 import {
   drainSteps,
@@ -47,6 +50,7 @@ import {
   type TradeData,
   type TradeEvaluationData,
   type TradePartnersData,
+  type TradeProposalPlayer,
 } from "./types.js";
 
 /** One player as the trade engine sees him (either roster, or the wire). */
@@ -649,6 +653,31 @@ function findPlayers(players: readonly TradePlayer[], ids: readonly number[]): T
       throw new AnalyticsError("invalid_request", "a traded player is not on that roster", "offer");
     return p;
   });
+}
+
+/**
+ * The players a partner's proposal lists, named (changelog §R18, R18-9; plan 07 E6
+ * `partners[].players[]`): one entry per id of `give`, then of `get`, in that order — `mine` (the
+ * user's roster the call read) names `give`, `theirs` (the partner's) names `get`. Each name is
+ * third-party text wrapped as the partner's own name is (`untrusted_text`, `espn.player.name`: plan
+ * 02 §6), so it carries its injection flags. An id its side's roster does not hold is named as every
+ * analytics answer names a player it cannot (`Player <id>`, unresolvedPlayerName), wrapped alike —
+ * never from the other side's roster.
+ */
+export function proposalPlayers(
+  proposal: { readonly give: readonly number[]; readonly get: readonly number[] },
+  mine: readonly TradePlayer[],
+  theirs: readonly TradePlayer[],
+): TradeProposalPlayer[] {
+  const side = (ids: readonly number[], roster: readonly TradePlayer[]): TradeProposalPlayer[] =>
+    ids.map((id) => ({
+      player_id: id,
+      name: wrapUntrusted(
+        roster.find((p) => p.player_id === id)?.name ?? unresolvedPlayerName(id),
+        "espn.player.name",
+      ),
+    }));
+  return [...side(proposal.give, mine), ...side(proposal.get, theirs)];
 }
 
 function validate(req: TradeRequest): void {
@@ -1332,11 +1361,14 @@ async function searchPartners(
     const t = plan.team;
     const weak = plan.weak;
     const sd = Math.sqrt(best.moved.reduce((s, p) => s + (rosCv(p.position) * own(p)) ** 2, 0));
+    const proposal = { give: asc(best.give), get: asc(best.get) };
     partners.push({
       team_id: t.team_id,
       name: t.name,
       weakest_slot: weak ?? "none",
-      proposal: { give: asc(best.give), get: asc(best.get) },
+      proposal,
+      // every player the proposal lists, named from the rosters read (changelog §R18, R18-9)
+      players: proposalPlayers(proposal, req.me.players, t.players),
       delta_me: normalDist(best.me, sd, "position_cv"),
       delta_partner: normalDist(best.partner, sd, "position_cv"),
     });

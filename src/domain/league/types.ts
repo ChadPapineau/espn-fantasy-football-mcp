@@ -489,6 +489,15 @@ export function bareUntrusted(raw: string, cls: TextClass): BareText {
   return sanitizeText(raw, TEXT_CAPS[cls]).value as BareText;
 }
 
+/**
+ * The name an analytics answer gives a player the data it read does not name: `Player <id>`, a bare
+ * player name like any other. One path for every such player — E11's transaction players (the feed
+ * carries no name) and E6's partner proposals' players (changelog §R18, R18-9).
+ */
+export function unresolvedPlayerName(id: number): BareText {
+  return bareUntrusted(`Player ${String(id)}`, "player_name");
+}
+
 /** Whether a value is exactly an `untrusted_text` wrapper. */
 export function isUntrustedText(v: unknown): v is UntrustedText {
   if (typeof v !== "object" || v === null || Array.isArray(v)) return false;

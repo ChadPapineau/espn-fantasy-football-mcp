@@ -8,7 +8,7 @@
 // stay `untrusted_text` (they come wrapped); player names stay BareText (path-listed). Pure. New.
 import type { Clock } from "../clock.js";
 import {
-  bareUntrusted,
+  unresolvedPlayerName,
   type BareText,
   type IsoInstant,
   type RosterSlots,
@@ -85,8 +85,8 @@ const instantOf = (t: Transaction): number => {
   const ms = Date.parse(t.process_date ?? t.proposed_date ?? "");
   return Number.isFinite(ms) ? ms : Number.NaN;
 };
-const nameOf = (id: number, name: BareText | null): BareText =>
-  name ?? bareUntrusted(`Player ${String(id)}`, "player_name");
+/** A feed player's name, or the one every analytics answer gives a player it cannot name. */
+const nameOf = (id: number, name: BareText | null): BareText => name ?? unresolvedPlayerName(id);
 
 /** E11. Throws AnalyticsError `invalid_request` on bounds. */
 export function analyzeLeagueActivity(req: ActivityRequest): ActivityOutcome {

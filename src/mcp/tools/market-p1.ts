@@ -2,13 +2,15 @@
 // plan 10 B4–B6, B8): E6 espn_analyze_trade (roster-contextual Δ for both sides converted to ΔU under
 // the configured seeding reading — both readings only when `seeding_mode: "both"` is passed — the
 // deadline from tradeSettings, veto as risk, ESPN's auction value as a comparator only; every uneven
-// trade names its implied drop), E7 espn_analyze_injury_cascade (vacated opportunity by role
-// affinity, an honest evidence grade, `hypothesis_only`, the IR consequence from the STRUCTURED status
-// only, and a claim / pass per available beneficiary from E5), E10 espn_analyze_evidence (structured
-// fields win; outlooks, RSS items and the user's pasted claim enter only wrapped — plan 02 §6.4; the
-// result is invariant to the text) and E11 espn_analyze_league_activity (what rivals did, priority
-// spent, who needs what, who is IR-blocked). Also the E5 P1 inputs (usage signals, rival rosters,
-// Sleeper's secondary trend, learned mechanics, the FAAB context) the waivers tool adds under `full`.
+// trade names its implied drop; a partner search names every player its proposals list, each name
+// wrapped as the partner's is — changelog §R18, R18-9), E7 espn_analyze_injury_cascade (vacated
+// opportunity by role affinity, an honest evidence grade, `hypothesis_only`, the IR consequence from
+// the STRUCTURED status only, and a claim / pass per available beneficiary from E5), E10
+// espn_analyze_evidence (structured fields win; outlooks, RSS items and the user's pasted claim enter
+// only wrapped — plan 02 §6.4; the result is invariant to the text) and E11
+// espn_analyze_league_activity (what rivals did, priority spent, who needs what, who is IR-blocked).
+// Also the E5 P1 inputs (usage signals, rival rosters, Sleeper's secondary trend, learned mechanics,
+// the FAAB context) the waivers tool adds under `full`.
 import { z } from "zod/v4";
 import {
   analyzeEvidence,
@@ -97,7 +99,14 @@ import {
 import { toDataInputs, wrapUntrusted, type InputStamp } from "../envelope.js";
 import { EffError } from "../errors.js";
 import { beforeSideEffect, defineTool, type ToolContext, type ToolOutput } from "../define.js";
-import { carryOutcome, cpuDeadlineOf, seedOf, waiverPlayerOf, type Subject } from "./analytics.js";
+import {
+  REC_INPUTS_TRIM,
+  carryOutcome,
+  cpuDeadlineOf,
+  seedOf,
+  waiverPlayerOf,
+  type Subject,
+} from "./analytics.js";
 import {
   canonicalPosition,
   crosswalkOf,
@@ -341,9 +350,15 @@ export const tradeSchema = z.discriminatedUnion("kind", [
           name: ut,
           weakest_slot: slotName,
           proposal: z.strictObject({
-            give: z.array(playerId).max(6),
-            get: z.array(playerId).max(6),
+            give: z.array(playerId).max(BOUNDS.tradeSide.max),
+            get: z.array(playerId).max(BOUNDS.tradeSide.max),
           }),
+          // the proposal's players named, one per id of give then get, in that order, from the
+          // rosters the call read: each name an untrusted_text from espn.player.name, wrapped as
+          // the partner's own name is (changelog §R18, R18-9; plan 02 §6)
+          players: z
+            .array(z.strictObject({ player_id: playerId, name: ut }))
+            .max(2 * BOUNDS.tradeSide.max),
           delta_me: dist,
           delta_partner: dist,
         }),
@@ -757,6 +772,10 @@ export const analyzeTradeTool = defineTool({
       partial:
         sims.partial || out.partial === true || warnings.some((x) => x.startsWith("partial:")),
       listKey: data.kind === "evaluation" ? "counters" : "partners",
+      // the partner search's budget step before its partners are halved (changelog §R18, R18-9):
+      // the rec's confidence inputs go first, as in every analytics answer (data.inputs carries
+      // them), so four partners whose every player is named fit whole at the search's reach
+      ...(data.kind === "partners" ? { trims: [REC_INPUTS_TRIM] } : {}),
       week: b.w,
     };
   },

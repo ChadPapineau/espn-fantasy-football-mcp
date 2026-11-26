@@ -786,6 +786,16 @@ export interface TradeEvaluationData extends AnalyticsResult {
   readonly rec: Rec;
 }
 
+/** One player a partner's proposal lists, named (changelog §R18, R18-9). */
+export interface TradeProposalPlayer {
+  readonly player_id: number;
+  /**
+   * His name from the roster the call read, wrapped as the partner's own name is (`untrusted_text`
+   * from `espn.player.name`); `Player <id>`, wrapped alike, when that roster does not hold him.
+   */
+  readonly name: UntrustedText;
+}
+
 /** E6 partner search. */
 export interface TradePartnersData extends AnalyticsResult {
   readonly kind: "partners";
@@ -794,6 +804,12 @@ export interface TradePartnersData extends AnalyticsResult {
     readonly name: UntrustedText;
     readonly weakest_slot: string;
     readonly proposal: { readonly give: readonly number[]; readonly get: readonly number[] };
+    /**
+     * The proposal's players, named (changelog §R18, R18-9; plan 07 E6): one entry per id of
+     * `proposal.give`, then of `proposal.get`, in that order — the user's roster names `give`, the
+     * partner's names `get`, from the rosters the call already read.
+     */
+    readonly players: readonly TradeProposalPlayer[];
     readonly delta_me: Dist;
     readonly delta_partner: Dist;
   }[];
