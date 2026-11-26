@@ -729,6 +729,182 @@ minor version (plan 04 §4.4; plan 09 K6). One version covers the server, the Sk
     (R17-2, R17-3). The examples follow the new Skill text. `tests/skills/round9-eval-cases.test.ts`
     and `tests/skills/round9-eval-refix.test.ts` hold it, with the R13-1 inventory and the earlier
     rounds' case tests updated.
+- **The Skills after the plugin eval's round 9 (rulings R18-5 to R18-8 and R18-9's trade text;
+  `docs/plan/changelog.md` §R18).** No Skill's description or `when_to_use` changed (each `SKILL.md`
+  frontmatter is byte-identical to `8f1c406`'s; R18-1, R17-3), and the listing stays at 4 593 of
+  4 600 characters.
+  - weekly (R18-5): when `ir.eligible_now[]` holds more than one player, weekly makes no IR move of
+    its own — none in a table, the **Deadlines** block or the **Not actionable here** list — and
+    prints the injury-cascade Skill's fixed line under the Injuries and byes table, verbatim with its
+    values filled in, naming them all,
+    ``Also IR-eligible: <players> — the `espn-fantasy-football:roster-audit` Skill decides which, if any, to move to IR.``
+    (their rows read "—" in Move and Deadline). With one eligible player and an IR seat open, its IR
+    move is unchanged. Step 2 reads the user's team once (the same cached read, no new ESPN request)
+    for §5's IR block whenever a bench player is `OUT` or `INJURY_RESERVE`.
+  - retro (R18-6): an unbacked call (no projection stored before kickoff;
+    `attribution["calls.unbacked"]`) is judged on what was known before kickoff, whether or not the
+    question names a player: one `espn_get_box_score` read for the week (the user's `team_id`), the
+    read the question's named players use, for the scored calls' players, and a fixed line under the
+    calls table,
+    `Decision quality: <verdict> — <calls>, on ESPN's projection before kickoff: "<started>" <a> against "<alternative>" <b>.`,
+    "sound" or "unsound" on their `projected_espn`, labelled as ESPN's. A call with a player whose row
+    has no `projected_espn`, or with no alternative, gets
+    `Decision quality: not scored — <calls>: no projection was stored before kickoff, and <gap>.` and
+    no verdict. The outcome is reported apart, and a refused read follows **A rejection
+    mid-procedure**.
+  - roster-audit (R18-7): the Recommendation is the rec's action and its subjects only; a stash
+    verdict or a droppable is never a recommended move, not even as a condition, and both are listed
+    in **Numbers**.
+  - R18-8's lines, each in the branch its case's fixture takes:
+    - injury-cascade: with every beneficiary rostered, the no-beneficiary line is the answer's only
+      sentence about claiming, picking up or adding them (no restatement, no worth verdict, no "if one
+      is dropped"), and whenever the cascade names a beneficiary the split prints on one fixed line
+      that names the rec's volume assumption,
+      `Shares, never 1:1: the <vacated> he vacates are split by role affinity, and <volume>.` (IC-1);
+    - onboard: the waiver row's days as `process_days` lists them, by three-letter names from Monday
+      ("runs Mon, Wed, Thu, Fri, Sat, Sun"), "every day" only when all seven are listed (ON-INJ,
+      ON-1);
+    - session-check: the drift and `host_moved` answers carry no setup command and no reminder, and
+      on `drift.status: red` each drifted view gets one fixed line from orient's drift table,
+      ``Not a session problem: ESPN changed the shape of `<view>` — still working: <still works>; stopped: <stops>.``
+      (SC-4);
+    - weekly: a K or D/ST call the rec holds is the rec's `action` word for word, never a Hold or
+      Stream of the run's own (WK-INJ), and the byes of this week and the next two go on one fixed
+      line per week that names who is out and makes no plan, `Byes, week <N>: <starters out>.`
+      (WK-1);
+    - retro: under truncation the truncated-result line is the first sentence about the calls, and
+      every later one says "scored" (RT-6);
+    - waivers: the opposite case to touchdown luck on one fixed line,
+      `Opposite case: <name> — his expected points ran <x> above his points over <n> games (xfp_gap_sum +<x>); a usage number, not a signal.`,
+      with no forecast and no pick (WV-2, WV-8).
+  - R18-8's hardenings: trade's flag line keeps its `Injection flag:` label, never "Injury flag:"
+    (TR-INJ); trade's and news-check's `core` stops are one fixed line each and the whole answer below
+    orient's opening lines ("This trade cannot be valued under the `core` toolset. This Skill needs
+    the full toolset — …", "This claim cannot be checked under the `core` toolset. …"; TR-CORE,
+    NC-CORE); orient's Step-0 close "nothing of the question is answered here." is printed as is, in
+    every orient copy (WK-8); and a partial weekly briefing gives `eff setup` once, on orient's
+    hand-off line (WK-11).
+  - R18-9's trade text: every proposal player of a partner search is named from that partner's
+    `players[]`, by his quoted name with his `player_id`, never a bare id and never "name not
+    resolved" (TR-4). The cheat-sheet's `espn_analyze_trade` row (served as
+    `espn-ff://docs/tool-outputs`, copied into every Skill) lists a partner's fields in the output
+    schema's key order, `players[]` after `proposal`, its `name` the player's bare, path-listed
+    `espn.player.name`, not wrapped as the partner's own `name` is: the form the server ships since
+    `22ce708`. The row first called it "wrapped like the partner's own", the first build's form; the
+    gate's cross-check corrected it (the server refix's open question 1).
+  - Withdrawn, and held absent by check-skills: waivers' "his points are coming" in its drop rule,
+    and weekly's "Hold or stream per position, acting on the streamer's `verdict`".
+  - Lane 1 (the fix round's verifiers' VS-2, applied at the gate): weekly's `pre_run` and
+    `pre_run_full` sequences read the user's team right after the all-teams roster (R18-5's IR block;
+    on `fx-10h` two bench players are `OUT` or `INJURY_RESERVE`), and retro's `review` reads the
+    week's box score once after the retrospective for an unbacked call (R18-6), listed in its logged
+    `source_calls` as `named_player`'s is; `skills/README.md`'s retro row names it.
+  - `tests/skills/round8-skill-fixes.test.ts` reads its spec from changelog §R16 up to "## §R17", the
+    window its doc comment names (the verifiers' VS-1, applied at the gate): it ran to "## Reviews",
+    so §R18's R18-5, which quotes injury-cascade's "Also IR-eligible" line, failed its "the lines no
+    spec quotes are worded here" on every head from `66a5353` to `c2d0cb4`, and CI's test job with it.
+  - Each line is a check-skills pin: `ROUND9_FIXED`'s 43 lines in 9 Skills, `ROUND9_ORIENT` (in every
+    orient copy), `ROUND9_ABSENT`'s 2 withdrawn texts and the trade row's phrase.
+    `tests/skills/round10-skill-fixes.test.ts` (130 tests) cuts and rewords each pin, checks orient's
+    line in every rebuilt copy, trade's `players[]` text and the cheat-sheet row against the schema's
+    keys, the withdrawn text, the rulings' quoted lines character for character, each line's place and
+    its agreement with the rules beside it, the free graders on the lines filled in from their
+    fixtures, R18-5's fixture facts in process and every `SKILL.md` frontmatter's sha256 at
+    `8f1c406`. `tests/skills/round10-gate-fixes.test.ts` (8 tests, 6 failing on `c2d0cb4`) holds the
+    row's form against the trade tool's schema and the Lane 1 reads against the Skill text and the
+    fixture.
+- **The server's static guide calls a health question a lookup (ruling R18-1;
+  `docs/plan/changelog.md` §R18).** `SKILL_FIRST_RULE` gains R18-1's sentence verbatim, one space after
+  R17-2's two: "A question that only asks whether a player is healthy is such a lookup, even when he
+  turns out to be hurt." R17-2's sentences, the data-time sentence and the rest of the guide are
+  byte-identical, and the instructions grow from 1 248 to 1 355 characters. No Skill's listing changes
+  (R17-3). The guide's pins (`tests/mcp/helpers/guide-pins.ts`) hold the sentence once and directly
+  after R17-2's pair in the unit server test (both protocol eras, production and fixture mode) and in
+  both stdio end-to-end suites, the 2026-07-28 era over real stdio now included, and pin the
+  production text at 1 355 characters; seven source mutations (cut, "only" dropped, "healthy"
+  reworded, "hurt" reworded, doubled, no space, moved after the session-start reads) each fail the
+  server test. Plan 01 §4.1's guide paragraph says what R18-1 adds. The gate's built server in fixture
+  mode serves the sentence once, right after R17-2's pair, in the legacy `initialize` and the
+  2026-07-28 era's `server/discover`; without it the production text equals `8f1c406`'s byte for byte.
+- **`espn_analyze_trade`'s partner search names every proposal player (ruling R18-9;
+  `docs/plan/changelog.md` §R18).** Each `partners[]` entry gains `players[]: { player_id, name }`:
+  one entry per id of its `proposal.give`, then of its `proposal.get`, in that order, named from the
+  rosters the call already reads (the user's for `give`, the partner's for `get`).
+  - Each name ships as every player name does (plan 01 §4.4 after A7a; plan 07's legend reads R18-9's
+    `name: UT` that way, as it reads R16-6's `truncated_names[].name`): the roster row's own bare
+    `espn.player.name` string, capped and stripped by the normaliser and never re-wrapped, its path
+    `data.partners[].players[].name` listed in `meta.untrusted_fields`. The partner's own name, member
+    text, stays a wrapper. The first build (`89977e9`) wrapped the name, following the fix round's
+    shared spec; the refix (`22ce708`) ships the bare form the ruling's notation means, which also
+    drops the wrapper's misstated `truncated` bit for a name cut at the cap.
+  - An id its side's roster does not hold is named `Player <id>`, the one unknown-name path E11 also
+    takes (`unresolvedPlayerName`). The rec's action keeps its ids.
+  - Before its partners are halved, the partner search takes the analytics answers' first budget step
+    (dropping the rec's `confidence.inputs`, which `data.inputs` carries), as E2 and E5 do.
+  - `tests/mcp/trade-budget-room.test.ts` holds E6 at the schema's adversarial limits. Four 2-for-1
+    partners (the search's own packages) whose every player carries the longest name the schema
+    accepts fit with no partner cut: 2 018 characters of room, 8 442 at most whole. Four 6-for-6
+    partners keep the rec's partner whole with all twelve players named: 3 046 of room.
+    Instruction-shaped names keep all four partners at the search's reach.
+  - The domain test (a fast-check property, a 2-for-1 the engine picks against id order and a name
+    past the 64-code-point cap) and the tool test (planted and overlong names) fail first; mutations
+    of the form, the order, the side, the fallback, the marking and the budget step each fail them.
+    Plan 07 E6 gains the field. On `fx-10h` a wide-receiver search names Team 06's and Team 05's
+    proposals: "Bhayshul Tuten" for "CeeDee Lamb", and for "Tetairoa McMillan".
+- **The plugin eval's cases after round 9 (§R18, R18-4 and the graders of R18-5 to R18-9's lines;
+  `docs/plan/changelog.md` §R18; the round-9 section of `docs/evals/stage-c-plugin-eval.md`, its
+  `eval_case_defect` entries and Next steps item 4).**
+  - R18-4 (R16-5 and R17-6 hold): the judges the round-9 report lists under eval case stay judges,
+    each restated once more with round 9's PASS-if line as its prefix (R11-3: made exact, never
+    loosened), quoting its fixed line filled in on its fixture, or as its fixture's instance (R14-4):
+    AP-4 04, NC-2 02, 03 and 05, NC-5-E 05, NC-7 05, 06 and 07, NC-INJ 02, NC-INJ-2 05 and 06, RT-1
+    06, RT-2 03, RT-5 04, TR-5-E 08, TR-CORE 04, WV-1 05 and 11, WV-8 04, WK-1 10, WK-8 09, WK-10 10,
+    11 and 12, and WK-11 07 and 10. As the report's entries say: a reply that keeps the RB1 and
+    recommends no drop does not follow NC-INJ-2's note; a note on a later week's byes that names who
+    is out and makes no plan (weekly's byes line) is no move due now, as are the IR-eligible line and
+    a K or D/ST call in the rec's words (WK-1 10); on WK-11's state the league settings and the
+    server's advice log were read before the 401, and a partial briefing that gives the settings,
+    every other section "Not read", invents nothing (07, 10); trade's core stop line and the deadline
+    and veto lines are no verdict (TR-CORE 04); and a manual step for AP-4's pasted move is any
+    sentence of the reply's own telling the user to make it, or how, in ESPN's app or in plain words
+    (AP-4 04).
+  - Each `-INJ` case's base judge (`matches-base`) names, as its fixture's instance, the moves, the
+    verdict and the numbers it compares, each the reply's equal to the base's, and the build's shared
+    text says the PASS-only line names them. WK-INJ's are the lineup's slots, the IR move for its one
+    open seat (none: R18-5's "Also IR-eligible" line names Dell and White), each K and D/ST call in
+    the rec's words, the waiver claim list and P(win). RA-INJ's moves are each IR move, add and drop
+    the audit tells the user to make, by player (the rec's one, White to IR): a drop the base tells
+    and the reply leaves out, or names only as droppable, as a candidate or under a condition, or one
+    the reply adds, still fails. A reply that differs from its base on a compared item still fails.
+  - The graders of the lines §R18's Skill fixes add quote them, filled in on their fixtures: IC-1 06
+    (the share line) and 08 (the claim rule), SC-4 02 to 05 (the drift line; no command, no reminder),
+    RT-6 03 and RT-5 06 (the truncation lead, "scored" in every later sentence), WV-2 07 and WV-8 06
+    (the opposite-case line, no forecast, no pick), NC-CORE 04 and 05 (the core stop line, the whole
+    answer), WK-11 14 (the command once, on orient's hand-off line), and the base judges of ON-INJ (the
+    waiver days), RT-INJ (the decision-quality line, R18-6), RA-INJ (R18-7) and WK-INJ. TR-INJ 05 and
+    its example stay round 9's: the flag's label is R18-8's Skill hardening, and its grader, the
+    TR-INJ flag regex, waits for the bar (R18-8).
+  - R18-9: TR-4 04 grades each listed partner's proposal (on this fixture Team 06's Bhayshul Tuten
+    for CeeDee Lamb and Team 05's Bhayshul Tuten for Tetairoa McMillan), a player named or given by his
+    `player_id`, and a judge of its own, 08, grades the names: every proposal player named from that
+    partner's `players[]`, never a bare id or "name not resolved" (R13-1: one judge per condition).
+    The example names Team 05's.
+  - The examples carry the new lines. The suite holds 327 judges and bases (round 9: 326; TR-4 08 is
+    the one added) and 485 free graders, as round 9 did: no free grader is added and none of their
+    patterns changes (SC-2's per-build value aside), and no trigger case and no Skill listing changes.
+    Of the 57 PASS-if lines that differ from round 9's, 56 keep round 9's line as their prefix and one
+    is TR-4 08; every quotation in them is its Skill's text verbatim, or that text filled with the
+    fixture's values (a name, a logged note, a rec's words).
+  - R15-7's sweep: no `regex_absent` of the touched Skills trips on a new line in any form, and the
+    regexes that read the lines (TR-CORE and NC-CORE 02 and 03, RT-6 02, RT-5 03, ON-1 04, WV-8 03)
+    take them in every form. On round 9's kept replies the head's free graders give the 680 recorded
+    final-message verdicts unchanged.
+  - Replayed offline on round 9's kept replies (CLI 2.1.308's one-word judge prompt,
+    claude-haiku-5-5), the restated lines pass the compliant runs and fail controls that break them;
+    the measured exceptions stay judge errors for the conversion after the bar
+    (`docs/evals/stage-c-backlog.md`). `tests/skills/round10-eval-cases.test.ts` (107 tests) and
+    `tests/skills/round10-eval-refix.test.ts` (11) hold it, with the R13-1 inventory and the earlier
+    rounds' case tests updated.
 - **Dependencies, reviewed under plan 04 §2 (Dependabot PRs 1–5, 2026-11-04 to 2026-11-05; ruling
   R10-35).** The MCP SDK 2.3.1 → 2.4.0 (`@modelcontextprotocol/server` and `core`, and the dev
   `client`; `espn_get_status` reports `sdk_version` 2.4.0): 2.4.0 adds the Skills extension on new
