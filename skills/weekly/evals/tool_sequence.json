@@ -63,6 +63,14 @@
           }
         },
         {
+          "id": "roster_mine",
+          "tool": "espn_get_roster",
+          "args": {
+            "week": 5
+          },
+          "note": "the same cached read, whenever a bench player is OUT or INJURY_RESERVE: its ir block gives the Injuries and byes section ir.eligible_now[] and the open IR seats (changelog §R18, R18-5)"
+        },
+        {
           "id": "injuries",
           "tool": "espn_get_injuries",
           "args": {
@@ -468,6 +476,14 @@
             "all": true,
             "week": 5
           }
+        },
+        {
+          "id": "roster_mine",
+          "tool": "espn_get_roster",
+          "args": {
+            "week": 5
+          },
+          "note": "the same cached read, whenever a bench player is OUT or INJURY_RESERVE: its ir block gives the Injuries and byes section ir.eligible_now[] and the open IR seats (changelog §R18, R18-5)"
         },
         {
           "id": "injuries",

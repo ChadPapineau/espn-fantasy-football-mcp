@@ -109,7 +109,9 @@ const fill = (s: string, ...values: string[]): string => {
 };
 /**
  * The spec's text, its line breaks and their indents read as one space: the round-7 section of the
- * eval report and changelog §R16 (the fix entries and rulings the fixed lines come from).
+ * eval report and changelog §R16 (the fix entries and rulings the fixed lines come from), up to
+ * "## §R17" — a later ruling that quotes one of these lines (§R18's R18-5 quotes injury-cascade's
+ * "Also IR-eligible" line) is not this round's spec.
  */
 const SPEC = [
   between(
@@ -117,7 +119,7 @@ const SPEC = [
     "## Run of 2026-11-24, round 7",
     "## Run of 2026-11-20, round 6",
   ),
-  between(read("docs/plan/changelog.md"), "## §R16", "## Reviews"),
+  between(read("docs/plan/changelog.md"), "## §R16", "## §R17"),
 ]
   .join("\n")
   .replace(/[ \t]*\n[ \t]*/g, " ");
