@@ -6,7 +6,9 @@
 // toolset's list in tests/smoke/expected-tools.json (18 / 34, + espn_debug_echo, fixture mode only),
 // no espn_prepare_*/espn_commit_*, every description ends with
 // the pointer and carries no mandatory sentence, each mandatory sentence exactly once in the
-// instructions, the ten resources (ttlMs + cacheScope in the modern era), the toolset's prompts (8 / 13),
+// instructions, then the static guide's R17-2, R18-1 and R18-11 sentences once each in their order
+// and the 1,477-character production text (changelog §R17, §R18; smoke-lib.mjs checkInstructions),
+// the ten resources (ttlMs + cacheScope in the modern era), the toolset's prompts (8 / 13),
 // espn_get_league's untrusted name and source, espn_get_status's credential and write capability,
 // G2 answering with no credential, the G3 nonce only in structuredContent, a clean stdin-EOF
 // shutdown and no error-level stderr line. No network; temp dirs only. Exit 0 = pass, 1 = a check

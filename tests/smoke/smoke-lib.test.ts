@@ -1,7 +1,12 @@
 // smoke-lib.test.ts — the A3a smoke assertions (tests/smoke/smoke-lib.mjs) are pinned to the code
 // they check (the mandatory sentences, the pointer, the resource and prompt sets, the debug tool, the
 // expected tool lists) and each check fails on the defect it names — hostile and malformed inputs
-// included — so a green smoke means something. Ported from sibling @0a0c7a5, adapted.
+// included — so a green smoke means something. The static guide's pinned sentences (changelog §R17,
+// R17-2; §R18, R18-1 and R18-11) and the production length are pinned to the guide pins the unit
+// server test and both stdio suites hold (tests/mcp/helpers/guide-pins.ts); the guide check passes
+// the text src serves and fails on the mutations those pins refuse (a sentence cut, reworded,
+// doubled, moved or respaced; the session-start reads unscoped or first) and on a wrong length.
+// Ported from sibling @0a0c7a5, adapted.
 import { describe, expect, it } from "vitest";
 import {
   DEBUG_TOOL,
@@ -9,8 +14,15 @@ import {
   EXPECTED_PROMPTS,
   EXPECTED_RESOURCES,
   EXPECTED_TEMPLATES,
+  GUIDE_SENTENCES,
+  INSTRUCTIONS_CHARS,
   MANDATORY_SENTENCES,
+  NO_SKILL_START,
   POINTER,
+  R17_2_DATA_TIME,
+  R17_2_SKILL_FIRST,
+  R18_11_OTHER_PLATFORM,
+  R18_1_HEALTH_LOOKUP,
   checkDescriptions,
   checkInstructions,
   checkPrompts,
@@ -22,6 +34,7 @@ import {
   readExpectedTools,
   SMOKE_TOOLSETS,
   toolsetArg,
+  withoutSpikeLine,
 } from "./smoke-lib.mjs";
 import {
   MANDATORY_SENTENCES as SRC_SENTENCES,
@@ -30,7 +43,9 @@ import {
 } from "../../src/mcp/envelope.js";
 import { ALL_PROMPTS, P1_PROMPTS, PROMPTS } from "../../src/mcp/prompts/index.js";
 import { REGISTRY } from "../../src/mcp/registry.js";
+import { SERVER_INSTRUCTIONS, instructionsFor, spikeLine } from "../../src/mcp/server.js";
 import { DEBUG_TOOL_NAME } from "../../src/mcp/tools/debug.js";
+import * as pins from "../mcp/helpers/guide-pins.js";
 import { rmSync } from "node:fs";
 
 describe("pinned to src", () => {
@@ -38,6 +53,39 @@ describe("pinned to src", () => {
     expect(MANDATORY_SENTENCES).toEqual(SRC_SENTENCES);
     expect(POINTER).toBe(UNTRUSTED_POINTER);
     expect(DEBUG_TOOL).toBe(DEBUG_TOOL_NAME);
+  });
+
+  it("the guide's pinned sentences and the production length: the guide pins', written out again (changelog §R17, R17-2; §R18, R18-1 and R18-11)", () => {
+    // each sentence, verbatim, and the five in the order the guide gives them
+    expect(R17_2_SKILL_FIRST).toBe(pins.R17_2_SKILL_FIRST);
+    expect(R18_1_HEALTH_LOOKUP).toBe(pins.R18_1_HEALTH_LOOKUP);
+    expect(R18_11_OTHER_PLATFORM).toBe(pins.R18_11_OTHER_PLATFORM);
+    expect(NO_SKILL_START).toBe(pins.NO_SKILL_START);
+    expect(R17_2_DATA_TIME).toBe(pins.R17_2_DATA_TIME);
+    expect(GUIDE_SENTENCES).toEqual(pins.GUIDE_PINS);
+    expect(GUIDE_SENTENCES).toEqual([
+      R17_2_SKILL_FIRST,
+      R18_1_HEALTH_LOOKUP,
+      R18_11_OTHER_PLATFORM,
+      NO_SKILL_START,
+      R17_2_DATA_TIME,
+    ]);
+    expect(Object.isFrozen(GUIDE_SENTENCES)).toBe(true);
+    // R18-11's 1,477 characters (1,355 before R18-11, 1,248 before R18-1)
+    expect(INSTRUCTIONS_CHARS).toBe(pins.R18_11_INSTRUCTIONS_CHARS);
+    expect(INSTRUCTIONS_CHARS).toBe(1_477);
+  });
+
+  it("checkInstructions passes the text src serves: the production text, and fixture mode's with its spike line", () => {
+    expect(checkInstructions(SERVER_INSTRUCTIONS)).toEqual([]);
+    const fx = instructionsFor({ fixtureMode: true, spikeNonce: "0123456789ab" });
+    expect(fx).not.toBe(SERVER_INSTRUCTIONS);
+    expect(checkInstructions(fx)).toEqual([]);
+    // the spike line comes off as the guide pins take it off; a text without one is left as it is
+    expect(withoutSpikeLine(fx)).toBe(SERVER_INSTRUCTIONS);
+    expect(withoutSpikeLine(fx)).toBe(pins.withoutSpikeLine(fx));
+    expect(withoutSpikeLine(SERVER_INSTRUCTIONS)).toBe(SERVER_INSTRUCTIONS);
+    expect(withoutSpikeLine(SERVER_INSTRUCTIONS)).toHaveLength(INSTRUCTIONS_CHARS);
   });
 
   it("the ten resources and the eight prompts", () => {
@@ -132,8 +180,8 @@ describe("checkDescriptions", () => {
 });
 
 describe("checkInstructions", () => {
-  const ok = `${MANDATORY_SENTENCES.join("\n\n")}\n\nGuide.`;
-  it("passes each sentence exactly once", () => {
+  const ok = SERVER_INSTRUCTIONS;
+  it("passes each mandatory sentence exactly once, then the guide's pinned sentences in order at 1,477 characters", () => {
     expect(checkInstructions(ok)).toEqual([]);
   });
   it.each<[string, unknown]>([
@@ -143,6 +191,122 @@ describe("checkInstructions", () => {
     ["a non-string", 42],
   ])("fails on %s", (_, ins) => {
     expect(checkInstructions(ins).length).toBeGreaterThan(0);
+  });
+
+  // The static guide (changelog §R17, R17-2; §R18, R18-1 and R18-11), as the built server serves it
+  // in both eras under both toolsets (run-smoke.mjs): every mutation the guide pins refuse, the
+  // texts before R18-11 and R18-1 among them, and a wrong length with every sentence intact.
+  const health = R18_1_HEALTH_LOOKUP;
+  const other = R18_11_OTHER_PLATFORM;
+  const guideCases: readonly [string, string][] = [
+    ["R18-11's sentence cut (b563c1a's text)", ok.replace(` ${other}`, "")],
+    ["R18-1's and R18-11's sentences cut (8f1c406's text)", ok.replace(` ${health} ${other}`, "")],
+    ["the Skill rule's first pair missing", ok.replace(R17_2_SKILL_FIRST, "")],
+    ["the Skill rule's first pair reworded", ok.replace("needs no Skill.", "needs none.")],
+    ["the data-time sentence cut", ok.replace(` ${R17_2_DATA_TIME}`, "")],
+    ["the data-time sentence doubled", `${ok} ${R17_2_DATA_TIME}`],
+    ["R18-1's sentence reworded", ok.replace(health, health.replace("only asks", "asks"))],
+    [
+      "R18-1's sentence moved before R17-2's pair",
+      ok.replace(` ${health}`, "").replace(R17_2_SKILL_FIRST, `${health} ${R17_2_SKILL_FIRST}`),
+    ],
+    ["R18-1's sentence on a line of its own", ok.replace(` ${health}`, `\n${health}`)],
+    [
+      "R18-11's sentence without a platform it names",
+      ok.replace(other, other.replace("(Sleeper, Yahoo and the like)", "(Sleeper and the like)")),
+    ],
+    [
+      "R18-11's sentence off R17-2's words",
+      ok.replace(other, other.replace("is not about this league", "is not this league")),
+    ],
+    ["R18-11's sentence doubled", `${ok} ${other}`],
+    [
+      "R18-11's sentence moved before R18-1's",
+      ok.replace(` ${other}`, "").replace(health, `${other} ${health}`),
+    ],
+    [
+      "R18-11's sentence moved after the session-start reads",
+      ok.replace(` ${other}`, "").replace(NO_SKILL_START, `${NO_SKILL_START} ${other}`),
+    ],
+    ["R18-11's sentence two spaces after R18-1's", ok.replace(` ${other}`, `  ${other}`)],
+    ["R18-11's sentence on a line of its own", ok.replace(` ${other}`, `\n${other}`)],
+    [
+      "the session-start reads unscoped",
+      ok.replace(NO_SKILL_START, NO_SKILL_START.replace("When no Skill is loaded, start", "Start")),
+    ],
+    [
+      "the session-start reads also given unscoped",
+      `${ok} Start with espn_get_status and espn_get_league once per session.`,
+    ],
+    [
+      "the session-start reads before the Skill rule",
+      ok
+        .replace(R17_2_SKILL_FIRST, "\u0000")
+        .replace(NO_SKILL_START, R17_2_SKILL_FIRST)
+        .replace("\u0000", NO_SKILL_START),
+    ],
+    [
+      "another word in the guide, every pinned sentence intact (the length)",
+      ok.replace("no tool changes the league", "no tool ever changes the league"),
+    ],
+  ];
+
+  it.each(guideCases)("fails on %s, with or without fixture mode's spike line", (label, text) => {
+    expect(text, `${label}: the mutation changes nothing`).not.toBe(ok);
+    expect(checkInstructions(text).length).toBeGreaterThan(0);
+    expect(checkInstructions(`${text}\n\n${spikeLine("0123456789ab")}`).length).toBeGreaterThan(0);
+  });
+
+  it("each guide case is its own text, and the guide pins or the production length refuse it too", () => {
+    expect(new Set(guideCases.map(([, text]) => text)).size).toBe(guideCases.length);
+    for (const [label, text] of guideCases)
+      expect(
+        pins.guidePinProblems(text).length > 0 ||
+          pins.withoutSpikeLine(text).length !== pins.R18_11_INSTRUCTIONS_CHARS,
+        label,
+      ).toBe(true);
+  });
+
+  it("names what it refuses, each check on a text only it (or it first) refuses", () => {
+    const r18_1After = "R18-1's sentence follows R17-2's pair directly, one space between, 0 times";
+    const r18_11After = "R18-11's sentence follows R18-1's directly, one space between, 0 times";
+    // b563c1a's text: R18-11's sentence missing, its place after R18-1's empty, 1,355 characters
+    expect(checkInstructions(ok.replace(` ${other}`, ""))).toEqual([
+      expect.stringContaining(
+        "guide sentence 3 appears 0 times (exactly 1 required): A question about",
+      ),
+      expect.stringContaining(r18_11After),
+      expect.stringContaining("the production instructions are 1355 characters (1477 required)"),
+    ]);
+    // a newline before a sentence keeps every sentence and the length: only its place tells
+    expect(checkInstructions(ok.replace(` ${other}`, `\n${other}`))).toEqual([
+      expect.stringContaining(r18_11After),
+    ]);
+    expect(checkInstructions(ok.replace(` ${health}`, `\n${health}`))).toEqual([
+      expect.stringContaining(r18_1After),
+    ]);
+    // a word changed elsewhere keeps every pin: only the length tells
+    expect(
+      checkInstructions(
+        ok.replace("no tool changes the league", "no tool ever changes the league"),
+      ),
+    ).toEqual([expect.stringContaining("the production instructions are 1482 characters")]);
+    // the session-start reads given a second time, unscoped
+    expect(
+      checkInstructions(`${ok} Start with espn_get_status and espn_get_league once per session.`),
+    ).toEqual([
+      expect.stringContaining("the session-start reads appear 2 times"),
+      expect.stringContaining("the production instructions are 1542 characters"),
+    ]);
+    // the session-start sentence and R17-2's pair swapped: the pair loses R18-1, the reads lead
+    const swapped = ok
+      .replace(R17_2_SKILL_FIRST, "\u0000")
+      .replace(NO_SKILL_START, R17_2_SKILL_FIRST)
+      .replace("\u0000", NO_SKILL_START);
+    expect(checkInstructions(swapped)).toEqual([
+      expect.stringContaining(r18_1After),
+      expect.stringContaining("the session-start reads come before the Skill rule"),
+    ]);
   });
 });
 

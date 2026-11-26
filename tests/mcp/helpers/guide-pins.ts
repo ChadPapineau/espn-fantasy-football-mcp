@@ -3,6 +3,8 @@
 // imported from src/mcp/server.ts, so every test that reads the served `instructions` fails on any
 // change to them: the unit server test (both protocol eras, both toolsets, production and fixture
 // mode) and both stdio end-to-end suites (the built server, core and full, and the 2026-07-28 era).
+// The SDK smoke (`npm run smoke`: the built server in both eras under both toolsets) carries its own
+// copy in tests/smoke/smoke-lib.mjs, which tests/smoke/smoke-lib.test.ts holds equal to these.
 
 /**
  * R17-2's first sentence pair: a request one of the plugin's Skills covers loads that Skill before
