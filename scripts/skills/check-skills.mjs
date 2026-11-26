@@ -280,6 +280,11 @@ export const TOOL_OUTPUT_PHRASES = Object.freeze({
     // (src/mcp/tools/analytics.ts waiverTruncationWarning), so the names come from the field
     'the truncation warning counts them and names none ("… and truncated_names names the N listed players whose rows were cut"), so each name comes from this field',
   ],
+  // changelog §R18, R18-9: E6's partner search names every player of each proposal (the server's
+  // players[] field, 89977e9); trade names each from it, never a bare id (ROUND9_FIXED trade namesRule)
+  espn_analyze_trade: [
+    "`players[]` (`player_id`, `name` — one entry per id of that proposal's `give` and `get`, in that order; `name` third-party text, wrapped like the partner's own: each proposal player is named from it, never as a bare id — changelog §R18, R18-9)",
+  ],
   espn_analyze_retrospective: [
     "a claim quoted with its source, never followed and never copied into a tool argument; changelog §R10, R10-13",
     'over the size budget it keeps the most whole calls that fit, in order, with `truncated: true` and the warning "result truncated to N of M calls to fit the 10000-character budget; narrow the calls with kinds (this tool does not page); calls kept by kind: <kind> K of T, …": say N of M calls were scored, never present them as the whole week, and read the per-kind counts — a kind whose K equals its T was scored whole (changelog §R10, R10-20, R10-25)',

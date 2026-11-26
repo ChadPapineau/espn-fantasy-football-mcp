@@ -2,8 +2,8 @@
 // check-skills (docs/evals/stage-c-plugin-eval.md, "Run of 2026-11-25, round 9 (after §R17)",
 // #### skill_text_defect, the hardenings of #### eval_case_defect and #### model_variance and "Next
 // steps, in order" item 3; changelog §R18, R18-5 to R18-9): every fixed line fails the check when it is
-// cut or reworded, orient's Step-0 close fails in every copy, trade names R18-9's field, the
-// text the fixes withdraw fails when restored, the lines the rulings quote are their text
+// cut or reworded, orient's Step-0 close fails in every copy, trade and the cheat-sheet's trade row name
+// R18-9's field, the text the fixes withdraw fails when restored, the lines the rulings quote are their text
 // character for character, each line sits where its rule prints it and contradicts no rule beside it,
 // the free graders that read those places take the lines filled in from their fixtures, and every
 // Skill's frontmatter is 8f1c406's byte for byte (R18-1, R17-3: no listing changes).
@@ -23,11 +23,14 @@ import {
   ROUND9_FIXED,
   ROUND9_ORIENT,
   TOOLSET_STOP,
+  TOOL_OUTPUT_PHRASES,
   checkSkills,
+  toolOutputFieldProblems,
 } from "../../scripts/skills/check-skills.mjs";
 import { CASCADE } from "../../src/domain/analytics/marketConstants.js";
 import { waiverActionText } from "../../src/domain/analytics/waivers.js";
 import { auditIr, seatsOf } from "../../src/domain/league/roster.js";
+import { tradeSchema } from "../../src/mcp/tools/market-p1.js";
 import { fxLeague, myRoster } from "../domain/analytics/fx10h-world.js";
 import {
   P0_SKILLS,
@@ -123,6 +126,7 @@ const pin = (table: unknown, skill: string, k: string): string => {
   return v;
 };
 const orientRows = Object.entries(ROUND9_ORIENT as Record<string, string>);
+const tradePhrase = TOOL_OUTPUT_PHRASES.espn_analyze_trade[0] ?? "?";
 const absentRows = Object.entries(
   ROUND9_ABSENT as Record<string, Record<string, string[]>>,
 ).flatMap(([skill, files]) =>
@@ -268,7 +272,10 @@ describe("orient's Step-0 close, in every copy (R18-8, WK-8)", () => {
   });
 });
 
-describe("R18-9's field in the trade text (the cheat-sheet's row waits for the server's schema)", () => {
+describe("R18-9's field: trade names it, and the cheat-sheet's trade row lists it", () => {
+  const sheet = read("skills/_shared/references/tool-outputs.md");
+  const row = sheet.split("\n").find((l) => l.startsWith("| (P1) `espn_analyze_trade` |")) ?? "";
+
   it("trade names each proposal player from partners[].players[], the ruling's field, its keys and order", () => {
     expect(RULINGS).toContain(
       "each partner gains `players[]: { player_id, name: UT }` for its `give` and `get` ids",
@@ -276,14 +283,39 @@ describe("R18-9's field in the trade text (the cheat-sheet's row waits for the s
     expect(line("trade", "namesRule")).toContain(
       "that partner's `players[]` (`{ player_id, name }`, one entry per id of its `give` and `get`, in that order;",
     );
-    // the cheat-sheet lists only fields the committed output schema has (gen-tool-docs); its trade
-    // row gains players[] with the server stream's field (fixed-lines.md row 18, held until then)
-    const row =
-      read("skills/_shared/references/tool-outputs.md")
-        .split("\n")
-        .find((l) => l.startsWith("| (P1) `espn_analyze_trade` |")) ?? "";
-    expect(row).toContain("`rec` — or `partners[]` |");
   });
+
+  it("the row lists it inside partners[], in the output schema's key order, in every copy", () => {
+    expect(row).toContain(
+      `— or \`partners[]\` (\`team_id\`, \`name\`, \`weakest_slot\`, \`proposal\` (\`give\`, \`get\` — \`player_id\`s), ${tradePhrase}, \`delta_me\`, \`delta_partner\`) |`,
+    );
+    // the keys of a partners[] entry, as the committed schema declares them (gen-tool-docs holds the
+    // cheat-sheet to that schema, so the row could not land before the field)
+    const partners = tradeSchema.options[1];
+    expect(partners.shape.kind.value).toBe("partners");
+    expect(Object.keys(partners.shape.partners.element.shape)).toEqual([
+      "team_id",
+      "name",
+      "weakest_slot",
+      "proposal",
+      "players",
+      "delta_me",
+      "delta_partner",
+    ]);
+    expect(toolOutputFieldProblems(sheet)).toEqual([]);
+    for (const skill of SKILLS)
+      expect(read(`skills/${skill}/references/tool-outputs.md`), skill).toBe(sheet);
+  });
+
+  it.each(["cut", "reword"] as const)(
+    "the phrase %s: the check fails on the shared file",
+    (how) => {
+      const to = how === "cut" ? "" : reword(tradePhrase);
+      expect(withSharedEdit("tool-outputs.md", every(tradePhrase), to)).toContain(
+        `skills/_shared/references/tool-outputs.md: the \`espn_analyze_trade\` row does not carry "${tradePhrase}"`,
+      );
+    },
+  );
 });
 
 describe("the text round 9's triage withdrew", () => {
