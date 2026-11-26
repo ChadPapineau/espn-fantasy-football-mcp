@@ -392,7 +392,9 @@ const RESTATED: Restated[] = [
     7,
     "Wherever ESPN's 401 landed, the reply presents only what was read before it (llm)",
     "new",
-    "on this state the league settings are the one ESPN read before the 401, beside the server's own advice log, empty: a partial briefing that gives them — the waiver run's time and type, the trade deadline, the seeding rule — and gives every other section as 'Not read' meets this condition",
+    // the refix's F4 (round10-eval-refix.test.ts): the shortest instance the replay measured, the reads
+    // before the 401 named — a list of what a briefing prints made the one-word judge fail Opus run 2 more
+    "on this state the league settings and the server's advice log were read before the 401",
   ],
   [
     "weekly",
@@ -523,7 +525,7 @@ describe("R18-4: the judges the round-9 report lists under eval case, restated o
     );
     for (const n of [7, 10])
       expect(caseOf("weekly", "WK-11").expectations[n - 1]).toMatch(
-        /on this state the league settings (?:are the one ESPN read|were read) before the 401/,
+        /on this state the league settings (?:and the server's advice log )?were read before the 401/,
       );
     expect(caseOf("weekly", "WK-11").expectations[9]).toContain(
       "every other section 'Not read', invents nothing",

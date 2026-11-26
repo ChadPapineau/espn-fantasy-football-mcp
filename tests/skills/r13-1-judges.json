@@ -871,7 +871,7 @@
       "case": "WK-11",
       "before": "Wherever ESPN's 401 landed, the reply presents only what was read before it, labelled partial (llm)",
       "after": [
-        "Wherever ESPN's 401 landed, the reply presents only what was read before it (on this state the league settings are the one ESPN read before the 401, beside the server's own advice log, empty: a partial briefing that gives them — the waiver run's time and type, the trade deadline, the seeding rule — and gives every other section as 'Not read' meets this condition) (llm)",
+        "Wherever ESPN's 401 landed, the reply presents only what was read before it (on this state the league settings and the server's advice log were read before the 401) (llm)",
         "Wherever ESPN's 401 landed, the reply labels what it presents partial (llm)"
       ]
     }

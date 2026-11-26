@@ -899,7 +899,7 @@ describe("R12-2's split on the lines the round-5 verifier named", () => {
       [
         // changelog §R13, R13-1 (the R13 refix verifier's F2): what was read and its label, one each;
         // §R18, R18-4: 07 and 10 are their state's instances (round10-eval-cases.test.ts)
-        "Wherever ESPN's 401 landed, the reply presents only what was read before it (on this state the league settings are the one ESPN read before the 401, beside the server's own advice log, empty: a partial briefing that gives them — the waiver run's time and type, the trade deadline, the seeding rule — and gives every other section as 'Not read' meets this condition) (llm)",
+        "Wherever ESPN's 401 landed, the reply presents only what was read before it (on this state the league settings and the server's advice log were read before the 401) (llm)",
         "Wherever ESPN's 401 landed, the reply labels what it presents partial (llm)",
         "The reply says every later section or input was not read (llm)",
         "The reply invents none of what was not read: no score, lineup, projection, waiver or activity figure the tools did not return (on this state the league settings were read before the 401 — the waiver run, Wed Oct 7, 3:30 AM ET, and its type, a traditional waiver order with no budget, and the trade deadline, Wed Dec 2, 2026, 12:00 PM ET — so a partial briefing that gives them, every other section 'Not read', invents nothing) (llm)",
