@@ -8,6 +8,11 @@ minor version (plan 04 §4.4; plan 09 K6). One version covers the server, the Sk
 
 ## [Unreleased]
 
+`main` carries this section from 2026-11-27. The plugin eval's round 10 ran on the Skills, cases and
+server as `dee2383` builds them and met plan 09 §5.2's bar on both models: B11 Lane 2 and B15 pass
+(`docs/evals/stage-c-plugin-eval.md`; `docs/plan/changelog.md` §R19, R19-2). No version is tagged; a
+tag is the owner's choice.
+
 ### Added
 
 - **E5's budget room is held (the §R16 gate's open question 11, in §R17's fix round;

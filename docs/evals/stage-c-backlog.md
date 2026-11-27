@@ -41,6 +41,12 @@ plugin eval, after the usage reset on 2026-11-10; `docs/HANDOFF.md` ▶ NEXT STE
 "Found after the owner's install (2026-11-03)", and those under "Found in §R10's fix rounds" at the
 end.
 
+**After round 10 (2026-11-27).** Rounds 3 to 10 of the plugin eval ran from 2026-11-14 to 2026-11-26,
+each after its rulings and fix round (`docs/plan/changelog.md` §R11–§R18). Round 10 met plan 09 §5.2's
+bar on both models: B11 Lane 2 and B15 pass (§R19, R19-2), and `main` takes round 10's build on
+2026-11-27. Still open: the items under "Round 10 and the ship" at the end (R19-3: open after the bar,
+not scheduled, the owner's call) and the owner's own items in `docs/HANDOFF.md` ▶ NEXT STEP.
+
 ## For the orchestrator's ledger
 
 **Ruled R8-5 (2026-10-28, `docs/plan/changelog.md` §R8):** the three findings below are closed as
@@ -2769,3 +2775,44 @@ wait here, each with its line pinned in the Skill, for the conversion after the 
   Sat, Sun" on `fx-10h`), "every day" only when all seven are listed. Sonnet wrote "every day" on six
   runs of round 9, which only `matches-base` compared (ON-INJ). onboard's `daysRule` pin holds the
   form.
+
+## Round 10 and the ship (changelog §R19; 2026-11-26 to 2026-11-27)
+
+Round 10 ran on `dee2383` in R18-12's order and met plan 09 §5.2's bar on both models (the round-10
+section of `docs/evals/stage-c-plugin-eval.md`, `56cb783`, corrected in `77d69e3` and `ce99631`). R19-2
+ships its build, and R19-3 records what stays below the bar. None of it is a condition of the ship and
+none of it is scheduled. A change to a Skill or a tool description re-opens Lane 2, so `main` takes one
+only after a full round meets the bar again on both models (about $575 with judges and about 30 weekly
+points at round 10's rates). Whether and when to run that round is the owner's call.
+
+### Open after the bar (R19-3)
+
+- **The conversions R18-4 held until the bar.** Each judge that round 10 measured failing a line a
+  regex can hold (the report's eval-case entries) becomes a free grader once its line prints verbatim
+  on every run; the others are restated as their fixtures' instances. Round 10's measured judge
+  errors join R18-4's table above, KD-1 06 (the Verdict line's Δ, the PASS-if's own words) and RA-INJ
+  06 (the base judge, with the phase and the bench template as the call) among them. IC-1 08 failed
+  all 24 votes on both models while every run printed both fixed lines.
+- **Skill-text fixes, each held by a check-skills pin:**
+  - retro: under `truncated: true` the empty-metric lines speak of the scored calls only, and
+    `calls.unbacked` is never given as the week's count (RT-5, RT-6);
+  - weekly: R18-5's IR line is the only sentence about the IR choice (WK-1), and the K and D/ST rows
+    on an invalid roster carry the block (WK-7-E).
+- **Hardenings, where no Skill-text cause was shown:**
+  - onboard's playoff row and access line (ON-INJ);
+  - roster-audit's answer to a rating question on its fixed lines, with no grade of its own (RA-INJ's
+    second cause);
+  - stream-kdef's Verdict line with `rec.action` as its reason (four Opus runs give it in their own
+    words);
+  - weekly's points-only line and its P(win) line;
+  - news-check's consequence line, and its Withheld line with nothing added after it (Sonnet NC-INJ
+    run 1 says what the withheld passage asked; R19-1, R17-1's guardrail);
+  - R15-4's flag label ("Injury flag" labels or heads the line on four Sonnet runs of four flagged
+    cases), with the TR-INJ flag regex R18-8 held until the bar;
+  - session-check's first line on a pasted command (Sonnet SC-INJ run 1);
+  - the ON-1 row regex R18-8 held until the bar.
+- **A product hardening:** the server gives each deadline (`rules.trade.deadline`, the waiver runs) its
+  Eastern Time rendering beside the UTC instant (Sonnet WK-11 run 1).
+- **The served-text pin** (under "Found in R18-11's fix and by its verifiers"): open as recorded there.
+- **R18-11's reach (the watch item there):** in round 10 every positive fired on both models, and the
+  triage traced no Lane 2 failure to the sentence.
