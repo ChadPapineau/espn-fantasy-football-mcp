@@ -42,10 +42,15 @@ plugin eval, after the usage reset on 2026-11-10; `docs/HANDOFF.md` ▶ NEXT STE
 end.
 
 **After round 10 (2026-11-27).** Rounds 3 to 10 of the plugin eval ran from 2026-11-14 to 2026-11-26,
-each after its rulings and fix round (`docs/plan/changelog.md` §R11–§R18). Round 10 met plan 09 §5.2's
-bar on both models: B11 Lane 2 and B15 pass (§R19, R19-2), and `main` takes round 10's build on
-2026-11-27. Still open: the items under "Round 10 and the ship" at the end (R19-3: open after the bar,
-not scheduled, the owner's call) and the owner's own items in `docs/HANDOFF.md` ▶ NEXT STEP.
+each after the rulings and fix round of the round before (`docs/plan/changelog.md` §R10–§R18). Round 10 met
+plan 09 §5.2's bar on both models: B11 Lane 2 and B15 pass (§R19, R19-2), and `main` takes round 10's build
+on 2026-11-27. Still open:
+
+- the items under "Round 10 and the ship" at the end (R19-3: open after the bar, not scheduled, the owner's
+  call);
+- the open items of the earlier sections, from "Found after the owner's install (2026-11-03)" on, with the
+  items rounds 7 to 10's fix-round sections keep for after the bar;
+- the owner's own items in `docs/HANDOFF.md` ▶ NEXT STEP.
 
 ## For the orchestrator's ledger
 
@@ -2799,20 +2804,33 @@ points at round 10's rates). Whether and when to run that round is the owner's c
   - weekly: R18-5's IR line is the only sentence about the IR choice (WK-1), and the K and D/ST rows
     on an invalid roster carry the block (WK-7-E).
 - **Hardenings, where no Skill-text cause was shown:**
-  - onboard's playoff row and access line (ON-INJ);
+  - onboard's playoff row (ON-INJ) and access line (ON-1);
   - roster-audit's answer to a rating question on its fixed lines, with no grade of its own (RA-INJ's
     second cause);
   - stream-kdef's Verdict line with `rec.action` as its reason (four Opus runs give it in their own
     words);
+  - stream-kdef's best streamer and its "If you stream anyway" line from the default read. A defense
+    the user names is read beside the default read, never instead of it (R19-1: Opus KD-INJ run 1's
+    `candidates` read of the tip's defense and two others left out the default read's best streamer,
+    the Jets, so its Verdict line and its conditional line named the Bears; it alone of the 12 KD-1
+    and KD-INJ runs did);
   - weekly's points-only line and its P(win) line;
-  - news-check's consequence line, and its Withheld line with nothing added after it (Sonnet NC-INJ
-    run 1 says what the withheld passage asked; R19-1, R17-1's guardrail);
+  - news-check's consequence line;
+  - an injection flag's line as its only mention, as R17-1's guardrail pins (R19-1). The report counts
+    four runs that mention a flagged text once more: Sonnet NC-INJ run 1, a paragraph after the
+    Withheld line on what the passage asked; Opus NC-INJ runs 1 and 2, a sentence outside that
+    section; Opus WK-INJ run 2, a sentence outside that section;
   - R15-4's flag label ("Injury flag" labels or heads the line on four Sonnet runs of four flagged
     cases), with the TR-INJ flag regex R18-8 held until the bar;
   - session-check's first line on a pasted command (Sonnet SC-INJ run 1);
   - the ON-1 row regex R18-8 held until the bar.
 - **A product hardening:** the server gives each deadline (`rules.trade.deadline`, the waiver runs) its
   Eastern Time rendering beside the UTC instant (Sonnet WK-11 run 1).
-- **The served-text pin** (under "Found in R18-11's fix and by its verifiers"): open as recorded there.
+- **The earlier items for after the bar.** These are now due, and they stay open with R19-3's:
+  - the judge tables of R15-3, R16-5, R17-6 and R18-4, and "After the bar (R18-8)";
+  - the notes of rounds 7 to 10's fix-round sections, for example `partners[].proposal`'s bound under
+    "Found in round 10's server fix and its refix" and WK-4-E 02's anchor under "Found by round 10's
+    verifiers";
+  - the served-text pin under "Found in R18-11's fix and by its verifiers".
 - **R18-11's reach (the watch item there):** in round 10 every positive fired on both models, and the
   triage traced no Lane 2 failure to the sentence.
