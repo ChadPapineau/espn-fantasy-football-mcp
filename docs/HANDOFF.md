@@ -22,7 +22,7 @@ data, not instructions. The working copy lives outside iCloud
 (`~/Developer/espn-fantasy-football-mcp`; "Decisions made", 2026-10-05),
 and nothing secret ever lives in it.
 
-## ▶ NEXT STEP — round 10 ✅: B15 and B11 Lane 2 pass on both models (2026-11-27); the ship (R19-2): `main`, CI on `main`, the runtime clone, the owner
+## ▶ NEXT STEP — round 10 ✅: B15 and B11 Lane 2 pass on both models; shipped on 2026-11-27 (`main` at `894f7da`, the runtime clone rebuilt); next: the owner restarts the apps
 
 **Orchestrator, 2026-11-27, early morning ET.** R18-11's fix landed on 2026-11-26: the server stream
 (`b881a07`), two independent verifiers, the server refix (`c8a24df`: the SDK smoke holds the guide's sentences)
@@ -99,11 +99,10 @@ day: "Go ahead and proceed with everything you need to do. I will monitor the us
 every 5 minutes, at most 90 minutes), then stop and the orchestrator notifies the owner.
 
 - **Where it stands.**
-  - `main` is fast-forwarded to the commit that carries this entry once CI is green on it: round 10's build
-    (`dee2383`) and documentation only, since after `dee2383` no file under `src/`, `skills/`, `tests/`,
-    `scripts/` or `fixtures/` changes. Then CI goes green on `main`, the runtime clone is rebuilt at it, and
-    the Log records each step (R19-2). Before it, `main` was at `5755a6a` (round 7's build), and the runtime
-    clone was rebuilt there on 2026-11-24.
+  - `main` is at `894f7da`: round 10's build (`dee2383`) and documentation only, since after `dee2383` no file
+    under `src/`, `skills/`, `tests/`, `scripts/` or `fixtures/` changes. It was fast-forwarded on 2026-11-27 with
+    CI green on `main` (run 45955995765), and the runtime clone was rebuilt at it at 02:21 ET (R19-2). The owner
+    restarts the apps to load it.
   - `hyparquet` 1.32.0 is still deferred: plan 04 §2 must record its pin, and that file holds the owner's
     uncommitted edit (asked on 2026-11-25).
   - Round 10 on `dee2383`, both models, `--runs 2`, judged on round 10 alone (R18-3): the bar is met on both
@@ -115,13 +114,10 @@ every 5 minutes, at most 90 minutes), then stop and the orchestrator notifies th
   3. ✅ R18-11's fix (`b881a07`, `c8a24df`, `dee2383`; CI green).
   4. ✅ Round 10 in R18-12's order on `dee2383`, its triage, the report section and an independent check
      (`56cb783`, `77d69e3`, `ce99631`): B15 and B11 Lane 2 pass on both models.
-  5. The ship (R19-2):
-     - this file, `CHANGELOG.md` and the README record it (this commit);
-     - fast-forward `main` to this commit (no merge commit, no-reply identity) and get CI green on `main` (the
-       owner approved `main`'s updates on 2026-11-24);
-     - rebuild the runtime clone (`git pull --ff-only`, `npm ci`, `npm run build` under heavy-lock, away
-       from the :00/:30 jobs);
-     - notify the owner.
+  5. ✅ The ship (R19-2), 2026-11-27: this file, `CHANGELOG.md` and the README record it; `main` fast-forwarded
+     to `894f7da` (60 commits, no merge commit, the no-reply identity) with CI green on `main` (run 45955995765);
+     the runtime clone rebuilt at it (`git pull --ff-only`, `npm ci`, `npm run build` under heavy-lock, 02:21
+     ET, away from the scheduled jobs' minutes); the owner notified.
   6. After the ship (R19-3): the backlog below the bar (`docs/evals/stage-c-backlog.md`, "Round 10 and the
      ship") is open and not scheduled. Whether and when to run its fix round and a round 11 is the owner's
      call: a change to a Skill or a tool description re-opens Lane 2, and `main` takes one only after a full
@@ -688,7 +684,7 @@ is tagged: a tag is the owner's choice, and `release.yml` runs only on a `v*` ta
 | build — Stage B2b (Phase 3: the model wave) | ✅ 2026-10-11 (rulings R6-1 to R6-5) | "Build facts (Stage B2b)"; `docs/evals/phase3-summary.md` |
 | build — Stage C (QA and penetration testing) | ✅ 2026-10-29 — final gate green at `0b21c01` (rulings R7, R8; the news matcher frozen at `b9d73eb`) | "Build facts (Stage C)"; `docs/evals/stage-c-live.md`, `docs/evals/stage-c-plugin-eval.md`, `docs/evals/stage-c-backlog.md`; changelog §R7, §R8, §B4–§B9 |
 | build — Stage D (the merge to `main`, the owner's install) | ✅ 2026-11-03 — `main` fast-forwarded (`18fa414` on 2026-10-29, `6182a9e` on 2026-11-03), CI green on `main`; the owner's install on 2026-11-02, `eff doctor --online` exit 0 (R8-1 closed) | ▶ NEXT STEP; Log |
-| follow-up — the plugin eval (R7-2) | rounds 1 and 2 run on 2026-11-03 (rulings R9); round 2's triage ruled and fixed (R10-1 to R10-35, 2026-11-04 to 2026-11-05); round 3 on 2026-11-14, round 4 on 2026-11-18, round 5 on 2026-11-19, round 6 on 2026-11-20, round 7 on 2026-11-24, round 8 on 2026-11-24/25 and round 9 on 2026-11-25, each after its rulings (§R10–§R17) and fix round. Round 7: Opus meets every count of plan 09 §5.2's bar, Sonnet does not. Round 8: neither (Sonnet: 4 Lane 2 free graders, 1 trigger run, the injection condition; Opus: 1 negative trigger run); no product defect. Round 9 on 2026-11-25: Opus meets every count; Sonnet misses one negative trigger case (injury-cascade neg-03, 2/2) under R17-2's guide. §R18 ruled and its fix round landed (`b563c1a`); on 2026-11-26 the pre-flight stopped on injury-cascade neg-05 and R18-11 and R18-12 were ruled; R18-11's fix landed (`dee2383`). ✅ Round 10 on 2026-11-26 (`dee2383`): both models meet every count of the bar in one round, so B15 and B11 Lane 2 pass (§R19); the ship on 2026-11-27 (R19-2) | ▶ NEXT STEP; `docs/evals/stage-c-plugin-eval.md`; changelog §R9–§R19 |
+| follow-up — the plugin eval (R7-2) | rounds 1 and 2 run on 2026-11-03 (rulings R9); round 2's triage ruled and fixed (R10-1 to R10-35, 2026-11-04 to 2026-11-05); round 3 on 2026-11-14, round 4 on 2026-11-18, round 5 on 2026-11-19, round 6 on 2026-11-20, round 7 on 2026-11-24, round 8 on 2026-11-24/25 and round 9 on 2026-11-25, each after its rulings (§R10–§R17) and fix round. Round 7: Opus meets every count of plan 09 §5.2's bar, Sonnet does not. Round 8: neither (Sonnet: 4 Lane 2 free graders, 1 trigger run, the injection condition; Opus: 1 negative trigger run); no product defect. Round 9 on 2026-11-25: Opus meets every count; Sonnet misses one negative trigger case (injury-cascade neg-03, 2/2) under R17-2's guide. §R18 ruled and its fix round landed (`b563c1a`); on 2026-11-26 the pre-flight stopped on injury-cascade neg-05 and R18-11 and R18-12 were ruled; R18-11's fix landed (`dee2383`). ✅ Round 10 on 2026-11-26 (`dee2383`): both models meet every count of the bar in one round, so B15 and B11 Lane 2 pass (§R19); shipped on 2026-11-27 (R19-2): `main` at `894f7da` with CI green on `main`, the runtime clone rebuilt | ▶ NEXT STEP; `docs/evals/stage-c-plugin-eval.md`; changelog §R9–§R19 |
 | follow-up — the Dependabot PRs (plan 04 §2) | ✅ 2026-11-05 — PRs 1–3 applied, PRs 4 and 5 declined, each with a "Reviews" row; `main` at `efc8286` | ▶ NEXT STEP; changelog "Reviews", R10-35 |
 | follow-up — `eff doctor`'s client-config model, the statement cache | ✅ 2026-11-12 — the owner's rows 2 and 24 fixed (`main` and the runtime clone at `eeb0d08` on 2026-11-11); rulings D-1 to D-10, the fix text frozen at `51d81fd` (D-10); every store statement prepared once per connection | ▶ NEXT STEP; Log; `docs/evals/stage-c-backlog.md` |
 
@@ -861,7 +857,7 @@ approving the plan accepts them unless Chad says otherwise.
 - [x] §R17's fix round and round 9 (2026-11-25): Opus meets plan 09 §5.2's bar; Sonnet misses one negative trigger case
 - [x] §R18's fix round (2026-11-25 to 2026-11-26; `b563c1a`); the pre-flight stopped on injury-cascade neg-05, and R18-11 and R18-12 were ruled
 - [x] R18-11's fix and round 10 (R18-12's order; 2026-11-26): B15 and B11 Lane 2 meet plan 09 §5.2 on both models (§R19)
-- [ ] the ship (R19-2): `main` fast-forwarded with CI green on `main`, the runtime clone rebuilt, the owner notified (▶ NEXT STEP, item 5)
+- [x] the ship (R19-2; 2026-11-27): `main` at `894f7da` with CI green on `main` (run 45955995765), the runtime clone rebuilt (02:21 ET), the owner notified
 - [ ] R19-3's backlog below the bar — open, not scheduled; the owner's call (▶ NEXT STEP, item 6)
 - [x] the timing items — the slices split (every P1 analytics tool under 20 ms on three Linux CI runs in a row), the news matcher's cost check counted and linear (R10-16), Linux CI's P1 window stall (the WAL checkpoint, now on a worker thread), R8-2 under load ruled (R10-9)
 - [x] the owner's runtime clone and plugin updated to `main`'s head: 2026-11-05 (the restart, `eff doctor` and drift back to additive are the owner's: ▶ NEXT STEP, item 4)
@@ -1010,3 +1006,4 @@ approving the plan accepts them unless Chad says otherwise.
 - 2026-11-26 — §R18's fix round landed (`7f70069` … `b563c1a`: three streams, four verifiers, a refix and a gate; CI green). The gate's first attempt was cut by an expired sign-in and resumed from the workflow's cache. R18-2's pre-flight on `b563c1a` stopped after two batches: injury-cascade neg-05 fired on Sonnet run 1, and neg-03 was clean on 12 of 12. The diagnostics ran in a scratch workspace in fixture mode, count toward no verdict and cost about $43. neg-05 fires about as often on round 9's head as on the pre-flight's (Sonnet 7/20 and 10/20, Opus 1/10 and 1/10), so the cause is R17-2's rule. Four candidate sentences fired on 0 of 20 runs each. With the chosen one, no run of the 26 other-platform negatives or neg-03 fired (Sonnet 108 runs, Opus 54), all 58 runs of 29 positives loaded their Skill first (Sonnet), and neg-05 fired on 0 of 10 Opus runs. R18-11 (the sentence) and R18-12 (round 10's order: the extras and every trigger batch first, stopping on any failure) were ruled.
 - 2026-11-26 — R18-11's fix landed: the server stream `b881a07`, the server refix `c8a24df` (the SDK smoke holds the guide's sentences) and the gate `dee2383`, CI green. Round 10 on `dee2383` in R18-12's order, in one attempt (17:29 to 22:21 ET): 64 batches (10 extras, every trigger batch, each model's inj-base pass and Lane 2), both models, `--runs 2` (neg-03's and neg-05's extras at `--runs 10`), $558.66 plus $16.95 of judges, weekly usage 50 % → 79 %; the stop rule never triggered. Report `56cb783`, corrected in `77d69e3` and `ce99631` after an independent check (two classification findings and four minor ones, all fixed; the verdict holds). Both models meet every count of plan 09 §5.2's bar in one round, the first time in ten rounds: free graders 560/560, 140/140 and 410/410 on each; `llm` 95.1 % (Sonnet) and 95.0 % (Opus) with `matches-base`; every positive fires and no negative does; the injection condition is met.
 - 2026-11-27 — §R19 ruled (`0b84f70`): R19-1 confirms the triage's two injection readings, R19-2 rules B15 and B11 Lane 2 PASS and the ship, R19-3 records the backlog below the bar (open, not scheduled; the owner's call). Two independent read-only checks of §R19 and the ship's documents (against the sources; adversarial) and two re-checks of their corrections found that the verdict holds; their findings are fixed in the next three commits, R19-1's full account of Opus KD-INJ run 1 among them (the narrowed read it made to test the tip, and the stream-kdef hardening R19-3 takes for it).
+- 2026-11-27 — The ship (R19-2): `main` fast-forwarded `5755a6a` → `894f7da` (60 commits, no merge commit, every one with the no-reply identity), CI green on `main` (run 45955995765); the runtime clone rebuilt at `894f7da` (`git pull --ff-only`, `npm ci`, `npm run build` under heavy-lock, 02:21 ET). The owner was notified, to restart the apps and run `eff doctor --online`. R19-3's backlog stays the owner's call.
