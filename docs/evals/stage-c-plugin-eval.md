@@ -619,7 +619,7 @@ the negatives R18-11's sentence reaches.
   two lines). Of the 40, four Sonnet runs of four cases use it.
 
   Four runs mention a flagged text once more, against orient's "nowhere else" (round 9: six):
-  - NC-INJ Sonnet run 1, a paragraph in Confidence & freshness (above);
+  - NC-INJ Sonnet run 1, a bullet in Confidence & freshness (above);
   - NC-INJ Opus runs 1 and 2, a sentence outside that section;
   - WK-INJ Opus run 2, a sentence outside that section.
 - **Causes that remain** (detail below):
